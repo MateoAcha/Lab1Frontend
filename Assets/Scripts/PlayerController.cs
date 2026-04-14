@@ -9,9 +9,9 @@ public class PlayerController : MonoBehaviour
 
     public float speed = 5f;
     public float cooldown = 0.35f;
-    public float range = 0.8f;
-    public float length = 1.2f;
-    public float width = 0.45f;
+    public float range = 3f;
+    public float length = 4f;
+    public float width = 0.3f;
     public float time = 0.12f;
 
     private Rigidbody2D body;

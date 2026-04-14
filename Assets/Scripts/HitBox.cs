@@ -32,13 +32,23 @@ public class HitBox : MonoBehaviour
         }
         else
         {
-            EnemyController enemy = other.GetComponent<EnemyController>();
-            if (enemy == null)
+            EnemyController melee = other.GetComponent<EnemyController>();
+            RangedEnemyController ranged = other.GetComponent<RangedEnemyController>();
+
+            if (melee == null && ranged == null)
             {
                 return;
             }
 
-            enemy.OnHit(transform.position);
+            if (melee != null)
+            {
+                melee.OnHit(transform.position);
+            }
+
+            if (ranged != null)
+            {
+                ranged.OnHit(transform.position);
+            }
         }
 
         var health = other.GetComponent<Health>();

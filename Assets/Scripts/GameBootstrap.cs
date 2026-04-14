@@ -2,6 +2,10 @@ using UnityEngine;
 
 public class GameBootstrap : MonoBehaviour
 {
+    public float playerSize = 1f;
+    public float meleeEnemySize = 0.8f;
+    public float rangedEnemySize = 0.75f;
+
     private void Start()
     {
         SetupCamera();
@@ -41,7 +45,7 @@ public class GameBootstrap : MonoBehaviour
 
         GameObject player = new GameObject("Player");
         player.transform.position = Vector3.zero;
-        player.transform.localScale = new Vector3(1f, 1f, 1f);
+        player.transform.localScale = new Vector3(playerSize, playerSize, 1f);
 
         SpriteRenderer renderer = player.AddComponent<SpriteRenderer>();
         renderer.sprite = SimpleSprite.Square;
@@ -62,6 +66,8 @@ public class GameBootstrap : MonoBehaviour
         }
 
         GameObject spawner = new GameObject("EnemySpawner");
-        spawner.AddComponent<EnemySpawner>();
+        EnemySpawner enemySpawner = spawner.AddComponent<EnemySpawner>();
+        enemySpawner.meleeEnemySize = meleeEnemySize;
+        enemySpawner.rangedEnemySize = rangedEnemySize;
     }
 }

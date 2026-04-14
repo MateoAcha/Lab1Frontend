@@ -41,7 +41,22 @@ public class AuthApiClient
         yield return PostJson("/users/login", JsonUtility.ToJson(payload), onSuccess, onError);
     }
 
-    private IEnumerator PostJson(string endpoint, string jsonBody, Action<AuthUserData> onSuccess, Action<string> onError)
+    public IEnumerator GetUserById(int userId, Action<AuthUserData> onSuccess, Action<string> onError)
+    {
+        yield return GetJson($"/users/{userId}", onSuccess, onError, requiresAuth: true);
+    }
+
+    public IEnumerator GetUserByIdWithoutAuth(int userId, Action<AuthUserData> onSuccess, Action<string> onError)
+    {
+        yield return GetJson($"/users/{userId}", onSuccess, onError, requiresAuth: false);
+    }
+
+    private IEnumerator PostJson(
+        string endpoint,
+        string jsonBody,
+        Action<AuthUserData> onSuccess,
+        Action<string> onError,
+        bool requiresAuth = false)
     {
         var request = new UnityWebRequest(_baseUrl + endpoint, "POST");
         byte[] bodyRaw = Encoding.UTF8.GetBytes(jsonBody);
@@ -49,6 +64,10 @@ public class AuthApiClient
         request.uploadHandler = new UploadHandlerRaw(bodyRaw);
         request.downloadHandler = new DownloadHandlerBuffer();
         request.SetRequestHeader("Content-Type", "application/json");
+        if (requiresAuth && !TryAttachAuthorization(request, onError))
+        {
+            yield break;
+        }
 
         Debug.Log($"[AuthApi] POST {_baseUrl + endpoint}");
 
@@ -95,6 +114,80 @@ public class AuthApiClient
 
         Debug.Log($"[AuthApi] Success for userId={userData.userId}, username='{userData.username}'");
         onSuccess?.Invoke(userData);
+    }
+
+    private IEnumerator GetJson(
+        string endpoint,
+        Action<AuthUserData> onSuccess,
+        Action<string> onError,
+        bool requiresAuth = false)
+    {
+        var request = UnityWebRequest.Get(_baseUrl + endpoint);
+
+        if (requiresAuth && !TryAttachAuthorization(request, onError))
+        {
+            yield break;
+        }
+
+        Debug.Log($"[AuthApi] GET {_baseUrl + endpoint}");
+
+        yield return request.SendWebRequest();
+
+        Debug.Log($"[AuthApi] Response {(long)request.responseCode} from {endpoint}");
+
+        if (request.result != UnityWebRequest.Result.Success)
+        {
+            string error = FormatError(request);
+            Debug.LogError($"[AuthApi] Network error: {error}");
+            onError?.Invoke(error);
+            yield break;
+        }
+
+        if (request.responseCode < 200 || request.responseCode >= 300)
+        {
+            string error = FormatError(request);
+            Debug.LogError($"[AuthApi] API error: {error}");
+            onError?.Invoke(error);
+            yield break;
+        }
+
+        AuthUserData userData;
+        try
+        {
+            userData = JsonUtility.FromJson<AuthUserData>(request.downloadHandler.text);
+        }
+        catch
+        {
+            const string parseError = "Unexpected server response.";
+            Debug.LogError($"[AuthApi] Parse error. Raw response: {request.downloadHandler.text}");
+            onError?.Invoke(parseError);
+            yield break;
+        }
+
+        if (userData == null)
+        {
+            const string emptyError = "Empty server response.";
+            Debug.LogError("[AuthApi] Empty response after successful status code.");
+            onError?.Invoke(emptyError);
+            yield break;
+        }
+
+        Debug.Log($"[AuthApi] Success for userId={userData.userId}, username='{userData.username}'");
+        onSuccess?.Invoke(userData);
+    }
+
+    private bool TryAttachAuthorization(UnityWebRequest request, Action<string> onError)
+    {
+        if (string.IsNullOrWhiteSpace(AuthSession.AccessToken))
+        {
+            const string authError = "Missing access token. Please log in again.";
+            Debug.LogError($"[AuthApi] {authError}");
+            onError?.Invoke(authError);
+            return false;
+        }
+
+        request.SetRequestHeader("Authorization", $"Bearer {AuthSession.AccessToken}");
+        return true;
     }
 
     private string FormatError(UnityWebRequest request)

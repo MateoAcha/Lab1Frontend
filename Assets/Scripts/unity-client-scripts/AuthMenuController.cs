@@ -1,6 +1,9 @@
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using TMPro;
+using System;
+using System.Collections;
+using System.Text;
 
 public class AuthMenuController : MonoBehaviour
 {
@@ -24,15 +27,22 @@ public class AuthMenuController : MonoBehaviour
 
     [Header("Session UI")]
     public TextMeshProUGUI sessionText;
+    public TextMeshProUGUI authProofText;
     public GameObject registerButton;
     public GameObject loginButton;
     public GameObject logoutButton;
+
+    [Header("Play")]
+    public GameObject gamePrefab;
+    public Transform gameParent;
+    public GameObject menuRoot;
 
     [Header("Config")]
     public string apiBaseUrl = "http://localhost:8080";
     public string gameplaySceneName = "GameScene";
 
     private AuthApiClient _apiClient;
+    private GameObject _gameInstance;
 
     private void Start()
     {
@@ -48,6 +58,8 @@ public class AuthMenuController : MonoBehaviour
         {
             errorPanel.SetActive(false);
         }
+
+        SetAuthProof("Auth proof pending. Log in to run checks.");
     }
 
     public void OpenRegister()
@@ -82,8 +94,39 @@ public class AuthMenuController : MonoBehaviour
 
     public void PlayGame()
     {
-        Debug.Log($"[AuthUI] Play clicked. Loading scene '{gameplaySceneName}'");
-        SceneManager.LoadScene(gameplaySceneName);
+        Debug.Log("[AuthUI] Play clicked.");
+
+        if (gamePrefab != null)
+        {
+            if (_gameInstance == null)
+            {
+                _gameInstance = Instantiate(gamePrefab, gameParent);
+                Debug.Log("[AuthUI] Game prefab instantiated.");
+            }
+            else
+            {
+                Debug.Log("[AuthUI] Game prefab already instantiated. Skipping duplicate.");
+            }
+
+            if (menuRoot != null)
+            {
+                Destroy(menuRoot);
+            }
+            else
+            {
+                Destroy(gameObject);
+            }
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(gameplaySceneName))
+        {
+            Debug.LogWarning($"[AuthUI] gamePrefab is not assigned. Falling back to loading scene '{gameplaySceneName}'.");
+            SceneManager.LoadScene(gameplaySceneName);
+            return;
+        }
+
+        ShowError("Game prefab is not assigned.");
     }
 
     public void SubmitRegister()
@@ -109,10 +152,19 @@ public class AuthMenuController : MonoBehaviour
         StartCoroutine(_apiClient.Register(username, email, password,
             onSuccess: user =>
             {
-                AuthSession.SetLoggedIn(user);
-                RefreshSessionUI();
-                Debug.Log($"[AuthUI] Register success. Logged as '{AuthSession.Username}' (id={AuthSession.UserId})");
-                ShowOnly(mainMenuPanel);
+                Debug.Log($"[AuthUI] Register success for '{user.username}'. Requesting JWT via login.");
+
+                StartCoroutine(_apiClient.Login(username, password,
+                    onSuccess: loginData =>
+                    {
+                        HandleLoginSuccess(loginData, "Register + login success");
+                    },
+                    onError: loginError =>
+                    {
+                        Debug.LogError($"[AuthUI] Auto-login after register failed: {loginError}");
+                        ShowError("Registered successfully, but automatic login failed. Please log in manually.");
+                        ShowOnly(mainMenuPanel);
+                    }));
             },
             onError: error =>
             {
@@ -141,12 +193,9 @@ public class AuthMenuController : MonoBehaviour
         Debug.Log($"[AuthUI] Submitting login for '{username}'");
 
         StartCoroutine(_apiClient.Login(username, password,
-            onSuccess: user =>
+            onSuccess: loginData =>
             {
-                AuthSession.SetLoggedIn(user);
-                RefreshSessionUI();
-                Debug.Log($"[AuthUI] Login success. Logged as '{AuthSession.Username}' (id={AuthSession.UserId})");
-                ShowOnly(mainMenuPanel);
+                HandleLoginSuccess(loginData, "Login success");
             },
             onError: error =>
             {
@@ -220,5 +269,167 @@ public class AuthMenuController : MonoBehaviour
         if (registerButton != null) registerButton.SetActive(!loggedIn);
         if (loginButton != null) loginButton.SetActive(!loggedIn);
         if (logoutButton != null) logoutButton.SetActive(loggedIn);
+
+        if (!loggedIn)
+        {
+            SetAuthProof("Auth proof pending. Log in to run checks.");
+        }
+    }
+
+    private void HandleLoginSuccess(AuthUserData loginData, string source)
+    {
+        AuthSession.SetLoggedIn(loginData);
+
+        if (!AuthSession.IsLoggedIn)
+        {
+            ShowError("Login failed: token was not returned by server.");
+            return;
+        }
+
+        RefreshSessionUI();
+        Debug.Log($"[AuthUI] {source}. Logged as '{AuthSession.Username}' (id={AuthSession.UserId})");
+
+        StartCoroutine(_apiClient.GetUserById(AuthSession.UserId,
+            onSuccess: profile =>
+            {
+                AuthSession.UpdateProfile(profile);
+                RefreshSessionUI();
+                ShowOnly(mainMenuPanel);
+                Debug.Log($"[AuthUI] Profile refreshed for '{AuthSession.Username}'.");
+                StartCoroutine(RunAuthProofChecks());
+            },
+            onError: profileError =>
+            {
+                Debug.LogWarning($"[AuthUI] Logged in, but profile refresh failed: {profileError}");
+                ShowOnly(mainMenuPanel);
+                StartCoroutine(RunAuthProofChecks());
+            }));
+    }
+
+    private IEnumerator RunAuthProofChecks()
+    {
+        if (!AuthSession.IsLoggedIn)
+        {
+            SetAuthProof("Auth proof unavailable: no active session.");
+            yield break;
+        }
+
+        SetAuthProof("Running auth proof checks...");
+
+        string withTokenResult = "Not run";
+        string withoutTokenResult = "Not run";
+        string wrongPasswordResult = "Not run";
+
+        yield return _apiClient.GetUserById(AuthSession.UserId,
+            onSuccess: _ =>
+            {
+                withTokenResult = "OK (protected endpoint accepted Bearer token)";
+            },
+            onError: error =>
+            {
+                withTokenResult = $"Failed ({error})";
+            });
+
+        yield return _apiClient.GetUserByIdWithoutAuth(AuthSession.UserId,
+            onSuccess: _ =>
+            {
+                withoutTokenResult = "Unexpectedly allowed (check backend security rules)";
+            },
+            onError: error =>
+            {
+                withoutTokenResult = $"Blocked as expected ({error})";
+            });
+
+        yield return _apiClient.Login(AuthSession.Username, "__wrong_password_probe__",
+            onSuccess: _ =>
+            {
+                wrongPasswordResult = "Unexpectedly accepted wrong password";
+            },
+            onError: error =>
+            {
+                wrongPasswordResult = $"Rejected as expected ({error})";
+            });
+
+        string jwtSummary = BuildJwtSummary(AuthSession.AccessToken);
+
+        SetAuthProof(
+            "Authentication proof:\n" +
+            $"- With token: {withTokenResult}\n" +
+            $"- Without token: {withoutTokenResult}\n" +
+            $"- Wrong password login: {wrongPasswordResult}\n" +
+            $"{jwtSummary}\n" +
+            "- Hashing note: frontend never receives a password field; hashing itself is verified on backend/DB.");
+    }
+
+    private string BuildJwtSummary(string token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return "- JWT: missing";
+        }
+
+        string[] parts = token.Split('.');
+        if (parts.Length < 2)
+        {
+            return "- JWT: malformed";
+        }
+
+        try
+        {
+            string payloadJson = DecodeBase64Url(parts[1]);
+            JwtPayload payload = JsonUtility.FromJson<JwtPayload>(payloadJson);
+            if (payload == null)
+            {
+                return "- JWT payload could not be parsed";
+            }
+
+            string expText = payload.exp > 0
+                ? DateTimeOffset.FromUnixTimeSeconds(payload.exp).ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")
+                : "unknown";
+
+            string tokenPreview = token.Length > 20
+                ? $"{token.Substring(0, 12)}...{token.Substring(token.Length - 8)}"
+                : token;
+
+            return $"- JWT: sub={payload.sub}, userId={payload.userId}, exp={expText}, token={tokenPreview}";
+        }
+        catch (Exception ex)
+        {
+            return $"- JWT decode failed: {ex.Message}";
+        }
+    }
+
+    private string DecodeBase64Url(string base64Url)
+    {
+        string base64 = base64Url.Replace('-', '+').Replace('_', '/');
+        switch (base64.Length % 4)
+        {
+            case 2:
+                base64 += "==";
+                break;
+            case 3:
+                base64 += "=";
+                break;
+        }
+
+        byte[] bytes = Convert.FromBase64String(base64);
+        return Encoding.UTF8.GetString(bytes);
+    }
+
+    private void SetAuthProof(string message)
+    {
+        if (authProofText != null)
+        {
+            authProofText.text = message;
+        }
+        Debug.Log($"[AuthUI] {message.Replace('\n', ' ')}");
+    }
+
+    [Serializable]
+    private class JwtPayload
+    {
+        public string sub;
+        public long exp;
+        public int userId;
     }
 }
