@@ -47,3 +47,21 @@ MonoBehaviour:
   playerSize: 1.25
   meleeEnemySize: 1
   rangedEnemySize: 1
+  mapSize: {x: 250, y: 250}
+  backgroundMaterial: {fileID: 2100000, guid: 1a9e9107b6db6404d88d156eeb9b9d0a, type: 2}
+  playerMaterial: {fileID: 2100000, guid: 26eeeb6b7b76040aba011e9ced446a3c, type: 2}
+  meleeEnemyMaterial: {fileID: 2100000, guid: dd80f5c627e074cada6db8fffa40fd83, type: 2}
+  rangedEnemyMaterial: {fileID: 2100000, guid: 561fd03a716de4a4aa57971074347ab0, type: 2}
+  enemyProjectileMaterial: {fileID: 2100000, guid: 60aabee0e70944b37a28f0f08f1c3e82, type: 2}
+  rockSprite: {fileID: -2182124076254010665, guid: a080095263241403c83b89fc334d74ad, type: 3}
+  rockMaterial: {fileID: 2100000, guid: df7eead20e63d45cfbb2027869d4ec59, type: 2}
+  rockColor: {r: 1, g: 0.88765955, b: 0.8066038, a: 1}
+  rockBaseSize: 1.5
+  rockSizeJitter: 0.108
+  rocksPer100Units: 3
+  centerRockChance: 0.08
+  edgeRockChance: 0.55
+  centerSafeRadius: 5
+  borderInset: 1.2
+  borderRockSize: 2
+  borderSpacing: 1.4

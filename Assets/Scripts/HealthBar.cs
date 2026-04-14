@@ -22,7 +22,7 @@ public class HealthBar : MonoBehaviour
             return;
         }
 
-        float ratio = health.maxHp > 0 ? (float)health.hp / health.maxHp : 0f;
+        float ratio = health.maxHp > 0f ? health.hp / health.maxHp : 0f;
         ratio = Mathf.Clamp01(ratio);
 
         fill.localScale = new Vector3(width * ratio, height, 1f);

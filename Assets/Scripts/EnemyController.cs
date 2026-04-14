@@ -11,6 +11,10 @@ public class EnemyController : MonoBehaviour
     public float time = 0.15f;
     public float recoilSpeed = 10f;
     public float recoilTime = 0.1f;
+    [Header("Obstacle Avoidance")]
+    public float avoidProbeRadius = 0.5f;
+    public float avoidProbeDistance = 2f;
+    public float avoidTurnAngle = 50f;
 
     private Rigidbody2D body;
     private Transform player;
@@ -71,8 +75,14 @@ public class EnemyController : MonoBehaviour
 
         if (distance > stopDistance)
         {
-            Vector2 move = to.normalized;
-            look = move;
+            look = to.normalized;
+            Vector2 move = EnemyObstacleAvoidance.GetSteeredDirection(
+                transform,
+                body,
+                look,
+                avoidProbeRadius,
+                avoidProbeDistance,
+                avoidTurnAngle);
             body.linearVelocity = move * speed;
             return;
         }
@@ -108,7 +118,7 @@ public class EnemyController : MonoBehaviour
         hit.life = time;
     }
 
-    public void OnHit(Vector2 hitPoint)
+    public void OnHit(Vector2 hitPoint, float pushMultiplier = 1f)
     {
         Vector2 push = ((Vector2)transform.position - hitPoint).normalized;
         if (push.sqrMagnitude < 0.001f)
@@ -116,7 +126,7 @@ public class EnemyController : MonoBehaviour
             push = Vector2.up;
         }
 
-        body.linearVelocity = push * recoilSpeed;
+        body.linearVelocity = push * (recoilSpeed * Mathf.Max(0f, pushMultiplier));
         recoilUntil = Time.time + recoilTime;
         SpawnSparkles();
     }
@@ -144,4 +154,5 @@ public class EnemyController : MonoBehaviour
             fx.life = 0.2f;
         }
     }
+
 }

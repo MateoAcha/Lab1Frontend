@@ -2,8 +2,8 @@ using UnityEngine;
 
 public class Health : MonoBehaviour
 {
-    public int hp = 3;
-    public int maxHp;
+    public float hp = 3f;
+    public float maxHp;
 
     private void Start()
     {
@@ -25,13 +25,23 @@ public class Health : MonoBehaviour
 
     public void Hit(int damage)
     {
+        Hit((float)damage);
+    }
+
+    public void Hit(float damage)
+    {
         hp -= damage;
-        if (hp < 0)
+        if (hp < 0f)
         {
-            hp = 0;
+            hp = 0f;
         }
 
-        if (hp <= 0)
+        if (hp > maxHp)
+        {
+            hp = maxHp;
+        }
+
+        if (hp <= 0f)
         {
             Destroy(gameObject);
         }

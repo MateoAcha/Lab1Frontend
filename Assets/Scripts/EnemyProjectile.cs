@@ -9,6 +9,18 @@ public class EnemyProjectile : MonoBehaviour
 
     private float dieAt;
 
+    private void Awake()
+    {
+        Rigidbody2D body = GetComponent<Rigidbody2D>();
+        if (body == null)
+        {
+            body = gameObject.AddComponent<Rigidbody2D>();
+        }
+
+        body.bodyType = RigidbodyType2D.Kinematic;
+        body.gravityScale = 0f;
+    }
+
     private void Start()
     {
         dieAt = Time.time + life;

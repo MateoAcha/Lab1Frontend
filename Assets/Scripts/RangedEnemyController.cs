@@ -11,6 +11,11 @@ public class RangedEnemyController : MonoBehaviour
     public float projectileLife = 4f;
     public float recoilSpeed = 10f;
     public float recoilTime = 0.1f;
+    public Material projectileMaterial;
+    [Header("Obstacle Avoidance")]
+    public float avoidProbeRadius = 0.5f;
+    public float avoidProbeDistance = 2f;
+    public float avoidTurnAngle = 50f;
 
     private Rigidbody2D body;
     private Transform player;
@@ -76,11 +81,25 @@ public class RangedEnemyController : MonoBehaviour
 
         if (distance > maxDistance)
         {
-            body.linearVelocity = look * speed;
+            Vector2 move = EnemyObstacleAvoidance.GetSteeredDirection(
+                transform,
+                body,
+                look,
+                avoidProbeRadius,
+                avoidProbeDistance,
+                avoidTurnAngle);
+            body.linearVelocity = move * speed;
         }
         else if (distance < minDistance)
         {
-            body.linearVelocity = -look * speed;
+            Vector2 move = EnemyObstacleAvoidance.GetSteeredDirection(
+                transform,
+                body,
+                -look,
+                avoidProbeRadius,
+                avoidProbeDistance,
+                avoidTurnAngle);
+            body.linearVelocity = move * speed;
         }
         else
         {
@@ -104,6 +123,11 @@ public class RangedEnemyController : MonoBehaviour
         renderer.sprite = SimpleSprite.Square;
         renderer.color = new Color(1f, 0.55f, 0.15f, 1f);
         renderer.sortingOrder = 9;
+        if (projectileMaterial != null)
+        {
+            renderer.sharedMaterial = projectileMaterial;
+            renderer.color = Color.white;
+        }
 
         BoxCollider2D box = projectile.AddComponent<BoxCollider2D>();
         box.isTrigger = true;
@@ -114,7 +138,7 @@ public class RangedEnemyController : MonoBehaviour
         enemyProjectile.life = projectileLife;
     }
 
-    public void OnHit(Vector2 hitPoint)
+    public void OnHit(Vector2 hitPoint, float pushMultiplier = 1f)
     {
         Vector2 push = ((Vector2)transform.position - hitPoint).normalized;
         if (push.sqrMagnitude < 0.001f)
@@ -122,7 +146,7 @@ public class RangedEnemyController : MonoBehaviour
             push = Vector2.up;
         }
 
-        body.linearVelocity = push * recoilSpeed;
+        body.linearVelocity = push * (recoilSpeed * Mathf.Max(0f, pushMultiplier));
         recoilUntil = Time.time + recoilTime;
         SpawnSparkles();
     }
@@ -151,4 +175,5 @@ public class RangedEnemyController : MonoBehaviour
             fx.life = 0.2f;
         }
     }
+
 }

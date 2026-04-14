@@ -32,6 +32,13 @@ public class HitBox : MonoBehaviour
         }
         else
         {
+            EnemyProjectile projectile = other.GetComponent<EnemyProjectile>();
+            if (projectile != null)
+            {
+                Destroy(projectile.gameObject);
+                return;
+            }
+
             EnemyController melee = other.GetComponent<EnemyController>();
             RangedEnemyController ranged = other.GetComponent<RangedEnemyController>();
 

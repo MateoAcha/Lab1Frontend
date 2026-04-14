@@ -9,14 +9,59 @@ public class PlayerController : MonoBehaviour
 
     public float speed = 5f;
     public float cooldown = 0.35f;
+    public int damage = 1;
     public float range = 3f;
-    public float length = 4f;
-    public float width = 0.3f;
+    public float length = 4.5f;
+    public float width = 0.5f;
     public float time = 0.12f;
+    [Header("Charge Ability (E)")]
+    public float chargeDuration = 0.3f;
+    public float chargeCooldown = 5f;
+    public float chargeSpeedMultiplier = 4f;
+    public float chargeDamageMultiplier = 2f;
+    public float chargeRangeMultiplier = 2f;
+    [Header("Burst Ability (Q)")]
+    public float burstRange = 6f;
+    public float burstDuration = 0.2f;
+    public float burstDamageMultiplier = 0.35f;
+    public float burstPushMultiplier = 4f;
+    public float burstCooldown = 6f;
 
     private Rigidbody2D body;
     private Vector2 look = Vector2.down;
+    private Vector2 chargeDirection = Vector2.down;
     private float nextAttack;
+    private float chargeUntil;
+    private float nextChargeReady;
+    private float nextBurstReady;
+
+    public float ChargeCooldownProgress01
+    {
+        get
+        {
+            if (chargeCooldown <= 0f)
+            {
+                return 1f;
+            }
+
+            float remaining = Mathf.Max(0f, nextChargeReady - Time.time);
+            return 1f - Mathf.Clamp01(remaining / chargeCooldown);
+        }
+    }
+
+    public float BurstCooldownProgress01
+    {
+        get
+        {
+            if (burstCooldown <= 0f)
+            {
+                return 1f;
+            }
+
+            float remaining = Mathf.Max(0f, nextBurstReady - Time.time);
+            return 1f - Mathf.Clamp01(remaining / burstCooldown);
+        }
+    }
 
     private void Awake()
     {
@@ -40,6 +85,16 @@ public class PlayerController : MonoBehaviour
         {
             gameObject.AddComponent<Health>();
         }
+
+        if (GetComponent<ChargeAbilityUI>() == null)
+        {
+            gameObject.AddComponent<ChargeAbilityUI>();
+        }
+
+        if (GetComponent<BurstAbilityUI>() == null)
+        {
+            gameObject.AddComponent<BurstAbilityUI>();
+        }
     }
 
     private void OnDestroy()
@@ -52,17 +107,31 @@ public class PlayerController : MonoBehaviour
 
     private void Update()
     {
-        Vector2 move = ReadMove();
-        body.linearVelocity = move * speed;
-
-        if (move.sqrMagnitude > 0f)
+        if (ReadChargeDown() && Time.time >= nextChargeReady)
         {
-            look = move;
+            ActivateCharge();
+        }
+
+        if (ReadBurstDown() && Time.time >= nextBurstReady)
+        {
+            ActivateBurst();
+        }
+
+        if (Time.time < chargeUntil)
+        {
+            float boost = Mathf.Max(1f, chargeSpeedMultiplier);
+            body.linearVelocity = chargeDirection * (speed * boost);
+        }
+        else
+        {
+            Vector2 move = ReadMove();
+            body.linearVelocity = move * speed;
         }
 
         if (ReadAttackDown() && Time.time >= nextAttack)
         {
-            Attack();
+            look = ReadMouseAimDirection();
+            Attack(look, 1f, 1f);
             nextAttack = Time.time + cooldown;
         }
     }
@@ -98,21 +167,110 @@ public class PlayerController : MonoBehaviour
     private bool ReadAttackDown()
     {
 #if ENABLE_INPUT_SYSTEM
-        if (Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame) return true;
-        if (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame) return true;
-        if (Gamepad.current != null && Gamepad.current.buttonSouth.wasPressedThisFrame) return true;
-        return false;
+        return Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame;
 #else
-        return Input.GetKeyDown(KeyCode.Space) || Input.GetMouseButtonDown(0);
+        return Input.GetMouseButtonDown(0);
 #endif
     }
 
-    private void Attack()
+    private bool ReadChargeDown()
     {
+#if ENABLE_INPUT_SYSTEM
+        return Keyboard.current != null && Keyboard.current.eKey.wasPressedThisFrame;
+#else
+        return Input.GetKeyDown(KeyCode.E);
+#endif
+    }
+
+    private bool ReadBurstDown()
+    {
+#if ENABLE_INPUT_SYSTEM
+        return Keyboard.current != null && Keyboard.current.qKey.wasPressedThisFrame;
+#else
+        return Input.GetKeyDown(KeyCode.Q);
+#endif
+    }
+
+    private Vector2 ReadMouseAimDirection()
+    {
+        Camera cam = Camera.main;
+        if (cam == null)
+        {
+            return look;
+        }
+
+#if ENABLE_INPUT_SYSTEM
+        if (Mouse.current == null)
+        {
+            return look;
+        }
+
+        Vector3 screen = Mouse.current.position.ReadValue();
+#else
+        Vector3 screen = Input.mousePosition;
+#endif
+        screen.z = Mathf.Abs(cam.transform.position.z - transform.position.z);
+        Vector3 world = cam.ScreenToWorldPoint(screen);
+        Vector2 aim = (Vector2)(world - transform.position);
+        return aim.sqrMagnitude > 0.001f ? aim.normalized : look;
+    }
+
+    private void ActivateCharge()
+    {
+        Vector2 aim = ReadMouseAimDirection();
+        look = aim;
+        chargeDirection = aim;
+
+        chargeUntil = Time.time + Mathf.Max(0f, chargeDuration);
+        nextChargeReady = Time.time + Mathf.Max(0f, chargeCooldown);
+
+        Attack(
+            aim,
+            Mathf.Max(1f, chargeDamageMultiplier),
+            Mathf.Max(1f, chargeRangeMultiplier),
+            Mathf.Max(0.01f, chargeDuration));
+    }
+
+    private void ActivateBurst()
+    {
+        nextBurstReady = Time.time + Mathf.Max(0f, burstCooldown);
+
+        GameObject burst = new GameObject("PlayerBurst");
+        burst.transform.position = transform.position;
+        burst.transform.localScale = Vector3.one * 0.1f;
+
+        SpriteRenderer renderer = burst.AddComponent<SpriteRenderer>();
+        renderer.sprite = SimpleSprite.Circle;
+        renderer.color = new Color(0.5f, 0.9f, 1f, 0.25f);
+        renderer.sortingOrder = 11;
+
+        CircleCollider2D circle = burst.AddComponent<CircleCollider2D>();
+        circle.isTrigger = true;
+        circle.radius = 0.5f;
+
+        Rigidbody2D burstBody = burst.AddComponent<Rigidbody2D>();
+        burstBody.bodyType = RigidbodyType2D.Kinematic;
+        burstBody.gravityScale = 0f;
+
+        ExpansionBurst expansion = burst.AddComponent<ExpansionBurst>();
+        expansion.duration = Mathf.Max(0.01f, burstDuration);
+        expansion.maxRadius = Mathf.Max(0.2f, burstRange);
+        expansion.pushMultiplier = Mathf.Max(0f, burstPushMultiplier);
+        float scaledBurstDamage = damage * burstDamageMultiplier;
+        expansion.damage = Mathf.Max(0f, scaledBurstDamage);
+    }
+
+    private void Attack(Vector2 direction, float damageMultiplier, float rangeMultiplier, float lifeOverride = -1f)
+    {
+        float usedScale = Mathf.Max(1f, rangeMultiplier);
+        float usedRange = range * usedScale;
+        float usedLength = length * usedScale;
+        float usedWidth = width * usedScale;
+
         GameObject slash = new GameObject("PlayerSlash");
-        slash.transform.position = transform.position + (Vector3)look * range;
-        slash.transform.localScale = new Vector3(length, width, 1f);
-        float angle = Mathf.Atan2(look.y, look.x) * Mathf.Rad2Deg;
+        slash.transform.position = transform.position + (Vector3)direction * usedRange;
+        slash.transform.localScale = new Vector3(usedLength, usedWidth, 1f);
+        float angle = Mathf.Atan2(direction.y, direction.x) * Mathf.Rad2Deg;
         slash.transform.rotation = Quaternion.Euler(0f, 0f, angle);
 
         SpriteRenderer renderer = slash.AddComponent<SpriteRenderer>();
@@ -123,8 +281,13 @@ public class PlayerController : MonoBehaviour
         BoxCollider2D box = slash.AddComponent<BoxCollider2D>();
         box.isTrigger = true;
 
+        Rigidbody2D slashBody = slash.AddComponent<Rigidbody2D>();
+        slashBody.bodyType = RigidbodyType2D.Kinematic;
+        slashBody.gravityScale = 0f;
+
         HitBox hit = slash.AddComponent<HitBox>();
         hit.hitsPlayer = false;
-        hit.life = time;
+        hit.life = lifeOverride > 0f ? lifeOverride : time;
+        hit.damage = Mathf.Max(1, Mathf.RoundToInt(damage * Mathf.Max(1f, damageMultiplier)));
     }
 }
