@@ -95,6 +95,11 @@ public class PlayerController : MonoBehaviour
         {
             gameObject.AddComponent<BurstAbilityUI>();
         }
+
+        if (GetComponent<GameTimerUI>() == null)
+        {
+            gameObject.AddComponent<GameTimerUI>();
+        }
     }
 
     private void OnDestroy()

@@ -11,6 +11,8 @@ public class AuthMenuController : MonoBehaviour
     public GameObject mainMenuPanel;
     public GameObject registerPanel;
     public GameObject loginPanel;
+    public GameObject profilePanel;
+    public GameObject statsPanel;
     public GameObject errorPanel;
 
     [Header("Register Inputs")]
@@ -30,6 +32,7 @@ public class AuthMenuController : MonoBehaviour
     public TextMeshProUGUI authProofText;
     public GameObject registerButton;
     public GameObject loginButton;
+    public GameObject profileButton;
     public GameObject logoutButton;
 
     [Header("Play")]
@@ -90,6 +93,55 @@ public class AuthMenuController : MonoBehaviour
     {
         Debug.Log("[AuthUI] Back to Main panel");
         ShowOnly(mainMenuPanel);
+    }
+
+    public void OpenProfile()
+    {
+        if (!AuthSession.IsLoggedIn)
+        {
+            Debug.Log("[AuthUI] Open Profile clicked while logged out. Redirecting to Login panel.");
+            ShowOnly(loginPanel);
+            return;
+        }
+
+        if (profilePanel == null)
+        {
+            ShowError("Profile panel is not assigned.");
+            return;
+        }
+
+        Debug.Log("[AuthUI] Open Profile panel");
+        ShowOnly(profilePanel);
+    }
+
+    public void OpenStats()
+    {
+        if (!AuthSession.IsLoggedIn)
+        {
+            ShowError("Please log in first to open stats.");
+            return;
+        }
+
+        if (statsPanel == null)
+        {
+            ShowError("Stats panel is not assigned.");
+            return;
+        }
+
+        Debug.Log("[AuthUI] Open Stats panel");
+        ShowOnly(statsPanel);
+    }
+
+    public void BackToProfile()
+    {
+        if (profilePanel == null)
+        {
+            ShowError("Profile panel is not assigned.");
+            return;
+        }
+
+        Debug.Log("[AuthUI] Back to Profile panel");
+        ShowOnly(profilePanel);
     }
 
     public void PlayGame()
@@ -224,6 +276,16 @@ public class AuthMenuController : MonoBehaviour
         ShowOnly(mainMenuPanel);
     }
 
+    public void QuitGame()
+    {
+        Debug.Log("[AuthUI] Quit clicked.");
+#if UNITY_EDITOR
+        UnityEditor.EditorApplication.isPlaying = false;
+#else
+        Application.Quit();
+#endif
+    }
+
     public void CloseError()
     {
         Debug.Log("[AuthUI] Close error panel");
@@ -253,6 +315,8 @@ public class AuthMenuController : MonoBehaviour
         if (mainMenuPanel != null) mainMenuPanel.SetActive(activePanel == mainMenuPanel);
         if (registerPanel != null) registerPanel.SetActive(activePanel == registerPanel);
         if (loginPanel != null) loginPanel.SetActive(activePanel == loginPanel);
+        if (profilePanel != null) profilePanel.SetActive(activePanel == profilePanel);
+        if (statsPanel != null) statsPanel.SetActive(activePanel == statsPanel);
     }
 
     private void RefreshSessionUI()
@@ -267,7 +331,8 @@ public class AuthMenuController : MonoBehaviour
         }
 
         if (registerButton != null) registerButton.SetActive(!loggedIn);
-        if (loginButton != null) loginButton.SetActive(!loggedIn);
+        if (loginButton != null && loginButton != profileButton) loginButton.SetActive(!loggedIn);
+        if (profileButton != null) profileButton.SetActive(true);
         if (logoutButton != null) logoutButton.SetActive(loggedIn);
 
         if (!loggedIn)
