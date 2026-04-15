@@ -50,6 +50,7 @@ public class AuthMenuController : MonoBehaviour
     private void Start()
     {
         _apiClient = new AuthApiClient(apiBaseUrl);
+        GameStatsTracker.SetApiBaseUrl(apiBaseUrl);
         AuthSession.LoadFromPrefs();
 
         Debug.Log($"[AuthUI] Menu initialized. LoggedIn={AuthSession.IsLoggedIn}, User='{AuthSession.Username}'");

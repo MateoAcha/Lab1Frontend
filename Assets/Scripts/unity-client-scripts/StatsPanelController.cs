@@ -1,7 +1,9 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
+using UnityEngine.Networking;
 using UnityEngine.UI;
 
 [Serializable]
@@ -32,8 +34,10 @@ public class StatsPanelController : MonoBehaviour
 
     [Header("Preview Data")]
     public bool usePlaceholderDataOnEnable = true;
-    public List<StatListItem> placeholderPlayerStats = new List<StatListItem>();
     public List<StatListItem> placeholderGlobalStats = new List<StatListItem>();
+
+    [Header("API")]
+    public string apiBaseUrl = "http://localhost:8080";
 
     private readonly List<StatListItem> _playerStats = new List<StatListItem>();
     private readonly List<StatListItem> _globalStats = new List<StatListItem>();
@@ -47,12 +51,23 @@ public class StatsPanelController : MonoBehaviour
 
     private void OnEnable()
     {
-        if (usePlaceholderDataOnEnable && _playerStats.Count == 0 && _globalStats.Count == 0)
+        LoadPlayerStatsFromSavedData();
+
+        if (usePlaceholderDataOnEnable && _globalStats.Count == 0)
         {
-            LoadPlaceholderData();
+            LoadGlobalPlaceholderData();
         }
 
         ShowPlayerTab();
+    }
+
+    public void RefreshPlayerStatsFromSave()
+    {
+        LoadPlayerStatsFromSavedData();
+        if (_activeTab == StatsTab.Player)
+        {
+            RebuildVisibleList();
+        }
     }
 
     public void ShowPlayerTab()
@@ -63,6 +78,7 @@ public class StatsPanelController : MonoBehaviour
     public void ShowGlobalTab()
     {
         SetActiveTab(StatsTab.Global);
+        StartCoroutine(LoadGlobalStatsFromBackend());
     }
 
     public void BeginPlayerStatsLoad()
@@ -219,22 +235,21 @@ public class StatsPanelController : MonoBehaviour
         }
     }
 
-    private void LoadPlaceholderData()
+    private void LoadPlayerStatsFromSavedData()
     {
         _playerStats.Clear();
+
+        PlayerStatsData stats = GameStatsTracker.GetCurrentPlayerStats();
+        _playerStats.Add(new StatListItem { label = "Matches Played", value = stats.matchesPlayed.ToString() });
+        _playerStats.Add(new StatListItem { label = "Melee Enemies Killed", value = stats.meleeEnemiesKilled.ToString() });
+        _playerStats.Add(new StatListItem { label = "Ranged Enemies Killed", value = stats.rangedEnemiesKilled.ToString() });
+        _playerStats.Add(new StatListItem { label = "Deaths", value = stats.deaths.ToString() });
+        _playerStats.Add(new StatListItem { label = "Time Played", value = FormatDuration(stats.timePlayedSeconds) });
+    }
+
+    private void LoadGlobalPlaceholderData()
+    {
         _globalStats.Clear();
-
-        if (placeholderPlayerStats.Count == 0)
-        {
-            _playerStats.Add(new StatListItem { label = "Total Kills", value = "42" });
-            _playerStats.Add(new StatListItem { label = "Matches Played", value = "17" });
-            _playerStats.Add(new StatListItem { label = "Highest Combo", value = "9" });
-        }
-        else
-        {
-            _playerStats.AddRange(placeholderPlayerStats);
-        }
-
         if (placeholderGlobalStats.Count == 0)
         {
             _globalStats.Add(new StatListItem { label = "Top Kills (All Players)", value = "2,194" });
@@ -245,5 +260,98 @@ public class StatsPanelController : MonoBehaviour
         {
             _globalStats.AddRange(placeholderGlobalStats);
         }
+    }
+
+    private IEnumerator LoadGlobalStatsFromBackend()
+    {
+        if (!AuthSession.IsLoggedIn || string.IsNullOrWhiteSpace(AuthSession.AccessToken))
+        {
+            BeginGlobalStatsLoad();
+            AddGlobalStat("Global Stats", "Please log in to view.");
+            yield break;
+        }
+
+        string baseUrl = string.IsNullOrWhiteSpace(apiBaseUrl)
+            ? GameStatsTracker.ApiBaseUrl
+            : apiBaseUrl.TrimEnd('/');
+
+        string endpoint = $"{baseUrl}/stats/global";
+        var request = UnityWebRequest.Get(endpoint);
+        request.SetRequestHeader("Authorization", $"Bearer {AuthSession.AccessToken}");
+
+        Debug.Log($"[StatsUI] GET {endpoint}");
+        yield return request.SendWebRequest();
+
+        bool success = request.result == UnityWebRequest.Result.Success
+            && request.responseCode >= 200
+            && request.responseCode < 300;
+
+        if (!success)
+        {
+            Debug.LogWarning($"[StatsUI] Global stats request failed ({request.responseCode}). Falling back to placeholder.");
+            BeginGlobalStatsLoad();
+            LoadGlobalPlaceholderData();
+            if (_activeTab == StatsTab.Global)
+            {
+                RebuildVisibleList();
+            }
+            yield break;
+        }
+
+        GlobalStatsResponse response;
+        try
+        {
+            response = JsonUtility.FromJson<GlobalStatsResponse>(request.downloadHandler.text);
+        }
+        catch
+        {
+            response = null;
+        }
+
+        BeginGlobalStatsLoad();
+        AddGlobalStat("Highest Matches Played", FormatLeader(response != null ? response.highestMatchesPlayed : null, false));
+        AddGlobalStat("Highest Kill Count", FormatLeader(response != null ? response.highestKillCount : null, false));
+        AddGlobalStat("Highest Time Played", FormatLeader(response != null ? response.highestTimePlayed : null, true));
+    }
+
+    private string FormatLeader(GlobalStatEntry entry, bool duration)
+    {
+        string username = entry != null && !string.IsNullOrWhiteSpace(entry.username)
+            ? entry.username
+            : "-";
+
+        long safeValue = entry != null ? Math.Max(0L, entry.value) : 0L;
+        string valueText = duration ? FormatDuration(safeValue) : safeValue.ToString();
+        return $"{username} - {valueText}";
+    }
+
+    private string FormatDuration(float totalSeconds)
+    {
+        long safeSeconds = Math.Max(0L, (long)Mathf.FloorToInt(totalSeconds));
+        return FormatDuration(safeSeconds);
+    }
+
+    private string FormatDuration(long totalSeconds)
+    {
+        long safeSeconds = Math.Max(0L, totalSeconds);
+        long hours = safeSeconds / 3600;
+        long minutes = (safeSeconds % 3600) / 60;
+        long seconds = safeSeconds % 60;
+        return $"{hours:00}:{minutes:00}:{seconds:00}";
+    }
+
+    [Serializable]
+    private class GlobalStatsResponse
+    {
+        public GlobalStatEntry highestMatchesPlayed;
+        public GlobalStatEntry highestKillCount;
+        public GlobalStatEntry highestTimePlayed;
+    }
+
+    [Serializable]
+    private class GlobalStatEntry
+    {
+        public string username;
+        public long value;
     }
 }

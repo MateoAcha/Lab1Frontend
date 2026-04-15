@@ -25,6 +25,7 @@ public class EnemySpawner : MonoBehaviour
     {
         startAt = Time.time;
         ElapsedTime = 0f;
+        GameStatsTracker.StartMatch();
     }
 
     private void Update()
