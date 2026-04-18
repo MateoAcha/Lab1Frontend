@@ -51,6 +51,127 @@ public class AuthApiClient
         yield return GetJson($"/users/{userId}", onSuccess, onError, requiresAuth: false);
     }
 
+    public IEnumerator AddCoins(int userId, int quantity, Action onSuccess, Action<string> onError)
+    {
+        string json = JsonUtility.ToJson(new AddCoinsRequest { quantity = quantity });
+        var request = new UnityWebRequest(_baseUrl + $"/users/{userId}/inventory/add-coins", "POST");
+        byte[] bodyRaw = Encoding.UTF8.GetBytes(json);
+        request.uploadHandler = new UploadHandlerRaw(bodyRaw);
+        request.downloadHandler = new DownloadHandlerBuffer();
+        request.SetRequestHeader("Content-Type", "application/json");
+        if (!string.IsNullOrWhiteSpace(AuthSession.AccessToken))
+            request.SetRequestHeader("Authorization", $"Bearer {AuthSession.AccessToken}");
+
+        Debug.Log($"[AuthApi] POST {_baseUrl}/users/{userId}/inventory/add-coins  qty={quantity}");
+        yield return request.SendWebRequest();
+
+        if (request.result == UnityWebRequest.Result.Success
+            && request.responseCode >= 200 && request.responseCode < 300)
+        {
+            onSuccess?.Invoke();
+        }
+        else
+        {
+            onError?.Invoke(FormatError(request));
+        }
+    }
+
+    public IEnumerator GetShopItems(Action<ShopCatalogData> onSuccess, Action<string> onError)
+    {
+        var request = UnityWebRequest.Get(_baseUrl + "/shop/items");
+        Debug.Log($"[AuthApi] GET {_baseUrl}/shop/items");
+        yield return request.SendWebRequest();
+
+        if (request.result != UnityWebRequest.Result.Success || request.responseCode < 200 || request.responseCode >= 300)
+        {
+            onError?.Invoke(FormatError(request));
+            yield break;
+        }
+
+        ShopCatalogData catalog;
+        try { catalog = JsonUtility.FromJson<ShopCatalogData>(request.downloadHandler.text); }
+        catch { onError?.Invoke("Unexpected shop response."); yield break; }
+
+        if (catalog == null) { onError?.Invoke("Empty shop response."); yield break; }
+        onSuccess?.Invoke(catalog);
+    }
+
+    public IEnumerator BuyShopItem(int userId, int shopItemId, Action onSuccess, Action<string> onError)
+    {
+        string json = JsonUtility.ToJson(new BuyShopItemRequest { shopItemId = shopItemId });
+        var request = new UnityWebRequest(_baseUrl + $"/users/{userId}/shop/buy", "POST");
+        byte[] bodyRaw = System.Text.Encoding.UTF8.GetBytes(json);
+        request.uploadHandler = new UploadHandlerRaw(bodyRaw);
+        request.downloadHandler = new DownloadHandlerBuffer();
+        request.SetRequestHeader("Content-Type", "application/json");
+        if (!string.IsNullOrWhiteSpace(AuthSession.AccessToken))
+            request.SetRequestHeader("Authorization", $"Bearer {AuthSession.AccessToken}");
+
+        Debug.Log($"[AuthApi] POST {_baseUrl}/users/{userId}/shop/buy  shopItemId={shopItemId}");
+        yield return request.SendWebRequest();
+
+        if (request.result == UnityWebRequest.Result.Success
+            && request.responseCode >= 200 && request.responseCode < 300)
+            onSuccess?.Invoke();
+        else
+            onError?.Invoke(FormatError(request));
+    }
+
+    public IEnumerator GetInventory(int userId, Action<UserInventoryData> onSuccess, Action<string> onError)
+    {
+        var request = UnityWebRequest.Get(_baseUrl + $"/users/{userId}/inventory");
+
+        if (!string.IsNullOrWhiteSpace(AuthSession.AccessToken))
+        {
+            request.SetRequestHeader("Authorization", $"Bearer {AuthSession.AccessToken}");
+        }
+
+        Debug.Log($"[AuthApi] GET {_baseUrl}/users/{userId}/inventory");
+
+        yield return request.SendWebRequest();
+
+        Debug.Log($"[AuthApi] Inventory response {(long)request.responseCode} for userId={userId}");
+
+        if (request.result != UnityWebRequest.Result.Success)
+        {
+            string error = FormatError(request);
+            Debug.LogError($"[AuthApi] Inventory network error: {error}");
+            onError?.Invoke(error);
+            yield break;
+        }
+
+        if (request.responseCode < 200 || request.responseCode >= 300)
+        {
+            string error = FormatError(request);
+            Debug.LogError($"[AuthApi] Inventory API error: {error}");
+            onError?.Invoke(error);
+            yield break;
+        }
+
+        UserInventoryData inventoryData;
+        try
+        {
+            inventoryData = JsonUtility.FromJson<UserInventoryData>(request.downloadHandler.text);
+        }
+        catch
+        {
+            const string parseError = "Unexpected inventory response.";
+            Debug.LogError($"[AuthApi] Inventory parse error. Raw response: {request.downloadHandler.text}");
+            onError?.Invoke(parseError);
+            yield break;
+        }
+
+        if (inventoryData == null)
+        {
+            const string emptyError = "Empty inventory response.";
+            Debug.LogError("[AuthApi] Inventory response body was empty after success.");
+            onError?.Invoke(emptyError);
+            yield break;
+        }
+
+        onSuccess?.Invoke(inventoryData);
+    }
+
     private IEnumerator PostJson(
         string endpoint,
         string jsonBody,
@@ -216,6 +337,18 @@ public class AuthApiClient
         }
 
         return raw;
+    }
+
+    [Serializable]
+    private class AddCoinsRequest
+    {
+        public int quantity;
+    }
+
+    [Serializable]
+    private class BuyShopItemRequest
+    {
+        public int shopItemId;
     }
 
     [Serializable]

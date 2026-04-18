@@ -25,6 +25,7 @@ public class EnemySpawner : MonoBehaviour
     {
         startAt = Time.time;
         ElapsedTime = 0f;
+        nextSpawn = Time.time + every;
         GameStatsTracker.StartMatch();
     }
 
@@ -139,12 +140,12 @@ public class EnemySpawner : MonoBehaviour
 
     private float GetRangedChance(float timeSinceStart)
     {
-        if (timeSinceStart < 5f)
+        if (timeSinceStart < 15f)
         {
             return 0f;
         }
 
-        float ramp = Mathf.Clamp01((timeSinceStart - 5f) / 30f);
+        float ramp = Mathf.Clamp01((timeSinceStart - 15f) / 30f);
         return 0.4f * ramp;
     }
 

@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.UI;
 using TMPro;
 using System;
 using System.Collections;
@@ -46,6 +47,21 @@ public class AuthMenuController : MonoBehaviour
 
     private AuthApiClient _apiClient;
     private GameObject _gameInstance;
+    private GameObject _inventoryPanel;
+    private InventoryPanelController _inventoryPanelController;
+    private Button _inventoryButton;
+    private Image _inventoryButtonImage;
+    private TextMeshProUGUI _inventoryButtonText;
+    private GameObject _shopPanel;
+    private ShopPanelController _shopPanelController;
+    private Button _shopButton;
+    private Image _shopButtonImage;
+    private TextMeshProUGUI _shopButtonText;
+
+    private void OnApplicationQuit()
+    {
+        AuthSession.Logout();
+    }
 
     private void Start()
     {
@@ -57,6 +73,8 @@ public class AuthMenuController : MonoBehaviour
 
         RefreshSessionUI();
         ShowOnly(mainMenuPanel);
+        EnsureInventoryUI();
+        EnsureShopUI();
 
         if (errorPanel != null)
         {
@@ -131,6 +149,50 @@ public class AuthMenuController : MonoBehaviour
 
         Debug.Log("[AuthUI] Open Stats panel");
         ShowOnly(statsPanel);
+    }
+
+    public void OpenInventory()
+    {
+        if (!AuthSession.IsLoggedIn)
+        {
+            ShowError("Please log in first to open inventory.");
+            return;
+        }
+
+        EnsureInventoryUI();
+
+        if (_inventoryPanel == null || _inventoryPanelController == null)
+        {
+            ShowError("Inventory panel is not available.");
+            return;
+        }
+
+        _inventoryPanelController.SetApiClient(_apiClient);
+        ShowOnly(_inventoryPanel);
+        _inventoryPanelController.LoadInventory(AuthSession.UserId);
+        Debug.Log("[AuthUI] Open Inventory panel");
+    }
+
+    public void OpenStore()
+    {
+        if (!AuthSession.IsLoggedIn)
+        {
+            ShowError("Please log in first to open the store.");
+            return;
+        }
+
+        EnsureShopUI();
+
+        if (_shopPanel == null || _shopPanelController == null)
+        {
+            ShowError("Shop panel is not available.");
+            return;
+        }
+
+        _shopPanelController.SetApiClient(_apiClient);
+        ShowOnly(_shopPanel);
+        _shopPanelController.Open(AuthSession.UserId);
+        Debug.Log("[AuthUI] Open Shop panel");
     }
 
     public void BackToProfile()
@@ -296,6 +358,20 @@ public class AuthMenuController : MonoBehaviour
         }
     }
 
+    private IEnumerator FetchLoadoutSilently(int userId)
+    {
+        yield return _apiClient.GetInventory(userId,
+            onSuccess: data =>
+            {
+                PlayerLoadout.ApplyFromItems(data?.items);
+                Debug.Log("[AuthUI] Loadout applied from inventory.");
+            },
+            onError: err =>
+            {
+                Debug.LogWarning($"[AuthUI] Silent inventory fetch failed: {err}");
+            });
+    }
+
     private void ShowError(string message)
     {
         if (errorText != null)
@@ -318,6 +394,8 @@ public class AuthMenuController : MonoBehaviour
         if (loginPanel != null) loginPanel.SetActive(activePanel == loginPanel);
         if (profilePanel != null) profilePanel.SetActive(activePanel == profilePanel);
         if (statsPanel != null) statsPanel.SetActive(activePanel == statsPanel);
+        if (_inventoryPanel != null) _inventoryPanel.SetActive(activePanel == _inventoryPanel);
+        if (_shopPanel != null) _shopPanel.SetActive(activePanel == _shopPanel);
     }
 
     private void RefreshSessionUI()
@@ -335,11 +413,197 @@ public class AuthMenuController : MonoBehaviour
         if (loginButton != null && loginButton != profileButton) loginButton.SetActive(!loggedIn);
         if (profileButton != null) profileButton.SetActive(true);
         if (logoutButton != null) logoutButton.SetActive(loggedIn);
+        RefreshInventoryButtonState(loggedIn);
+        RefreshShopButtonState(loggedIn);
 
         if (!loggedIn)
         {
             SetAuthProof("Auth proof pending. Log in to run checks.");
+
+            if ((_inventoryPanel != null && _inventoryPanel.activeSelf) ||
+                (_shopPanel != null && _shopPanel.activeSelf))
+            {
+                ShowOnly(mainMenuPanel);
+            }
         }
+    }
+
+    private void EnsureInventoryUI()
+    {
+        EnsureInventoryButton();
+        EnsureInventoryPanel();
+    }
+
+    private void EnsureInventoryButton()
+    {
+        if (_inventoryButton != null || profilePanel == null) return;
+
+        Color baseColor = new Color(0.10f, 0.34f, 0.42f, 1f);
+        (_inventoryButton, _inventoryButtonImage, _inventoryButtonText) = CreateCardButton(
+            "InventoryButton", profilePanel.transform,
+            "INVENTORY", "View and equip\nyour items",
+            new Vector2(100f, -134f), new Vector2(480f, 760f),
+            baseColor, new Color(0.13f, 0.42f, 0.52f, 1f), new Color(0.07f, 0.24f, 0.30f, 1f),
+            OpenInventory);
+
+        RefreshInventoryButtonState(AuthSession.IsLoggedIn);
+    }
+
+    private void EnsureInventoryPanel()
+    {
+        if (_inventoryPanel != null)
+        {
+            return;
+        }
+
+        Transform panelParent = mainMenuPanel != null ? mainMenuPanel.transform.parent : transform;
+
+        _inventoryPanel = new GameObject("InventoryPanel");
+        _inventoryPanel.transform.SetParent(panelParent, false);
+
+        RectTransform rect = _inventoryPanel.AddComponent<RectTransform>();
+        rect.anchorMin = Vector2.zero;
+        rect.anchorMax = Vector2.one;
+        rect.offsetMin = Vector2.zero;
+        rect.offsetMax = Vector2.zero;
+
+        _inventoryPanelController = _inventoryPanel.AddComponent<InventoryPanelController>();
+        _inventoryPanelController.Initialize(_apiClient, BackToProfile);
+        _inventoryPanel.SetActive(false);
+    }
+
+    private void EnsureShopUI()
+    {
+        EnsureShopButton();
+        EnsureShopPanel();
+    }
+
+    private void EnsureShopButton()
+    {
+        if (_shopButton != null || profilePanel == null) return;
+
+        Color baseColor = new Color(0.32f, 0.14f, 0.44f, 1f);
+        (_shopButton, _shopButtonImage, _shopButtonText) = CreateCardButton(
+            "ShopButton", profilePanel.transform,
+            "STORE", "Buy new gear\nwith gold coins",
+            new Vector2(650f, -134f), new Vector2(480f, 760f),
+            baseColor, new Color(0.40f, 0.18f, 0.54f, 1f), new Color(0.22f, 0.10f, 0.30f, 1f),
+            OpenStore);
+
+        RefreshShopButtonState(AuthSession.IsLoggedIn);
+    }
+
+    private (Button btn, Image img, TextMeshProUGUI label) CreateCardButton(
+        string name, Transform parent,
+        string title, string subtitle,
+        Vector2 position, Vector2 size,
+        Color baseColor, Color hoverColor, Color pressColor,
+        UnityEngine.Events.UnityAction onClick)
+    {
+        GameObject obj = new GameObject(name);
+        obj.transform.SetParent(parent, false);
+
+        RectTransform rect = obj.AddComponent<RectTransform>();
+        rect.anchorMin = new Vector2(0.5f, 0.5f);
+        rect.anchorMax = new Vector2(0.5f, 0.5f);
+        rect.pivot     = new Vector2(0.5f, 0.5f);
+        rect.sizeDelta = size;
+        rect.anchoredPosition = position;
+
+        Image img = obj.AddComponent<Image>();
+        img.color = baseColor;
+
+        Button btn = obj.AddComponent<Button>();
+        btn.targetGraphic = img;
+        ColorBlock cb = btn.colors;
+        cb.normalColor      = baseColor;
+        cb.highlightedColor = hoverColor;
+        cb.pressedColor     = pressColor;
+        cb.selectedColor    = hoverColor;
+        cb.disabledColor    = new Color(0.15f, 0.15f, 0.17f, 0.85f);
+        btn.colors = cb;
+        btn.onClick.AddListener(onClick);
+
+        // Inner layout
+        VerticalLayoutGroup vg = obj.AddComponent<VerticalLayoutGroup>();
+        vg.padding = new RectOffset(28, 28, 40, 40);
+        vg.spacing = 20f;
+        vg.childAlignment       = TextAnchor.MiddleCenter;
+        vg.childControlWidth    = true;
+        vg.childControlHeight   = true;
+        vg.childForceExpandWidth  = true;
+        vg.childForceExpandHeight = false;
+
+        // Title
+        GameObject titleObj = new GameObject("Title");
+        titleObj.transform.SetParent(obj.transform, false);
+        titleObj.AddComponent<LayoutElement>().preferredHeight = 80f;
+        var titleTMP = titleObj.AddComponent<TextMeshProUGUI>();
+        titleTMP.text = title;
+        titleTMP.font = TMP_Settings.defaultFontAsset;
+        titleTMP.fontSize = 52f;
+        titleTMP.fontStyle = FontStyles.Bold;
+        titleTMP.alignment = TextAlignmentOptions.Center;
+        titleTMP.color = Color.white;
+        titleTMP.raycastTarget = false;
+
+        // Subtitle
+        GameObject subtitleObj = new GameObject("Subtitle");
+        subtitleObj.transform.SetParent(obj.transform, false);
+        subtitleObj.AddComponent<LayoutElement>().preferredHeight = 60f;
+        var subtitleTMP = subtitleObj.AddComponent<TextMeshProUGUI>();
+        subtitleTMP.text = subtitle;
+        subtitleTMP.font = TMP_Settings.defaultFontAsset;
+        subtitleTMP.fontSize = 26f;
+        subtitleTMP.fontStyle = FontStyles.Normal;
+        subtitleTMP.alignment = TextAlignmentOptions.Center;
+        subtitleTMP.color = new Color(0.85f, 0.90f, 1f, 0.85f);
+        subtitleTMP.enableWordWrapping = true;
+        subtitleTMP.raycastTarget = false;
+
+        return (btn, img, titleTMP);
+    }
+
+    private void EnsureShopPanel()
+    {
+        if (_shopPanel != null) return;
+
+        Transform panelParent = mainMenuPanel != null ? mainMenuPanel.transform.parent : transform;
+
+        _shopPanel = new GameObject("ShopPanel");
+        _shopPanel.transform.SetParent(panelParent, false);
+
+        RectTransform rect = _shopPanel.AddComponent<RectTransform>();
+        rect.anchorMin = Vector2.zero;
+        rect.anchorMax = Vector2.one;
+        rect.offsetMin = Vector2.zero;
+        rect.offsetMax = Vector2.zero;
+
+        _shopPanelController = _shopPanel.AddComponent<ShopPanelController>();
+        _shopPanelController.Initialize(_apiClient, BackToProfile);
+        _shopPanel.SetActive(false);
+    }
+
+    private void RefreshShopButtonState(bool loggedIn)
+    {
+        if (_shopButton == null) return;
+        _shopButton.gameObject.SetActive(loggedIn);
+        _shopButton.interactable = loggedIn;
+        if (_shopButtonImage != null)
+            _shopButtonImage.color = loggedIn ? new Color(0.32f, 0.14f, 0.44f, 1f) : new Color(0.15f, 0.15f, 0.17f, 0.85f);
+        if (_shopButtonText != null)
+            _shopButtonText.color = loggedIn ? Color.white : new Color(0.6f, 0.6f, 0.6f, 0.7f);
+    }
+
+    private void RefreshInventoryButtonState(bool loggedIn)
+    {
+        if (_inventoryButton == null) return;
+        _inventoryButton.gameObject.SetActive(loggedIn);
+        _inventoryButton.interactable = loggedIn;
+        if (_inventoryButtonImage != null)
+            _inventoryButtonImage.color = loggedIn ? new Color(0.10f, 0.34f, 0.42f, 1f) : new Color(0.15f, 0.15f, 0.17f, 0.85f);
+        if (_inventoryButtonText != null)
+            _inventoryButtonText.color = loggedIn ? Color.white : new Color(0.6f, 0.6f, 0.6f, 0.7f);
     }
 
     private void HandleLoginSuccess(AuthUserData loginData, string source)
@@ -363,12 +627,14 @@ public class AuthMenuController : MonoBehaviour
                 ShowOnly(mainMenuPanel);
                 Debug.Log($"[AuthUI] Profile refreshed for '{AuthSession.Username}'.");
                 StartCoroutine(RunAuthProofChecks());
+                StartCoroutine(FetchLoadoutSilently(AuthSession.UserId));
             },
             onError: profileError =>
             {
                 Debug.LogWarning($"[AuthUI] Logged in, but profile refresh failed: {profileError}");
                 ShowOnly(mainMenuPanel);
                 StartCoroutine(RunAuthProofChecks());
+                StartCoroutine(FetchLoadoutSilently(AuthSession.UserId));
             }));
     }
 

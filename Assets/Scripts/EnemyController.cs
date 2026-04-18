@@ -11,6 +11,9 @@ public class EnemyController : MonoBehaviour
     public float time = 0.15f;
     public float recoilSpeed = 10f;
     public float recoilTime = 0.1f;
+    [Header("Attack Recoil")]
+    public float attackRecoilSpeed = 3f;
+    public float attackRecoilTime = 0.08f;
     [Header("Obstacle Avoidance")]
     public float avoidProbeRadius = 0.5f;
     public float avoidProbeDistance = 2f;
@@ -113,9 +116,22 @@ public class EnemyController : MonoBehaviour
         BoxCollider2D box = slash.AddComponent<BoxCollider2D>();
         box.isTrigger = true;
 
+        Rigidbody2D slashBody = slash.AddComponent<Rigidbody2D>();
+        slashBody.bodyType = RigidbodyType2D.Kinematic;
+        slashBody.gravityScale = 0f;
+
         HitBox hit = slash.AddComponent<HitBox>();
         hit.hitsPlayer = true;
         hit.life = time;
+        hit.enemyOwner = this;
+    }
+
+    public void OnAttackConnect(Vector2 targetPos)
+    {
+        Vector2 push = ((Vector2)transform.position - targetPos).normalized;
+        if (push.sqrMagnitude < 0.001f) push = Vector2.up;
+        body.linearVelocity = push * attackRecoilSpeed;
+        recoilUntil = Time.time + attackRecoilTime;
     }
 
     public void OnHit(Vector2 hitPoint, float pushMultiplier = 1f)

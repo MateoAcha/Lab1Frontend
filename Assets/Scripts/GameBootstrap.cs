@@ -35,6 +35,7 @@ public class GameBootstrap : MonoBehaviour
         SetupPlayer();
         SetupRocks();
         SetupSpawner();
+        SetupGameOverScreen();
     }
 
     private void SetupCamera()
@@ -83,9 +84,15 @@ public class GameBootstrap : MonoBehaviour
         }
 
         Health health = player.AddComponent<Health>();
-        health.hp = 10;
+        health.hp = PlayerLoadout.MaxHP;
 
         player.AddComponent<PlayerController>();
+    }
+
+    private void SetupGameOverScreen()
+    {
+        GameObject obj = new GameObject("GameOverScreen");
+        obj.AddComponent<GameOverScreen>();
     }
 
     private void SetupSpawner()
@@ -159,10 +166,10 @@ public class GameBootstrap : MonoBehaviour
         float halfHeight = height * 0.5f;
 
         SpawnBorderRocks(rocksRoot.transform, halfWidth, halfHeight);
-        SpawnInteriorRocks(rocksRoot.transform, width, height, halfWidth, halfHeight);
+        StartCoroutine(SpawnInteriorRocksAsync(rocksRoot.transform, width, height, halfWidth, halfHeight));
     }
 
-    private void SpawnInteriorRocks(Transform parent, float width, float height, float halfWidth, float halfHeight)
+    private System.Collections.IEnumerator SpawnInteriorRocksAsync(Transform parent, float width, float height, float halfWidth, float halfHeight)
     {
         float usableHalfWidth = Mathf.Max(0.25f, halfWidth - borderInset - rockBaseSize * 0.5f);
         float usableHalfHeight = Mathf.Max(0.25f, halfHeight - borderInset - rockBaseSize * 0.5f);
@@ -170,9 +177,18 @@ public class GameBootstrap : MonoBehaviour
         int targetCount = Mathf.RoundToInt((width * height / 100f) * Mathf.Max(0f, rocksPer100Units));
         int maxAttempts = Mathf.Max(24, targetCount * 10);
         int spawned = 0;
+        const int attemptsPerFrame = 50;
+        int attemptsThisFrame = 0;
 
         for (int i = 0; i < maxAttempts && spawned < targetCount; i++)
         {
+            if (attemptsThisFrame >= attemptsPerFrame)
+            {
+                attemptsThisFrame = 0;
+                yield return null;
+            }
+            attemptsThisFrame++;
+
             Vector2 pos = new Vector2(
                 Random.Range(-usableHalfWidth, usableHalfWidth),
                 Random.Range(-usableHalfHeight, usableHalfHeight));
@@ -185,7 +201,6 @@ public class GameBootstrap : MonoBehaviour
             float edgeX = usableHalfWidth > 0.001f ? Mathf.Abs(pos.x) / usableHalfWidth : 1f;
             float edgeY = usableHalfHeight > 0.001f ? Mathf.Abs(pos.y) / usableHalfHeight : 1f;
             float edge01 = Mathf.Clamp01(Mathf.Max(edgeX, edgeY));
-            // Quadratic falloff: sparse in center, denser near map limits.
             float chance = Mathf.Lerp(centerRockChance, edgeRockChance, edge01 * edge01);
             if (Random.value > chance)
             {

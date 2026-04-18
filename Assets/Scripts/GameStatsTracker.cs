@@ -20,6 +20,12 @@ public static class GameStatsTracker
     private const string GuestSuffix = "guest";
     private const string DefaultApiBaseUrl = "http://localhost:8080";
 
+    public static event Action<int, int, int> OnPlayerDied;
+
+    public static int LastRunMeleeKills { get; private set; }
+    public static int LastRunRangedKills { get; private set; }
+    public static int LastRunTimeSeconds { get; private set; }
+
     private static bool _runActive;
     private static float _runStartAt;
     private static int _runMeleeKills;
@@ -80,8 +86,13 @@ public static class GameStatsTracker
         stats.rangedEnemiesKilled += rangedKills;
         stats.timePlayedSeconds += timePlayedSeconds;
 
+        LastRunMeleeKills = meleeKills;
+        LastRunRangedKills = rangedKills;
+        LastRunTimeSeconds = timePlayedSeconds;
+
         SaveStats(stats);
         TrySyncSessionToBackend(meleeKills, rangedKills, timePlayedSeconds);
+        OnPlayerDied?.Invoke(meleeKills, rangedKills, timePlayedSeconds);
         _runActive = false;
     }
 

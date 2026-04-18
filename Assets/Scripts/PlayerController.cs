@@ -34,6 +34,9 @@ public class PlayerController : MonoBehaviour
     private float chargeUntil;
     private float nextChargeReady;
     private float nextBurstReady;
+    private float nextConsumableReady;
+
+    public float ConsumableCooldownRemaining => Mathf.Max(0f, nextConsumableReady - Time.time);
 
     public float ChargeCooldownProgress01
     {
@@ -66,6 +69,7 @@ public class PlayerController : MonoBehaviour
     private void Awake()
     {
         main = this;
+        damage = PlayerLoadout.WeaponDamage;
 
         body = GetComponent<Rigidbody2D>();
         if (body == null)
@@ -100,6 +104,11 @@ public class PlayerController : MonoBehaviour
         {
             gameObject.AddComponent<GameTimerUI>();
         }
+
+        if (GetComponent<ConsumableUI>() == null)
+        {
+            gameObject.AddComponent<ConsumableUI>();
+        }
     }
 
     private void OnDestroy()
@@ -120,6 +129,11 @@ public class PlayerController : MonoBehaviour
         if (ReadBurstDown() && Time.time >= nextBurstReady)
         {
             ActivateBurst();
+        }
+
+        if (ReadConsumableDown() && Time.time >= nextConsumableReady)
+        {
+            UseConsumable();
         }
 
         if (Time.time < chargeUntil)
@@ -194,6 +208,24 @@ public class PlayerController : MonoBehaviour
 #else
         return Input.GetKeyDown(KeyCode.Q);
 #endif
+    }
+
+    private bool ReadConsumableDown()
+    {
+#if ENABLE_INPUT_SYSTEM
+        return Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame;
+#else
+        return Input.GetKeyDown(KeyCode.Space);
+#endif
+    }
+
+    private void UseConsumable()
+    {
+        if (!PlayerLoadout.UseConsumable()) return;
+        Health health = GetComponent<Health>();
+        if (health != null)
+            health.Hit(-PlayerLoadout.ConsumableHealAmount);
+        nextConsumableReady = Time.time + Mathf.Max(0f, PlayerLoadout.ConsumableCooldown);
     }
 
     private Vector2 ReadMouseAimDirection()
