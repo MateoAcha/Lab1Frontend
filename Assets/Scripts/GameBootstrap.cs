@@ -31,6 +31,8 @@ public class GameBootstrap : MonoBehaviour
 
     private void Start()
     {
+        Cursor.visible = false;
+        Cursor.lockState = CursorLockMode.Confined;
         SetupCamera();
         SetupPlayer();
         SetupRocks();

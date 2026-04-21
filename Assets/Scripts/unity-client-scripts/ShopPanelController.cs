@@ -243,21 +243,37 @@ public class ShopPanelController : MonoBehaviour
     private void RenderChallenges()
     {
         PlayerStatsData stats = GameStatsTracker.GetCurrentPlayerStats();
-        CreateChallengeRow("Kill 100 Melee Enemies",  stats.meleeEnemiesKilled, 100);
-        CreateChallengeRow("Kill 100 Ranged Enemies", stats.rangedEnemiesKilled, 100);
-        CreateChallengeRow("Survive 1 Minute Total",  (int)stats.timePlayedSeconds, 60);
+        CreateChallengeRow(0, "Kill 100 Melee Enemies",  stats.meleeEnemiesKilled, 100);
+        CreateChallengeRow(1, "Kill 100 Ranged Enemies", stats.rangedEnemiesKilled, 100);
+        CreateChallengeRow(2, "Survive 1 Minute Total",  (int)stats.timePlayedSeconds, 60);
     }
 
-    private void CreateChallengeRow(string title, int current, int goal)
+    private static string ClaimKey(int userId, int index) =>
+        $"challenge_claimed_{userId}_{index}";
+
+    private bool IsClaimed(int index) =>
+        PlayerPrefs.GetInt(ClaimKey(_userId, index), 0) == 1;
+
+    private void MarkClaimed(int index)
+    {
+        PlayerPrefs.SetInt(ClaimKey(_userId, index), 1);
+        PlayerPrefs.Save();
+    }
+
+    private void CreateChallengeRow(int index, string title, int current, int goal)
     {
         float progress  = goal > 0 ? Mathf.Clamp01((float)current / goal) : 0f;
         bool  completed = current >= goal;
+        bool  claimed   = IsClaimed(index);
+        bool  claimable = completed && !claimed;
 
         GameObject row = CreateUIObj("ChallengeRow", _contentRoot);
         _rows.Add(row);
-        row.AddComponent<Image>().color = completed
-            ? new Color(0.12f, 0.22f, 0.15f, 0.98f)
-            : new Color(0.16f, 0.18f, 0.24f, 0.98f);
+        row.AddComponent<Image>().color = claimed
+            ? new Color(0.10f, 0.14f, 0.18f, 0.98f)
+            : completed
+                ? new Color(0.12f, 0.22f, 0.15f, 0.98f)
+                : new Color(0.16f, 0.18f, 0.24f, 0.98f);
 
         VerticalLayoutGroup vg = row.AddComponent<VerticalLayoutGroup>();
         vg.padding = new RectOffset(18, 18, 14, 12);
@@ -269,18 +285,26 @@ public class ShopPanelController : MonoBehaviour
         vg.childForceExpandHeight = false;
         row.AddComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
 
-        // Title
-        Color titleColor = completed ? new Color(0.35f, 1f, 0.50f, 1f) : new Color(0.95f, 0.97f, 1f, 1f);
-        MakeLabel(row.transform, title, 20, FontStyles.Bold, titleColor, 28f);
+        // Title + reward hint
+        Color titleColor = claimed
+            ? new Color(0.55f, 0.60f, 0.65f, 1f)
+            : completed
+                ? new Color(0.35f, 1f, 0.50f, 1f)
+                : new Color(0.95f, 0.97f, 1f, 1f);
+        MakeLabel(row.transform, $"{title}  —  🏆 100 coins", 20, FontStyles.Bold, titleColor, 28f);
 
-        // Progress bar (text-based)
+        // Progress bar
         int filled = Mathf.RoundToInt(24 * progress);
         string bar = new string('\u2588', filled) + new string('\u2591', 24 - filled);
         string progressText = $"{bar}   {current} / {goal}";
-        Color barColor = completed ? new Color(0.30f, 0.95f, 0.45f, 1f) : new Color(0.40f, 0.70f, 1f, 1f);
+        Color barColor = claimed
+            ? new Color(0.45f, 0.50f, 0.55f, 1f)
+            : completed
+                ? new Color(0.30f, 0.95f, 0.45f, 1f)
+                : new Color(0.40f, 0.70f, 1f, 1f);
         MakeLabel(row.transform, progressText, 14, FontStyles.Normal, barColor, 22f);
 
-        // Claim button (disabled for now)
+        // Bottom row
         GameObject bottom = CreateUIObj("Bottom", row.transform);
         bottom.AddComponent<LayoutElement>().preferredHeight = 38f;
 
@@ -296,27 +320,42 @@ public class ShopPanelController : MonoBehaviour
         GameObject statusObj = CreateUIObj("Status", bottom.transform);
         statusObj.AddComponent<LayoutElement>().preferredWidth = 260f;
         var statusTMP = statusObj.AddComponent<TextMeshProUGUI>();
-        statusTMP.text = completed ? "Completed!" : "In progress...";
+        statusTMP.text = claimed ? "Reward claimed." : completed ? "Completed!" : "In progress...";
         statusTMP.fontSize = 15f;
-        statusTMP.fontStyle = completed ? FontStyles.Bold : FontStyles.Italic;
-        statusTMP.color = completed ? new Color(0.30f, 1f, 0.45f, 1f) : new Color(0.65f, 0.70f, 0.80f, 0.85f);
+        statusTMP.fontStyle = (completed && !claimed) ? FontStyles.Bold : FontStyles.Italic;
+        statusTMP.color = claimed
+            ? new Color(0.50f, 0.55f, 0.60f, 0.85f)
+            : completed
+                ? new Color(0.30f, 1f, 0.45f, 1f)
+                : new Color(0.65f, 0.70f, 0.80f, 0.85f);
         statusTMP.font = TMP_Settings.defaultFontAsset;
         statusTMP.enableWordWrapping = false;
         statusTMP.alignment = TextAlignmentOptions.MidlineLeft;
         statusTMP.raycastTarget = false;
 
-        // Claim button (always disabled — rewards coming soon)
-        Color claimColor = new Color(0.25f, 0.25f, 0.27f, 0.85f);
+        // Claim button
+        Color claimColor = claimable
+            ? new Color(0.55f, 0.38f, 0.10f, 1f)
+            : new Color(0.25f, 0.25f, 0.27f, 0.85f);
         GameObject claimObj = CreateUIObj("ClaimBtn", bottom.transform);
         claimObj.AddComponent<LayoutElement>().preferredWidth = 160f;
         Image claimImg = claimObj.AddComponent<Image>();
         claimImg.color = claimColor;
         Button claimBtn = claimObj.AddComponent<Button>();
         claimBtn.targetGraphic = claimImg;
-        claimBtn.interactable = false;
+        claimBtn.interactable = claimable;
         ColorBlock cb = claimBtn.colors;
-        cb.disabledColor = new Color(0.25f, 0.25f, 0.27f, 0.60f);
+        cb.normalColor      = claimColor;
+        cb.highlightedColor = claimable ? new Color(0.72f, 0.50f, 0.12f, 1f) : claimColor;
+        cb.pressedColor     = claimable ? new Color(0.38f, 0.25f, 0.06f, 1f) : claimColor;
+        cb.disabledColor    = new Color(0.25f, 0.25f, 0.27f, 0.50f);
         claimBtn.colors = cb;
+
+        if (claimable)
+        {
+            int capturedIndex = index;
+            claimBtn.onClick.AddListener(() => StartCoroutine(ClaimReward(capturedIndex)));
+        }
 
         GameObject claimLabel = CreateUIObj("Label", claimObj.transform);
         var claimLabelRT = claimLabel.AddComponent<RectTransform>();
@@ -325,13 +364,27 @@ public class ShopPanelController : MonoBehaviour
         claimLabelRT.offsetMin = Vector2.zero;
         claimLabelRT.offsetMax = Vector2.zero;
         var claimTMP = claimLabel.AddComponent<TextMeshProUGUI>();
-        claimTMP.text = "Claim (coming soon)";
+        claimTMP.text = claimed ? "Claimed" : "Claim 100 coins";
         claimTMP.fontSize = 14f;
-        claimTMP.fontStyle = FontStyles.Normal;
-        claimTMP.color = new Color(0.60f, 0.62f, 0.65f, 0.85f);
+        claimTMP.fontStyle = FontStyles.Bold;
+        claimTMP.color = claimable ? Color.white : new Color(0.60f, 0.62f, 0.65f, 0.85f);
         claimTMP.alignment = TextAlignmentOptions.Center;
         claimTMP.font = TMP_Settings.defaultFontAsset;
         claimTMP.raycastTarget = false;
+    }
+
+    private IEnumerator ClaimReward(int index)
+    {
+        MarkClaimed(index);
+
+        string error = null;
+        yield return _apiClient.AddCoins(_userId, 100, () => { }, e => error = e);
+
+        if (error != null)
+            Debug.LogWarning($"[Shop] Claim reward failed: {error}");
+
+        if (_loadRoutine != null) StopCoroutine(_loadRoutine);
+        _loadRoutine = StartCoroutine(LoadRoutine());
     }
 
     // ── UI Building ──────────────────────────────────────────────────────────

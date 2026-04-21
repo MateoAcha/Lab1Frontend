@@ -10,27 +10,98 @@ public static class PlayerLoadout
     public static float ConsumableHealAmount { get; private set; } = 0f;
     public static float ConsumableCooldown { get; private set; } = 0f;
     public static string ConsumableName { get; private set; } = "";
+    public static bool ConsumableIsSpeedBoost { get; private set; } = false;
+    public static float SpeedBoostDuration { get; private set; } = 3f;
+    public static float SpeedBoostMultiplier { get; private set; } = 2f;
+
+    public static InventoryItemData EquippedWeapon { get; private set; }
+    public static InventoryItemData EquippedArmor { get; private set; }
+    public static InventoryItemData EquippedConsumable { get; private set; }
 
     public static void ApplyFromItems(InventoryItemData[] items)
     {
-        Apply(
-            FindEquipped(items, "Weapon", "Starter Spear"),
-            FindEquipped(items, "Armor", "Training Vest"),
-            FindEquipped(items, "Consumable", "Health Potion"));
+        EquippedWeapon = ResolveSlot(items, "Weapon", EquippedWeapon);
+        EquippedArmor = ResolveSlot(items, "Armor", EquippedArmor);
+        EquippedConsumable = ResolveSlot(items, "Consumable", EquippedConsumable);
+        Apply(EquippedWeapon, EquippedArmor, EquippedConsumable);
     }
 
-    private static InventoryItemData FindEquipped(InventoryItemData[] items, string itemType, string preferredName)
+    public static void EquipItem(InventoryItemData item)
+    {
+        if (item == null) return;
+        string type = item.itemType ?? "";
+        if (string.Equals(type, "Weapon", StringComparison.OrdinalIgnoreCase))
+            EquippedWeapon = item;
+        else if (string.Equals(type, "Armor", StringComparison.OrdinalIgnoreCase))
+            EquippedArmor = item;
+        else if (string.Equals(type, "Consumable", StringComparison.OrdinalIgnoreCase))
+            EquippedConsumable = item;
+        else
+            return;
+
+        Apply(EquippedWeapon, EquippedArmor, EquippedConsumable);
+    }
+
+    // Keeps the current equipped item if it's still in inventory; otherwise picks the best.
+    private static InventoryItemData ResolveSlot(InventoryItemData[] items, string type, InventoryItemData current)
+    {
+        if (current != null && items != null)
+        {
+            foreach (InventoryItemData item in items)
+            {
+                if (item != null && item.itemId == current.itemId &&
+                    string.Equals(item.itemType, type, StringComparison.OrdinalIgnoreCase))
+                    return item;
+            }
+        }
+        return FindBest(items, type);
+    }
+
+    // Picks the highest-rarity item; breaks ties by primary stat (DMG for weapons, DEF for armor).
+    private static InventoryItemData FindBest(InventoryItemData[] items, string itemType)
     {
         if (items == null) return null;
-        InventoryItemData fallback = null;
+        InventoryItemData best = null;
         foreach (InventoryItemData item in items)
         {
             if (item == null) continue;
             if (!string.Equals(item.itemType, itemType, StringComparison.OrdinalIgnoreCase)) continue;
-            if (string.Equals(item.itemName, preferredName, StringComparison.OrdinalIgnoreCase)) return item;
-            if (fallback == null) fallback = item;
+            if (best == null || CompareItems(item, best, itemType) > 0)
+                best = item;
         }
-        return fallback;
+        return best;
+    }
+
+    private static int CompareItems(InventoryItemData a, InventoryItemData b, string itemType)
+    {
+        int rarityDiff = RarityRank(a.rarity) - RarityRank(b.rarity);
+        if (rarityDiff != 0) return rarityDiff;
+        float statA = GetPrimaryStat(a, itemType);
+        float statB = GetPrimaryStat(b, itemType);
+        return statA.CompareTo(statB);
+    }
+
+    private static int RarityRank(string rarity)
+    {
+        if (string.IsNullOrWhiteSpace(rarity)) return 0;
+        return rarity.ToLowerInvariant() switch
+        {
+            "legendary" => 5,
+            "epic"      => 4,
+            "rare"      => 3,
+            "uncommon"  => 2,
+            "common"    => 1,
+            _           => 0
+        };
+    }
+
+    private static float GetPrimaryStat(InventoryItemData item, string itemType)
+    {
+        if (string.Equals(itemType, "Weapon", StringComparison.OrdinalIgnoreCase))
+            return ParseKeyValue(item.detailSummary, "DMG");
+        if (string.Equals(itemType, "Armor", StringComparison.OrdinalIgnoreCase))
+            return ParseKeyValue(item.detailSummary, "DEF");
+        return 0f;
     }
 
     public static void Apply(InventoryItemData weapon, InventoryItemData armor, InventoryItemData consumable)
@@ -41,6 +112,8 @@ public static class PlayerLoadout
         ConsumableHealAmount = 0f;
         ConsumableCooldown = 0f;
         ConsumableName = "";
+        ConsumableIsSpeedBoost = false;
+        SpeedBoostDuration = 3f;
 
         if (weapon != null)
         {
@@ -58,21 +131,31 @@ public static class PlayerLoadout
         {
             ConsumableQuantity = Mathf.Max(0, consumable.quantity);
             ConsumableName = consumable.itemName ?? "";
-            ConsumableHealAmount = ParseHealAmount(consumable.detailSummary);
             ConsumableCooldown = ParseCooldown(consumable.detailSummary);
+
+            ConsumableIsSpeedBoost = !string.IsNullOrWhiteSpace(consumable.detailSummary) &&
+                consumable.detailSummary.IndexOf("Speed Boost", StringComparison.OrdinalIgnoreCase) >= 0;
+
+            if (ConsumableIsSpeedBoost)
+            {
+                float dur = ParseDuration(consumable.detailSummary);
+                SpeedBoostDuration = dur > 0f ? dur : 3f;
+            }
+            else
+            {
+                ConsumableHealAmount = ParseHealAmount(consumable.detailSummary);
+            }
         }
     }
 
-    // Returns true and decrements quantity if a consumable is available.
     public static bool UseConsumable()
     {
-        if (ConsumableQuantity <= 0 || ConsumableHealAmount <= 0f)
-            return false;
+        if (ConsumableQuantity <= 0) return false;
+        if (!ConsumableIsSpeedBoost && ConsumableHealAmount <= 0f) return false;
         ConsumableQuantity--;
         return true;
     }
 
-    // Parses "KEY: value" segments separated by "|", returns rounded int or 0.
     private static int ParseKeyValue(string summary, string key)
     {
         if (string.IsNullOrWhiteSpace(summary)) return 0;
@@ -91,7 +174,6 @@ public static class PlayerLoadout
         return 0;
     }
 
-    // Finds a number immediately before "HP" in the summary (e.g. "Restores 35 HP instantly.").
     private static float ParseHealAmount(string summary)
     {
         if (string.IsNullOrWhiteSpace(summary)) return 0f;
@@ -108,11 +190,25 @@ public static class PlayerLoadout
         return 0f;
     }
 
-    // Parses "Cooldown: Xs" from the summary.
     private static float ParseCooldown(string summary)
     {
         if (string.IsNullOrWhiteSpace(summary)) return 0f;
         const string key = "Cooldown:";
+        int idx = summary.IndexOf(key, StringComparison.OrdinalIgnoreCase);
+        if (idx < 0) return 0f;
+        string after = summary.Substring(idx + key.Length).Trim();
+        int len = 0;
+        while (len < after.Length && (char.IsDigit(after[len]) || after[len] == '.')) len++;
+        if (len == 0) return 0f;
+        if (float.TryParse(after.Substring(0, len), NumberStyles.Float, CultureInfo.InvariantCulture, out float result))
+            return result;
+        return 0f;
+    }
+
+    private static float ParseDuration(string summary)
+    {
+        if (string.IsNullOrWhiteSpace(summary)) return 0f;
+        const string key = "Duration:";
         int idx = summary.IndexOf(key, StringComparison.OrdinalIgnoreCase);
         if (idx < 0) return 0f;
         string after = summary.Substring(idx + key.Length).Trim();

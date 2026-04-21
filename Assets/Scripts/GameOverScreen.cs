@@ -18,6 +18,8 @@ public class GameOverScreen : MonoBehaviour
 
     private void Show(int meleeKills, int rangedKills, int seconds)
     {
+        Cursor.visible = true;
+        Cursor.lockState = CursorLockMode.None;
         int coins = meleeKills + rangedKills * 2;
 
         GameObject canvasObj = new GameObject("GameOverCanvas");

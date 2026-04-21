@@ -5,6 +5,7 @@ using TMPro;
 using System;
 using System.Collections;
 using System.Text;
+using System.Text.RegularExpressions;
 
 public class AuthMenuController : MonoBehaviour
 {
@@ -68,6 +69,12 @@ public class AuthMenuController : MonoBehaviour
         _apiClient = new AuthApiClient(apiBaseUrl);
         GameStatsTracker.SetApiBaseUrl(apiBaseUrl);
         AuthSession.LoadFromPrefs();
+
+        if (loginPasswordInput != null)
+        {
+            loginPasswordInput.contentType = TMP_InputField.ContentType.Password;
+            loginPasswordInput.ForceLabelUpdate();
+        }
 
         Debug.Log($"[AuthUI] Menu initialized. LoggedIn={AuthSession.IsLoggedIn}, User='{AuthSession.Username}'");
 
@@ -262,6 +269,12 @@ public class AuthMenuController : MonoBehaviour
             return;
         }
 
+        if (!Regex.IsMatch(email, @"^[\w\-\.]+@([\w\-]+\.)+[\w\-]{2,4}$"))
+        {
+            ShowError("Please enter a valid email address.");
+            return;
+        }
+
         Debug.Log($"[AuthUI] Submitting register for '{username}' / '{email}'");
 
         StartCoroutine(_apiClient.Register(username, email, password,
@@ -374,17 +387,110 @@ public class AuthMenuController : MonoBehaviour
 
     private void ShowError(string message)
     {
-        if (errorText != null)
-        {
-            errorText.text = message;
-        }
-
-        if (errorPanel != null)
-        {
-            errorPanel.SetActive(true);
-        }
-
         Debug.LogError($"[AuthUI] Error shown to user: {message}");
+        EnsureErrorUI();
+        if (errorText != null) errorText.text = message;
+        if (errorPanel != null) errorPanel.SetActive(true);
+    }
+
+    private void EnsureErrorUI()
+    {
+        if (errorPanel != null) return;
+
+        Transform panelParent = mainMenuPanel != null ? mainMenuPanel.transform.parent : transform;
+
+        errorPanel = new GameObject("ErrorPanel");
+        errorPanel.transform.SetParent(panelParent, false);
+        errorPanel.transform.SetAsLastSibling();
+
+        RectTransform bg = errorPanel.AddComponent<RectTransform>();
+        bg.anchorMin = Vector2.zero;
+        bg.anchorMax = Vector2.one;
+        bg.offsetMin = Vector2.zero;
+        bg.offsetMax = Vector2.zero;
+
+        UnityEngine.UI.Image overlay = errorPanel.AddComponent<UnityEngine.UI.Image>();
+        overlay.color = new Color(0f, 0f, 0f, 0.55f);
+        overlay.raycastTarget = true;
+
+        GameObject card = new GameObject("Card");
+        card.transform.SetParent(errorPanel.transform, false);
+
+        RectTransform cardRect = card.AddComponent<RectTransform>();
+        cardRect.anchorMin = new Vector2(0.5f, 0.5f);
+        cardRect.anchorMax = new Vector2(0.5f, 0.5f);
+        cardRect.pivot     = new Vector2(0.5f, 0.5f);
+        cardRect.sizeDelta = new Vector2(500f, 220f);
+        cardRect.anchoredPosition = Vector2.zero;
+
+        UnityEngine.UI.Image cardImg = card.AddComponent<UnityEngine.UI.Image>();
+        cardImg.color = new Color(0.12f, 0.08f, 0.08f, 0.97f);
+
+        UnityEngine.UI.VerticalLayoutGroup vg = card.AddComponent<UnityEngine.UI.VerticalLayoutGroup>();
+        vg.padding = new RectOffset(30, 30, 28, 28);
+        vg.spacing = 18f;
+        vg.childAlignment = TextAnchor.UpperCenter;
+        vg.childControlWidth = true;
+        vg.childControlHeight = true;
+        vg.childForceExpandWidth = true;
+        vg.childForceExpandHeight = false;
+
+        GameObject titleObj = new GameObject("Title");
+        titleObj.transform.SetParent(card.transform, false);
+        titleObj.AddComponent<UnityEngine.UI.LayoutElement>().preferredHeight = 36f;
+        TextMeshProUGUI title = titleObj.AddComponent<TextMeshProUGUI>();
+        title.text = "Error";
+        title.font = TMP_Settings.defaultFontAsset;
+        title.fontSize = 26f;
+        title.fontStyle = FontStyles.Bold;
+        title.color = new Color(1f, 0.35f, 0.35f, 1f);
+        title.alignment = TextAlignmentOptions.Center;
+        title.raycastTarget = false;
+
+        GameObject msgObj = new GameObject("Message");
+        msgObj.transform.SetParent(card.transform, false);
+        msgObj.AddComponent<UnityEngine.UI.LayoutElement>().preferredHeight = 60f;
+        errorText = msgObj.AddComponent<TextMeshProUGUI>();
+        errorText.font = TMP_Settings.defaultFontAsset;
+        errorText.fontSize = 20f;
+        errorText.color = new Color(0.95f, 0.88f, 0.88f, 1f);
+        errorText.alignment = TextAlignmentOptions.Center;
+        errorText.enableWordWrapping = true;
+        errorText.raycastTarget = false;
+
+        GameObject btnObj = new GameObject("CloseButton");
+        btnObj.transform.SetParent(card.transform, false);
+        btnObj.AddComponent<UnityEngine.UI.LayoutElement>().preferredHeight = 44f;
+
+        UnityEngine.UI.Image btnImg = btnObj.AddComponent<UnityEngine.UI.Image>();
+        btnImg.color = new Color(0.55f, 0.15f, 0.15f, 1f);
+
+        UnityEngine.UI.Button btn = btnObj.AddComponent<UnityEngine.UI.Button>();
+        btn.targetGraphic = btnImg;
+        UnityEngine.UI.ColorBlock cb = btn.colors;
+        cb.normalColor      = new Color(0.55f, 0.15f, 0.15f, 1f);
+        cb.highlightedColor = new Color(0.70f, 0.20f, 0.20f, 1f);
+        cb.pressedColor     = new Color(0.38f, 0.10f, 0.10f, 1f);
+        btn.colors = cb;
+        btn.onClick.AddListener(CloseError);
+
+        GameObject btnLabel = new GameObject("Label");
+        btnLabel.transform.SetParent(btnObj.transform, false);
+        RectTransform lr = btnLabel.AddComponent<RectTransform>();
+        lr.anchorMin = Vector2.zero;
+        lr.anchorMax = Vector2.one;
+        lr.offsetMin = Vector2.zero;
+        lr.offsetMax = Vector2.zero;
+        TextMeshProUGUI btnTmp = btnLabel.AddComponent<TextMeshProUGUI>();
+        btnTmp.text = "Close";
+        btnTmp.font = TMP_Settings.defaultFontAsset;
+        btnTmp.fontSize = 20f;
+        btnTmp.fontStyle = FontStyles.Bold;
+        btnTmp.color = Color.white;
+        btnTmp.alignment = TextAlignmentOptions.Center;
+        btnTmp.raycastTarget = false;
+
+        errorPanel.SetActive(false);
     }
 
     private void ShowOnly(GameObject activePanel)

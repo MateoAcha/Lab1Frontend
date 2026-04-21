@@ -50,7 +50,7 @@ public class GameTimerUI : MonoBehaviour
         rect.anchorMin = new Vector2(0.5f, 1f);
         rect.anchorMax = new Vector2(0.5f, 1f);
         rect.pivot = new Vector2(0.5f, 1f);
-        rect.sizeDelta = new Vector2(500f, 100f);
+        rect.sizeDelta = new Vector2(620f, 120f);
         rect.anchoredPosition = new Vector2(0f, -16f);
 
         timerText = timerObj.GetComponent<Text>();
@@ -66,7 +66,7 @@ public class GameTimerUI : MonoBehaviour
         }
 
         timerText.font = font;
-        timerText.fontSize = 28;
+        timerText.fontSize = 75;
         timerText.alignment = TextAnchor.MiddleCenter;
         timerText.color = Color.white;
         timerText.raycastTarget = false;

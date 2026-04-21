@@ -7,6 +7,7 @@ public class RangedEnemyController : MonoBehaviour
     public float maxDistance = 4.5f;
     public float attackDistance = 6f;
     public float cooldown = 1.5f;
+    public int touchDamage = 1;
     public float projectileSpeed = 3f;
     public float projectileLife = 4f;
     public float recoilSpeed = 10f;
@@ -21,6 +22,7 @@ public class RangedEnemyController : MonoBehaviour
     private Transform player;
     private Vector2 look = Vector2.down;
     private float nextAttack;
+    private float nextTouchDamageAt;
     private float recoilUntil;
 
     private void Awake()
@@ -39,10 +41,10 @@ public class RangedEnemyController : MonoBehaviour
             gameObject.AddComponent<BoxCollider2D>();
         }
 
-        if (GetComponent<Health>() == null)
-        {
-            gameObject.AddComponent<Health>();
-        }
+        Health health = GetComponent<Health>();
+        if (health == null)
+            health = gameObject.AddComponent<Health>();
+        health.hp = 15f;
     }
 
     private void Start()
@@ -174,6 +176,48 @@ public class RangedEnemyController : MonoBehaviour
             fx.velocity = dir * Random.Range(2f, 4f);
             fx.life = 0.2f;
         }
+    }
+
+    private void OnCollisionEnter2D(Collision2D collision)
+    {
+        TryDamagePlayer(collision.collider);
+    }
+
+    private void OnCollisionStay2D(Collision2D collision)
+    {
+        TryDamagePlayer(collision.collider);
+    }
+
+    private void OnTriggerEnter2D(Collider2D other)
+    {
+        TryDamagePlayer(other);
+    }
+
+    private void OnTriggerStay2D(Collider2D other)
+    {
+        TryDamagePlayer(other);
+    }
+
+    private void TryDamagePlayer(Collider2D other)
+    {
+        if (Time.time < nextTouchDamageAt)
+        {
+            return;
+        }
+
+        if (other.GetComponent<PlayerController>() == null)
+        {
+            return;
+        }
+
+        Health health = other.GetComponent<Health>();
+        if (health == null)
+        {
+            return;
+        }
+
+        health.Hit(touchDamage);
+        nextTouchDamageAt = Time.time + Mathf.Max(0.05f, cooldown);
     }
 
 }

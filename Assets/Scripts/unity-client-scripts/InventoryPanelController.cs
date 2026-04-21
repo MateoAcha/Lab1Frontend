@@ -18,6 +18,17 @@ public class InventoryPanelController : MonoBehaviour
     private TextMeshProUGUI _equippedConsumableText;
     private Coroutine _loadRoutine;
     private bool _built;
+    private int _userId;
+
+    // Inspect overlay
+    private GameObject _inspectOverlay;
+    private TextMeshProUGUI _inspectNameText;
+    private TextMeshProUGUI _inspectMetaText;
+    private TextMeshProUGUI _inspectDescText;
+    private TextMeshProUGUI _inspectStatsText;
+    private Button _equipButton;
+    private TextMeshProUGUI _equipButtonLabel;
+    private InventoryItemData _inspectItem;
 
     public void Initialize(AuthApiClient apiClient, Action backAction)
     {
@@ -33,12 +44,11 @@ public class InventoryPanelController : MonoBehaviour
 
     public void LoadInventory(int userId)
     {
+        _userId = userId;
         EnsureBuilt();
 
         if (_loadRoutine != null)
-        {
             StopCoroutine(_loadRoutine);
-        }
 
         _loadRoutine = StartCoroutine(LoadInventoryRoutine(userId));
     }
@@ -47,7 +57,7 @@ public class InventoryPanelController : MonoBehaviour
     {
         ClearRows();
         SetState("Loading inventory...");
-        PopulateEquipped(null);
+        PopulateEquipped();
 
         if (_apiClient == null)
         {
@@ -70,9 +80,9 @@ public class InventoryPanelController : MonoBehaviour
         }
 
         InventoryItemData[] items = response != null ? response.items : null;
-        PopulateEquipped(items);
 
         PlayerLoadout.ApplyFromItems(items);
+        PopulateEquipped();
 
         if (items == null || items.Length == 0)
         {
@@ -83,18 +93,12 @@ public class InventoryPanelController : MonoBehaviour
         _stateText.gameObject.SetActive(false);
 
         for (int i = 0; i < items.Length; i++)
-        {
             CreateRow(items[i]);
-        }
     }
 
     private void EnsureBuilt()
     {
-        if (_built)
-        {
-            return;
-        }
-
+        if (_built) return;
         _built = true;
 
         RectTransform panelRect = GetOrAddRectTransform(gameObject);
@@ -103,8 +107,7 @@ public class InventoryPanelController : MonoBehaviour
         panelRect.offsetMin = Vector2.zero;
         panelRect.offsetMax = Vector2.zero;
 
-        Image panelImage = GetOrAddImage(gameObject);
-        panelImage.color = new Color(0.07f, 0.1f, 0.14f, 0.96f);
+        GetOrAddImage(gameObject).color = new Color(0.07f, 0.1f, 0.14f, 0.96f);
 
         GameObject titleObj = CreateUIObject("Title", transform);
         RectTransform titleRect = GetOrAddRectTransform(titleObj);
@@ -113,7 +116,6 @@ public class InventoryPanelController : MonoBehaviour
         titleRect.pivot = new Vector2(0.5f, 1f);
         titleRect.sizeDelta = new Vector2(760f, 60f);
         titleRect.anchoredPosition = new Vector2(0f, -28f);
-
         TextMeshProUGUI titleText = CreateText(titleObj.transform, "Inventory", 34, FontStyles.Bold);
         titleText.alignment = TextAlignmentOptions.Center;
         titleText.color = new Color(0.95f, 0.96f, 1f, 1f);
@@ -125,23 +127,15 @@ public class InventoryPanelController : MonoBehaviour
         subtitleRect.pivot = new Vector2(0.5f, 1f);
         subtitleRect.sizeDelta = new Vector2(820f, 36f);
         subtitleRect.anchoredPosition = new Vector2(0f, -78f);
-
-        TextMeshProUGUI subtitleText = CreateText(
-            subtitleObj.transform,
-            "All item rows are loaded from the Java backend for the currently logged-in player.",
-            18,
-            FontStyles.Normal);
+        TextMeshProUGUI subtitleText = CreateText(subtitleObj.transform,
+            "Click an item to inspect it and equip it.", 18, FontStyles.Normal);
         subtitleText.alignment = TextAlignmentOptions.Center;
         subtitleText.color = new Color(0.78f, 0.84f, 0.9f, 1f);
 
-        GameObject backButton = CreateButton(
-            "BackButton",
-            transform,
-            "Back",
-            new Vector2(100f, -34f),
-            new Vector2(150f, 46f),
-            new Color(0.18f, 0.23f, 0.3f, 1f));
-        backButton.GetComponent<Button>().onClick.AddListener(HandleBackPressed);
+        CreateButton("BackButton", transform, "Back",
+            new Vector2(100f, -34f), new Vector2(150f, 46f),
+            new Color(0.18f, 0.23f, 0.3f, 1f))
+            .GetComponent<Button>().onClick.AddListener(HandleBackPressed);
 
         GameObject stateObj = CreateUIObject("StateText", transform);
         RectTransform stateRect = GetOrAddRectTransform(stateObj);
@@ -150,11 +144,11 @@ public class InventoryPanelController : MonoBehaviour
         stateRect.pivot = new Vector2(0.5f, 0.5f);
         stateRect.sizeDelta = new Vector2(760f, 80f);
         stateRect.anchoredPosition = new Vector2(0f, -12f);
-
         _stateText = CreateText(stateObj.transform, "", 22, FontStyles.Normal);
         _stateText.alignment = TextAlignmentOptions.Center;
         _stateText.color = new Color(0.9f, 0.92f, 0.96f, 1f);
 
+        // Scroll view
         GameObject scrollRoot = CreateUIObject("ScrollView", transform);
         RectTransform scrollRect = GetOrAddRectTransform(scrollRoot);
         scrollRect.anchorMin = new Vector2(0.01f, 0.05f);
@@ -164,9 +158,7 @@ public class InventoryPanelController : MonoBehaviour
         scrollRect.offsetMax = Vector2.zero;
         scrollRect.sizeDelta = Vector2.zero;
         scrollRect.anchoredPosition = Vector2.zero;
-
-        Image scrollImage = GetOrAddImage(scrollRoot);
-        scrollImage.color = new Color(0.12f, 0.15f, 0.2f, 0.92f);
+        GetOrAddImage(scrollRoot).color = new Color(0.12f, 0.15f, 0.2f, 0.92f);
 
         ScrollRect scroll = scrollRoot.AddComponent<ScrollRect>();
         scroll.horizontal = false;
@@ -179,9 +171,7 @@ public class InventoryPanelController : MonoBehaviour
         viewportRect.anchorMax = Vector2.one;
         viewportRect.offsetMin = new Vector2(14f, 14f);
         viewportRect.offsetMax = new Vector2(-14f, -14f);
-
-        Image viewportImage = GetOrAddImage(viewport);
-        viewportImage.color = new Color(1f, 1f, 1f, 0.025f);
+        GetOrAddImage(viewport).color = new Color(1f, 1f, 1f, 0.025f);
         viewport.AddComponent<Mask>().showMaskGraphic = false;
 
         GameObject content = CreateUIObject("Content", viewport.transform);
@@ -189,9 +179,9 @@ public class InventoryPanelController : MonoBehaviour
         _contentRoot.anchorMin = new Vector2(0f, 1f);
         _contentRoot.anchorMax = new Vector2(1f, 1f);
         _contentRoot.pivot = new Vector2(0.5f, 1f);
-        _contentRoot.offsetMin = new Vector2(0f, 0f);
-        _contentRoot.offsetMax = new Vector2(0f, 0f);
-        _contentRoot.sizeDelta = new Vector2(0f, 0f);
+        _contentRoot.offsetMin = Vector2.zero;
+        _contentRoot.offsetMax = Vector2.zero;
+        _contentRoot.sizeDelta = Vector2.zero;
 
         VerticalLayoutGroup contentLayout = content.AddComponent<VerticalLayoutGroup>();
         contentLayout.padding = new RectOffset(0, 0, 0, 0);
@@ -210,6 +200,7 @@ public class InventoryPanelController : MonoBehaviour
         scroll.content = _contentRoot;
 
         BuildEquippedPanel();
+        BuildInspectOverlay();
     }
 
     private void CreateRow(InventoryItemData item)
@@ -217,16 +208,27 @@ public class InventoryPanelController : MonoBehaviour
         GameObject row = CreateUIObject("InventoryRow", _contentRoot);
         _rows.Add(row);
 
+        bool equipped = IsEquipped(item);
         Image rowImage = GetOrAddImage(row);
-        rowImage.color = new Color(0.18f, 0.22f, 0.29f, 0.98f);
+        rowImage.color = equipped
+            ? new Color(0.14f, 0.28f, 0.22f, 0.98f)
+            : new Color(0.18f, 0.22f, 0.29f, 0.98f);
 
-        LayoutElement layout = row.AddComponent<LayoutElement>();
-        layout.preferredHeight = 180f;
-        layout.flexibleHeight = 0f;
+        Button rowButton = row.AddComponent<Button>();
+        rowButton.targetGraphic = rowImage;
+        ColorBlock cb = rowButton.colors;
+        cb.normalColor = rowImage.color;
+        cb.highlightedColor = rowImage.color * 1.12f;
+        cb.pressedColor = rowImage.color * 0.9f;
+        cb.selectedColor = rowImage.color;
+        rowButton.colors = cb;
+
+        InventoryItemData captured = item;
+        rowButton.onClick.AddListener(() => ShowInspectPanel(captured));
 
         VerticalLayoutGroup group = row.AddComponent<VerticalLayoutGroup>();
-        group.padding = new RectOffset(18, 18, 14, 14);
-        group.spacing = 8f;
+        group.padding = new RectOffset(18, 18, 12, 12);
+        group.spacing = 6f;
         group.childAlignment = TextAnchor.UpperLeft;
         group.childControlWidth = true;
         group.childControlHeight = true;
@@ -237,49 +239,156 @@ public class InventoryPanelController : MonoBehaviour
         rowSize.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
         rowSize.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
 
-        RectTransform rowRect = GetOrAddRectTransform(row);
-        rowRect.anchorMin = new Vector2(0f, 1f);
-        rowRect.anchorMax = new Vector2(1f, 1f);
-        rowRect.pivot = new Vector2(0.5f, 1f);
-        rowRect.sizeDelta = new Vector2(0f, 180f);
+        string name = !string.IsNullOrWhiteSpace(item.itemName) ? item.itemName : "Unnamed Item";
+        string detailSummary = !string.IsNullOrWhiteSpace(item.detailSummary) ? item.detailSummary : "—";
+        string equippedTag = equipped ? "  [EQUIPPED]" : "";
+
+        TextMeshProUGUI nameText = CreateText(
+            CreateSection("Name", row.transform, 42f).transform,
+            $"{name}  x{Mathf.Max(0, item.quantity)}{equippedTag}",
+            30, FontStyles.Bold, true);
+        nameText.color = equipped ? new Color(0.6f, 1f, 0.72f, 1f) : new Color(0.97f, 0.98f, 1f, 1f);
+
+        TextMeshProUGUI statsText = CreateText(
+            CreateSection("Stats", row.transform, 30f).transform,
+            detailSummary, 19, FontStyles.Italic, true);
+        statsText.color = new Color(0.76f, 0.86f, 0.77f, 1f);
+    }
+
+    private bool IsEquipped(InventoryItemData item)
+    {
+        if (item == null) return false;
+        string type = item.itemType ?? "";
+        InventoryItemData equipped = null;
+        if (string.Equals(type, "Weapon", StringComparison.OrdinalIgnoreCase))
+            equipped = PlayerLoadout.EquippedWeapon;
+        else if (string.Equals(type, "Armor", StringComparison.OrdinalIgnoreCase))
+            equipped = PlayerLoadout.EquippedArmor;
+        else if (string.Equals(type, "Consumable", StringComparison.OrdinalIgnoreCase))
+            equipped = PlayerLoadout.EquippedConsumable;
+        return equipped != null && equipped.itemId == item.itemId;
+    }
+
+    private void BuildInspectOverlay()
+    {
+        _inspectOverlay = CreateUIObject("InspectOverlay", transform);
+        RectTransform overlayRect = GetOrAddRectTransform(_inspectOverlay);
+        overlayRect.anchorMin = Vector2.zero;
+        overlayRect.anchorMax = Vector2.one;
+        overlayRect.offsetMin = Vector2.zero;
+        overlayRect.offsetMax = Vector2.zero;
+        GetOrAddImage(_inspectOverlay).color = new Color(0f, 0f, 0f, 0.7f);
+
+        GameObject card = CreateUIObject("InspectCard", _inspectOverlay.transform);
+        RectTransform cardRect = GetOrAddRectTransform(card);
+        cardRect.anchorMin = new Vector2(0.5f, 0.5f);
+        cardRect.anchorMax = new Vector2(0.5f, 0.5f);
+        cardRect.pivot = new Vector2(0.5f, 0.5f);
+        cardRect.sizeDelta = new Vector2(540f, 380f);
+        cardRect.anchoredPosition = Vector2.zero;
+        GetOrAddImage(card).color = new Color(0.1f, 0.13f, 0.18f, 0.99f);
+
+        VerticalLayoutGroup cardLayout = card.AddComponent<VerticalLayoutGroup>();
+        cardLayout.padding = new RectOffset(28, 28, 24, 24);
+        cardLayout.spacing = 14f;
+        cardLayout.childAlignment = TextAnchor.UpperCenter;
+        cardLayout.childControlWidth = true;
+        cardLayout.childControlHeight = true;
+        cardLayout.childForceExpandWidth = true;
+        cardLayout.childForceExpandHeight = false;
+
+        ContentSizeFitter cardFitter = card.AddComponent<ContentSizeFitter>();
+        cardFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+        cardFitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
+
+        _inspectNameText = CreateText(CreateSection("IName", card.transform, 38f).transform,
+            "", 26, FontStyles.Bold, true);
+        _inspectNameText.alignment = TextAlignmentOptions.Center;
+        _inspectNameText.color = new Color(0.97f, 0.98f, 1f, 1f);
+
+        _inspectMetaText = CreateText(CreateSection("IMeta", card.transform, 30f).transform,
+            "", 18, FontStyles.Normal, true);
+        _inspectMetaText.alignment = TextAlignmentOptions.Center;
+        _inspectMetaText.color = new Color(0.66f, 0.84f, 1f, 1f);
+
+        _inspectDescText = CreateText(CreateSection("IDesc", card.transform, 60f).transform,
+            "", 17, FontStyles.Normal, true);
+        _inspectDescText.alignment = TextAlignmentOptions.Center;
+        _inspectDescText.color = new Color(0.88f, 0.9f, 0.95f, 1f);
+
+        _inspectStatsText = CreateText(CreateSection("IStats", card.transform, 36f).transform,
+            "", 16, FontStyles.Italic, true);
+        _inspectStatsText.alignment = TextAlignmentOptions.Center;
+        _inspectStatsText.color = new Color(0.76f, 0.86f, 0.77f, 1f);
+
+        // Button row
+        GameObject buttonRow = CreateUIObject("ButtonRow", card.transform);
+        GetOrAddRectTransform(buttonRow).sizeDelta = new Vector2(0f, 52f);
+        LayoutElement buttonRowLayout = buttonRow.AddComponent<LayoutElement>();
+        buttonRowLayout.preferredHeight = 52f;
+
+        HorizontalLayoutGroup buttonRowGroup = buttonRow.AddComponent<HorizontalLayoutGroup>();
+        buttonRowGroup.padding = new RectOffset(0, 0, 0, 0);
+        buttonRowGroup.spacing = 20f;
+        buttonRowGroup.childAlignment = TextAnchor.MiddleCenter;
+        buttonRowGroup.childControlWidth = false;
+        buttonRowGroup.childControlHeight = true;
+        buttonRowGroup.childForceExpandWidth = false;
+        buttonRowGroup.childForceExpandHeight = false;
+
+        GameObject equipBtnObj = CreateStyledButton("EquipBtn", buttonRow.transform,
+            "Equip", new Color(0.15f, 0.55f, 0.3f, 1f), new Vector2(180f, 46f));
+        _equipButton = equipBtnObj.GetComponent<Button>();
+        _equipButtonLabel = equipBtnObj.GetComponentInChildren<TextMeshProUGUI>();
+        _equipButton.onClick.AddListener(HandleEquipPressed);
+
+        GameObject closeBtnObj = CreateStyledButton("CloseBtn", buttonRow.transform,
+            "Close", new Color(0.3f, 0.18f, 0.18f, 1f), new Vector2(140f, 46f));
+        closeBtnObj.GetComponent<Button>().onClick.AddListener(HideInspectPanel);
+
+        _inspectOverlay.SetActive(false);
+    }
+
+    private void ShowInspectPanel(InventoryItemData item)
+    {
+        _inspectItem = item;
 
         string name = !string.IsNullOrWhiteSpace(item.itemName) ? item.itemName : "Unnamed Item";
         string type = !string.IsNullOrWhiteSpace(item.itemType) ? item.itemType : "Unknown";
         string rarity = !string.IsNullOrWhiteSpace(item.rarity) ? item.rarity : "Unknown";
         string description = !string.IsNullOrWhiteSpace(item.description) ? item.description : "No description.";
-        string detailSummary = !string.IsNullOrWhiteSpace(item.detailSummary) ? item.detailSummary : "No subtype details.";
+        string stats = !string.IsNullOrWhiteSpace(item.detailSummary) ? item.detailSummary : "No subtype details.";
 
-        TextMeshProUGUI nameText = CreateText(
-            CreateSection("Name", row.transform, 34f).transform,
-            $"{name}  x{Mathf.Max(0, item.quantity)}",
-            24,
-            FontStyles.Bold,
-            true);
-        nameText.color = new Color(0.97f, 0.98f, 1f, 1f);
+        _inspectNameText.text = $"{name}  x{Mathf.Max(0, item.quantity)}";
+        _inspectMetaText.text = $"Type: {type}    Rarity: {rarity}";
+        _inspectDescText.text = description;
+        _inspectStatsText.text = stats;
 
-        TextMeshProUGUI metaText = CreateText(
-            CreateSection("Meta", row.transform, 28f).transform,
-            $"Type: {type}    Rarity: {rarity}",
-            18,
-            FontStyles.Normal,
-            true);
-        metaText.color = new Color(0.66f, 0.84f, 1f, 1f);
+        bool canEquip = string.Equals(type, "Weapon", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(type, "Armor", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(type, "Consumable", StringComparison.OrdinalIgnoreCase);
 
-        TextMeshProUGUI descriptionText = CreateText(
-            CreateSection("Description", row.transform, 50f).transform,
-            description,
-            17,
-            FontStyles.Normal,
-            true);
-        descriptionText.color = new Color(0.88f, 0.9f, 0.95f, 1f);
+        _equipButton.gameObject.SetActive(canEquip);
+        bool alreadyEquipped = IsEquipped(item);
+        if (_equipButtonLabel != null)
+            _equipButtonLabel.text = alreadyEquipped ? "Equipped" : "Equip";
+        _equipButton.interactable = !alreadyEquipped;
 
-        TextMeshProUGUI detailsText = CreateText(
-            CreateSection("Details", row.transform, 36f).transform,
-            detailSummary,
-            16,
-            FontStyles.Italic,
-            true);
-        detailsText.color = new Color(0.76f, 0.86f, 0.77f, 1f);
+        _inspectOverlay.SetActive(true);
+    }
+
+    private void HideInspectPanel()
+    {
+        _inspectOverlay.SetActive(false);
+        _inspectItem = null;
+    }
+
+    private void HandleEquipPressed()
+    {
+        if (_inspectItem == null) return;
+        PlayerLoadout.EquipItem(_inspectItem);
+        HideInspectPanel();
+        LoadInventory(_userId);
     }
 
     private void ClearRows()
@@ -287,82 +396,31 @@ public class InventoryPanelController : MonoBehaviour
         for (int i = _rows.Count - 1; i >= 0; i--)
         {
             if (_rows[i] != null)
-            {
                 Destroy(_rows[i]);
-            }
         }
-
         _rows.Clear();
     }
 
     private void SetState(string text)
     {
-        if (_stateText == null)
-        {
-            return;
-        }
-
+        if (_stateText == null) return;
         _stateText.gameObject.SetActive(true);
         _stateText.text = text;
     }
 
-    private void PopulateEquipped(InventoryItemData[] items)
+    private void PopulateEquipped()
     {
-        SetEquippedSlot(_equippedWeaponText, "Starter Spear", FindEquippedItem(items, "Weapon", "Starter Spear"));
-        SetEquippedSlot(_equippedArmorText, "Training Vest", FindEquippedItem(items, "Armor", "Training Vest"));
-        SetEquippedSlot(_equippedConsumableText, "Health Potion", FindEquippedItem(items, "Consumable", "Health Potion"));
+        SetEquippedSlot(_equippedWeaponText, PlayerLoadout.EquippedWeapon);
+        SetEquippedSlot(_equippedArmorText, PlayerLoadout.EquippedArmor);
+        SetEquippedSlot(_equippedConsumableText, PlayerLoadout.EquippedConsumable);
     }
 
-    private InventoryItemData FindEquippedItem(InventoryItemData[] items, string itemType, string fallbackName)
+    private void SetEquippedSlot(TextMeshProUGUI text, InventoryItemData item)
     {
-        if (items == null)
-        {
-            return null;
-        }
-
-        for (int i = 0; i < items.Length; i++)
-        {
-            InventoryItemData item = items[i];
-            if (item == null)
-            {
-                continue;
-            }
-
-            if (string.Equals(item.itemType, itemType, StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(item.itemName, fallbackName, StringComparison.OrdinalIgnoreCase))
-            {
-                return item;
-            }
-        }
-
-        for (int i = 0; i < items.Length; i++)
-        {
-            InventoryItemData item = items[i];
-            if (item == null)
-            {
-                continue;
-            }
-
-            if (string.Equals(item.itemType, itemType, StringComparison.OrdinalIgnoreCase))
-            {
-                return item;
-            }
-        }
-
-        return null;
-    }
-
-    private void SetEquippedSlot(TextMeshProUGUI text, string fallbackName, InventoryItemData item)
-    {
-        if (text == null)
-        {
-            return;
-        }
-
-        string itemName = item != null && !string.IsNullOrWhiteSpace(item.itemName) ? item.itemName : fallbackName;
-        string rarity = item != null && !string.IsNullOrWhiteSpace(item.rarity) ? item.rarity : "Common";
-        string detail = item != null && !string.IsNullOrWhiteSpace(item.detailSummary) ? item.detailSummary : "Equipped by default";
-
+        if (text == null) return;
+        string itemName = item != null && !string.IsNullOrWhiteSpace(item.itemName) ? item.itemName : "(none)";
+        string rarity = item != null && !string.IsNullOrWhiteSpace(item.rarity) ? item.rarity : "—";
+        string detail = item != null && !string.IsNullOrWhiteSpace(item.detailSummary) ? item.detailSummary : "—";
         text.text = $"{itemName}\nRarity: {rarity}\n{detail}";
     }
 
@@ -371,7 +429,118 @@ public class InventoryPanelController : MonoBehaviour
         _backAction?.Invoke();
     }
 
-    private GameObject CreateButton(string name, Transform parent, string label, Vector2 anchoredPosition, Vector2 size, Color color)
+    private void BuildEquippedPanel()
+    {
+        GameObject equippedRoot = CreateUIObject("EquippedPanel", transform);
+        RectTransform equippedRect = GetOrAddRectTransform(equippedRoot);
+        equippedRect.anchorMin = new Vector2(0.66f, 0.05f);
+        equippedRect.anchorMax = new Vector2(0.99f, 0.93f);
+        equippedRect.pivot = new Vector2(0.5f, 0.5f);
+        equippedRect.offsetMin = Vector2.zero;
+        equippedRect.offsetMax = Vector2.zero;
+        equippedRect.sizeDelta = Vector2.zero;
+        equippedRect.anchoredPosition = Vector2.zero;
+        GetOrAddImage(equippedRoot).color = new Color(0.11f, 0.14f, 0.19f, 0.94f);
+
+        VerticalLayoutGroup layout = equippedRoot.AddComponent<VerticalLayoutGroup>();
+        layout.padding = new RectOffset(16, 16, 18, 18);
+        layout.spacing = 12f;
+        layout.childAlignment = TextAnchor.UpperCenter;
+        layout.childControlWidth = true;
+        layout.childControlHeight = true;
+        layout.childForceExpandWidth = true;
+        layout.childForceExpandHeight = false;
+
+        ContentSizeFitter fitter = equippedRoot.AddComponent<ContentSizeFitter>();
+        fitter.verticalFit = ContentSizeFitter.FitMode.Unconstrained;
+        fitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
+
+        TextMeshProUGUI heading = CreateText(
+            CreateSection("EquippedHeading", equippedRoot.transform, 36f).transform,
+            "Equipped", 28, FontStyles.Bold, false);
+        heading.alignment = TextAlignmentOptions.Center;
+        heading.color = new Color(0.95f, 0.97f, 1f, 1f);
+
+        TextMeshProUGUI subtitle = CreateText(
+            CreateSection("EquippedSubtitle", equippedRoot.transform, 48f).transform,
+            "Click an item row to inspect and equip it.", 16, FontStyles.Normal, true);
+        subtitle.alignment = TextAlignmentOptions.Center;
+        subtitle.color = new Color(0.75f, 0.82f, 0.9f, 1f);
+
+        _equippedWeaponText = CreateEquippedSlot(equippedRoot.transform, "Weapon");
+        _equippedArmorText = CreateEquippedSlot(equippedRoot.transform, "Armor");
+        _equippedConsumableText = CreateEquippedSlot(equippedRoot.transform, "Consumable");
+        PopulateEquipped();
+    }
+
+    private TextMeshProUGUI CreateEquippedSlot(Transform parent, string slotName)
+    {
+        GameObject slot = CreateUIObject(slotName + "Slot", parent);
+        GetOrAddRectTransform(slot).sizeDelta = new Vector2(0f, 112f);
+        GetOrAddImage(slot).color = new Color(0.17f, 0.21f, 0.28f, 1f);
+
+        LayoutElement layout = slot.AddComponent<LayoutElement>();
+        layout.preferredHeight = 112f;
+
+        VerticalLayoutGroup group = slot.AddComponent<VerticalLayoutGroup>();
+        group.padding = new RectOffset(14, 14, 12, 12);
+        group.spacing = 6f;
+        group.childAlignment = TextAnchor.UpperLeft;
+        group.childControlWidth = true;
+        group.childControlHeight = true;
+        group.childForceExpandWidth = true;
+        group.childForceExpandHeight = false;
+
+        TextMeshProUGUI label = CreateText(
+            CreateSection(slotName + "Label", slot.transform, 24f).transform,
+            slotName.ToUpperInvariant(), 16, FontStyles.Bold, false);
+        label.color = new Color(0.66f, 0.84f, 1f, 1f);
+
+        TextMeshProUGUI body = CreateText(
+            CreateSection(slotName + "Body", slot.transform, 58f).transform,
+            "", 16, FontStyles.Normal, true);
+        body.color = new Color(0.94f, 0.96f, 1f, 1f);
+        return body;
+    }
+
+    private GameObject CreateStyledButton(string name, Transform parent, string label, Color color, Vector2 size)
+    {
+        GameObject buttonObj = CreateUIObject(name, parent);
+        RectTransform rect = GetOrAddRectTransform(buttonObj);
+        rect.sizeDelta = size;
+
+        LayoutElement le = buttonObj.AddComponent<LayoutElement>();
+        le.preferredWidth = size.x;
+        le.preferredHeight = size.y;
+
+        Image image = GetOrAddImage(buttonObj);
+        image.color = color;
+
+        Button button = buttonObj.AddComponent<Button>();
+        ColorBlock colors = button.colors;
+        colors.normalColor = color;
+        colors.highlightedColor = color * 1.1f;
+        colors.pressedColor = color * 0.88f;
+        colors.selectedColor = color;
+        colors.disabledColor = new Color(color.r * 0.5f, color.g * 0.5f, color.b * 0.5f, 0.8f);
+        button.colors = colors;
+        button.targetGraphic = image;
+
+        GameObject labelObj = CreateUIObject("Label", buttonObj.transform);
+        RectTransform labelRect = GetOrAddRectTransform(labelObj);
+        labelRect.anchorMin = Vector2.zero;
+        labelRect.anchorMax = Vector2.one;
+        labelRect.offsetMin = Vector2.zero;
+        labelRect.offsetMax = Vector2.zero;
+        TextMeshProUGUI text = CreateText(labelObj.transform, label, 20, FontStyles.Bold);
+        text.alignment = TextAlignmentOptions.Center;
+        text.color = Color.white;
+
+        return buttonObj;
+    }
+
+    private GameObject CreateButton(string name, Transform parent, string label,
+        Vector2 anchoredPosition, Vector2 size, Color color)
     {
         GameObject buttonObj = CreateUIObject(name, parent);
         RectTransform rect = GetOrAddRectTransform(buttonObj);
@@ -400,7 +569,6 @@ public class InventoryPanelController : MonoBehaviour
         labelRect.anchorMax = Vector2.one;
         labelRect.offsetMin = Vector2.zero;
         labelRect.offsetMax = Vector2.zero;
-
         TextMeshProUGUI text = CreateText(labelObj.transform, label, 22, FontStyles.Bold);
         text.alignment = TextAlignmentOptions.Center;
         text.color = Color.white;
@@ -408,98 +576,8 @@ public class InventoryPanelController : MonoBehaviour
         return buttonObj;
     }
 
-    private void BuildEquippedPanel()
-    {
-        GameObject equippedRoot = CreateUIObject("EquippedPanel", transform);
-        RectTransform equippedRect = GetOrAddRectTransform(equippedRoot);
-        equippedRect.anchorMin = new Vector2(0.66f, 0.05f);
-        equippedRect.anchorMax = new Vector2(0.99f, 0.93f);
-        equippedRect.pivot = new Vector2(0.5f, 0.5f);
-        equippedRect.offsetMin = Vector2.zero;
-        equippedRect.offsetMax = Vector2.zero;
-        equippedRect.sizeDelta = Vector2.zero;
-        equippedRect.anchoredPosition = Vector2.zero;
-
-        Image equippedImage = GetOrAddImage(equippedRoot);
-        equippedImage.color = new Color(0.11f, 0.14f, 0.19f, 0.94f);
-
-        VerticalLayoutGroup layout = equippedRoot.AddComponent<VerticalLayoutGroup>();
-        layout.padding = new RectOffset(16, 16, 18, 18);
-        layout.spacing = 12f;
-        layout.childAlignment = TextAnchor.UpperCenter;
-        layout.childControlWidth = true;
-        layout.childControlHeight = true;
-        layout.childForceExpandWidth = true;
-        layout.childForceExpandHeight = false;
-
-        ContentSizeFitter fitter = equippedRoot.AddComponent<ContentSizeFitter>();
-        fitter.verticalFit = ContentSizeFitter.FitMode.Unconstrained;
-        fitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
-
-        TextMeshProUGUI heading = CreateText(
-            CreateSection("EquippedHeading", equippedRoot.transform, 36f).transform,
-            "Equipped",
-            28,
-            FontStyles.Bold,
-            false);
-        heading.alignment = TextAlignmentOptions.Center;
-        heading.color = new Color(0.95f, 0.97f, 1f, 1f);
-
-        TextMeshProUGUI subtitle = CreateText(
-            CreateSection("EquippedSubtitle", equippedRoot.transform, 48f).transform,
-            "Every profile keeps one equipped weapon, one armor piece, and one consumable.",
-            16,
-            FontStyles.Normal,
-            true);
-        subtitle.alignment = TextAlignmentOptions.Center;
-        subtitle.color = new Color(0.75f, 0.82f, 0.9f, 1f);
-
-        _equippedWeaponText = CreateEquippedSlot(equippedRoot.transform, "Weapon");
-        _equippedArmorText = CreateEquippedSlot(equippedRoot.transform, "Armor");
-        _equippedConsumableText = CreateEquippedSlot(equippedRoot.transform, "Consumable");
-        PopulateEquipped(null);
-    }
-
-    private TextMeshProUGUI CreateEquippedSlot(Transform parent, string slotName)
-    {
-        GameObject slot = CreateUIObject(slotName + "Slot", parent);
-        RectTransform slotRect = GetOrAddRectTransform(slot);
-        slotRect.sizeDelta = new Vector2(0f, 112f);
-
-        Image slotImage = GetOrAddImage(slot);
-        slotImage.color = new Color(0.17f, 0.21f, 0.28f, 1f);
-
-        LayoutElement layout = slot.AddComponent<LayoutElement>();
-        layout.preferredHeight = 112f;
-
-        VerticalLayoutGroup group = slot.AddComponent<VerticalLayoutGroup>();
-        group.padding = new RectOffset(14, 14, 12, 12);
-        group.spacing = 6f;
-        group.childAlignment = TextAnchor.UpperLeft;
-        group.childControlWidth = true;
-        group.childControlHeight = true;
-        group.childForceExpandWidth = true;
-        group.childForceExpandHeight = false;
-
-        TextMeshProUGUI label = CreateText(
-            CreateSection(slotName + "Label", slot.transform, 24f).transform,
-            slotName.ToUpperInvariant(),
-            16,
-            FontStyles.Bold,
-            false);
-        label.color = new Color(0.66f, 0.84f, 1f, 1f);
-
-        TextMeshProUGUI body = CreateText(
-            CreateSection(slotName + "Body", slot.transform, 58f).transform,
-            "",
-            16,
-            FontStyles.Normal,
-            true);
-        body.color = new Color(0.94f, 0.96f, 1f, 1f);
-        return body;
-    }
-
-    private TextMeshProUGUI CreateText(Transform parent, string textValue, float fontSize, FontStyles fontStyle, bool wrap = false)
+    private TextMeshProUGUI CreateText(Transform parent, string textValue, float fontSize,
+        FontStyles fontStyle, bool wrap = false)
     {
         GameObject textObj = CreateUIObject("Text", parent);
         RectTransform rect = GetOrAddRectTransform(textObj);
@@ -550,22 +628,12 @@ public class InventoryPanelController : MonoBehaviour
     private RectTransform GetOrAddRectTransform(GameObject obj)
     {
         RectTransform rect = obj.GetComponent<RectTransform>();
-        if (rect == null)
-        {
-            rect = obj.AddComponent<RectTransform>();
-        }
-
-        return rect;
+        return rect != null ? rect : obj.AddComponent<RectTransform>();
     }
 
     private Image GetOrAddImage(GameObject obj)
     {
         Image image = obj.GetComponent<Image>();
-        if (image == null)
-        {
-            image = obj.AddComponent<Image>();
-        }
-
-        return image;
+        return image != null ? image : obj.AddComponent<Image>();
     }
 }

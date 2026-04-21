@@ -35,6 +35,7 @@ public class PlayerController : MonoBehaviour
     private float nextChargeReady;
     private float nextBurstReady;
     private float nextConsumableReady;
+    private float _speedBoostUntil;
 
     public float ConsumableCooldownRemaining => Mathf.Max(0f, nextConsumableReady - Time.time);
 
@@ -69,7 +70,6 @@ public class PlayerController : MonoBehaviour
     private void Awake()
     {
         main = this;
-        damage = PlayerLoadout.WeaponDamage;
 
         body = GetComponent<Rigidbody2D>();
         if (body == null)
@@ -144,7 +144,10 @@ public class PlayerController : MonoBehaviour
         else
         {
             Vector2 move = ReadMove();
-            body.linearVelocity = move * speed;
+            float activeSpeed = Time.time < _speedBoostUntil
+                ? speed * PlayerLoadout.SpeedBoostMultiplier
+                : speed;
+            body.linearVelocity = move * activeSpeed;
         }
 
         if (ReadAttackDown() && Time.time >= nextAttack)
@@ -222,9 +225,18 @@ public class PlayerController : MonoBehaviour
     private void UseConsumable()
     {
         if (!PlayerLoadout.UseConsumable()) return;
-        Health health = GetComponent<Health>();
-        if (health != null)
-            health.Hit(-PlayerLoadout.ConsumableHealAmount);
+
+        if (PlayerLoadout.ConsumableIsSpeedBoost)
+        {
+            _speedBoostUntil = Time.time + PlayerLoadout.SpeedBoostDuration;
+        }
+        else
+        {
+            Health health = GetComponent<Health>();
+            if (health != null)
+                health.Hit(-PlayerLoadout.ConsumableHealAmount);
+        }
+
         nextConsumableReady = Time.time + Mathf.Max(0f, PlayerLoadout.ConsumableCooldown);
     }
 
@@ -293,7 +305,7 @@ public class PlayerController : MonoBehaviour
         expansion.duration = Mathf.Max(0.01f, burstDuration);
         expansion.maxRadius = Mathf.Max(0.2f, burstRange);
         expansion.pushMultiplier = Mathf.Max(0f, burstPushMultiplier);
-        float scaledBurstDamage = damage * burstDamageMultiplier;
+        float scaledBurstDamage = PlayerLoadout.WeaponDamage * burstDamageMultiplier;
         expansion.damage = Mathf.Max(0f, scaledBurstDamage);
     }
 
@@ -325,6 +337,6 @@ public class PlayerController : MonoBehaviour
         HitBox hit = slash.AddComponent<HitBox>();
         hit.hitsPlayer = false;
         hit.life = lifeOverride > 0f ? lifeOverride : time;
-        hit.damage = Mathf.Max(1, Mathf.RoundToInt(damage * Mathf.Max(1f, damageMultiplier)));
+        hit.damage = Mathf.Max(1, Mathf.RoundToInt(PlayerLoadout.WeaponDamage * Mathf.Max(1f, damageMultiplier)));
     }
 }

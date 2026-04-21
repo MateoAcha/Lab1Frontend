@@ -3,17 +3,10 @@ using UnityEngine;
 public class EnemyController : MonoBehaviour
 {
     public float speed = 2.5f;
-    public float stopDistance = 0.9f;
     public float cooldown = 0.8f;
-    public float range = 0.7f;
-    public float length = 0.8f;
-    public float width = 0.4f;
-    public float time = 0.15f;
+    public int touchDamage = 1;
     public float recoilSpeed = 10f;
     public float recoilTime = 0.1f;
-    [Header("Attack Recoil")]
-    public float attackRecoilSpeed = 3f;
-    public float attackRecoilTime = 0.08f;
     [Header("Obstacle Avoidance")]
     public float avoidProbeRadius = 0.5f;
     public float avoidProbeDistance = 2f;
@@ -22,7 +15,7 @@ public class EnemyController : MonoBehaviour
     private Rigidbody2D body;
     private Transform player;
     private Vector2 look = Vector2.down;
-    private float nextAttack;
+    private float nextTouchDamageAt;
     private float recoilUntil;
 
     private void Awake()
@@ -41,10 +34,10 @@ public class EnemyController : MonoBehaviour
             gameObject.AddComponent<BoxCollider2D>();
         }
 
-        if (GetComponent<Health>() == null)
-        {
-            gameObject.AddComponent<Health>();
-        }
+        Health health = GetComponent<Health>();
+        if (health == null)
+            health = gameObject.AddComponent<Health>();
+        health.hp = 30f;
     }
 
     private void Start()
@@ -74,64 +67,19 @@ public class EnemyController : MonoBehaviour
         }
 
         Vector2 to = player.position - transform.position;
-        float distance = to.magnitude;
-
-        if (distance > stopDistance)
+        if (to.sqrMagnitude > 0.001f)
         {
             look = to.normalized;
-            Vector2 move = EnemyObstacleAvoidance.GetSteeredDirection(
-                transform,
-                body,
-                look,
-                avoidProbeRadius,
-                avoidProbeDistance,
-                avoidTurnAngle);
-            body.linearVelocity = move * speed;
-            return;
         }
 
-        body.linearVelocity = Vector2.zero;
-        look = to.sqrMagnitude > 0f ? to.normalized : look;
-
-        if (Time.time >= nextAttack)
-        {
-            Attack();
-            nextAttack = Time.time + cooldown;
-        }
-    }
-
-    private void Attack()
-    {
-        GameObject slash = new GameObject("EnemySlash");
-        slash.transform.position = transform.position + (Vector3)look * range;
-        slash.transform.localScale = new Vector3(length, width, 1f);
-        float angle = Mathf.Atan2(look.y, look.x) * Mathf.Rad2Deg;
-        slash.transform.rotation = Quaternion.Euler(0f, 0f, angle);
-
-        SpriteRenderer renderer = slash.AddComponent<SpriteRenderer>();
-        renderer.sprite = SimpleSprite.Square;
-        renderer.color = new Color(1f, 0.25f, 0.25f, 0.35f);
-        renderer.sortingOrder = 9;
-
-        BoxCollider2D box = slash.AddComponent<BoxCollider2D>();
-        box.isTrigger = true;
-
-        Rigidbody2D slashBody = slash.AddComponent<Rigidbody2D>();
-        slashBody.bodyType = RigidbodyType2D.Kinematic;
-        slashBody.gravityScale = 0f;
-
-        HitBox hit = slash.AddComponent<HitBox>();
-        hit.hitsPlayer = true;
-        hit.life = time;
-        hit.enemyOwner = this;
-    }
-
-    public void OnAttackConnect(Vector2 targetPos)
-    {
-        Vector2 push = ((Vector2)transform.position - targetPos).normalized;
-        if (push.sqrMagnitude < 0.001f) push = Vector2.up;
-        body.linearVelocity = push * attackRecoilSpeed;
-        recoilUntil = Time.time + attackRecoilTime;
+        Vector2 move = EnemyObstacleAvoidance.GetSteeredDirection(
+            transform,
+            body,
+            look,
+            avoidProbeRadius,
+            avoidProbeDistance,
+            avoidTurnAngle);
+        body.linearVelocity = move * speed;
     }
 
     public void OnHit(Vector2 hitPoint, float pushMultiplier = 1f)
@@ -169,6 +117,48 @@ public class EnemyController : MonoBehaviour
             fx.velocity = dir * Random.Range(2f, 4f);
             fx.life = 0.2f;
         }
+    }
+
+    private void OnCollisionEnter2D(Collision2D collision)
+    {
+        TryDamagePlayer(collision.collider);
+    }
+
+    private void OnCollisionStay2D(Collision2D collision)
+    {
+        TryDamagePlayer(collision.collider);
+    }
+
+    private void OnTriggerEnter2D(Collider2D other)
+    {
+        TryDamagePlayer(other);
+    }
+
+    private void OnTriggerStay2D(Collider2D other)
+    {
+        TryDamagePlayer(other);
+    }
+
+    private void TryDamagePlayer(Collider2D other)
+    {
+        if (Time.time < nextTouchDamageAt)
+        {
+            return;
+        }
+
+        if (other.GetComponent<PlayerController>() == null)
+        {
+            return;
+        }
+
+        Health health = other.GetComponent<Health>();
+        if (health == null)
+        {
+            return;
+        }
+
+        health.Hit(touchDamage);
+        nextTouchDamageAt = Time.time + Mathf.Max(0.05f, cooldown);
     }
 
 }

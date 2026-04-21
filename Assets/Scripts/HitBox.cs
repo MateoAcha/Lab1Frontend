@@ -5,7 +5,6 @@ public class HitBox : MonoBehaviour
     public bool hitsPlayer;
     public int damage = 1;
     public float life = 0.15f;
-    public EnemyController enemyOwner;
 
     private float dieAt;
 
@@ -63,7 +62,6 @@ public class HitBox : MonoBehaviour
         if (health != null)
         {
             health.Hit(damage);
-            enemyOwner?.OnAttackConnect(other.transform.position);
         }
     }
 }

@@ -79,6 +79,8 @@ public class AuthApiClient
     public IEnumerator GetShopItems(Action<ShopCatalogData> onSuccess, Action<string> onError)
     {
         var request = UnityWebRequest.Get(_baseUrl + "/shop/items");
+        if (!string.IsNullOrWhiteSpace(AuthSession.AccessToken))
+            request.SetRequestHeader("Authorization", $"Bearer {AuthSession.AccessToken}");
         Debug.Log($"[AuthApi] GET {_baseUrl}/shop/items");
         yield return request.SendWebRequest();
 
@@ -134,6 +136,12 @@ public class AuthApiClient
 
         if (request.result != UnityWebRequest.Result.Success)
         {
+            if (request.responseCode == 401 || request.responseCode == 403)
+            {
+                AuthSession.Logout();
+                onError?.Invoke("Session expired. Please log in again.");
+                yield break;
+            }
             string error = FormatError(request);
             Debug.LogError($"[AuthApi] Inventory network error: {error}");
             onError?.Invoke(error);
@@ -314,29 +322,56 @@ public class AuthApiClient
     private string FormatError(UnityWebRequest request)
     {
         string raw = request.downloadHandler != null ? request.downloadHandler.text : "";
-        if (string.IsNullOrWhiteSpace(raw))
-        {
-            return $"Request failed ({request.responseCode}).";
-        }
+        long code  = request.responseCode;
+        Debug.Log($"[AuthApi] Error body (code={code}): {raw}");
 
-        try
+        // Try to extract a message from the JSON body (works with both Spring Boot formats).
+        if (!string.IsNullOrWhiteSpace(raw))
         {
-            var apiError = JsonUtility.FromJson<ApiError>(raw);
-            if (!string.IsNullOrWhiteSpace(apiError.message))
+            foreach (string field in new[] { "detail", "message", "title" })
             {
-                return apiError.message;
-            }
-            if (!string.IsNullOrWhiteSpace(apiError.error))
-            {
-                return apiError.error;
+                string val = ExtractJsonString(raw, field);
+                if (!string.IsNullOrWhiteSpace(val) &&
+                    !val.Equals("error", System.StringComparison.OrdinalIgnoreCase))
+                    return val;
             }
         }
-        catch
-        {
-            // keep raw body fallback
-        }
 
-        return raw;
+        // Status-code fallbacks for common cases.
+        if (code == 401) return "Incorrect username or password.";
+        if (code == 409)
+        {
+            if (raw.IndexOf("username", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                return "That username is already taken.";
+            if (raw.IndexOf("email", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                return "That email is already registered.";
+            return "Account already exists.";
+        }
+        if (code == 400) return "Invalid data.";
+        if (code == 403) return "Access denied.";
+        if (code == 404) return "Not found.";
+
+        return "Invalid data.";
+    }
+
+    // Extracts the string value of a JSON key without a full JSON parser.
+    private static string ExtractJsonString(string json, string key)
+    {
+        string search = "\"" + key + "\"";
+        int idx = json.IndexOf(search, System.StringComparison.OrdinalIgnoreCase);
+        if (idx < 0) return null;
+        idx += search.Length;
+        while (idx < json.Length && (json[idx] == ' ' || json[idx] == ':')) idx++;
+        if (idx >= json.Length || json[idx] != '"') return null;
+        idx++;
+        var sb = new System.Text.StringBuilder();
+        while (idx < json.Length && json[idx] != '"')
+        {
+            if (json[idx] == '\\') idx++;
+            if (idx < json.Length) sb.Append(json[idx]);
+            idx++;
+        }
+        return sb.ToString();
     }
 
     [Serializable]
@@ -366,10 +401,4 @@ public class AuthApiClient
         public string password;
     }
 
-    [Serializable]
-    private class ApiError
-    {
-        public string message;
-        public string error;
-    }
 }
