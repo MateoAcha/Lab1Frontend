@@ -33,7 +33,7 @@ public class EnemySpawner : MonoBehaviour
     {
         ElapsedTime = Time.time - startAt;
 
-        if (PlayerController.main == null)
+        if (MultiplayerState.GetNearestPlayer(Vector3.zero) == null)
         {
             return;
         }
@@ -77,12 +77,13 @@ public class EnemySpawner : MonoBehaviour
     private bool TryGetSpawnPoint(float enemySize, out Vector2 point)
     {
         point = Vector2.zero;
-        if (PlayerController.main == null)
+        Transform nearestPlayer = MultiplayerState.GetNearestPlayer(Vector3.zero);
+        if (nearestPlayer == null)
         {
             return false;
         }
 
-        Vector2 playerPos = PlayerController.main.transform.position;
+        Vector2 playerPos = nearestPlayer.position;
         float halfWidth = Mathf.Max(1f, mapSize.x) * 0.5f;
         float halfHeight = Mathf.Max(1f, mapSize.y) * 0.5f;
         float margin = Mathf.Max(0.2f, spawnPadding + enemySize * 0.5f);

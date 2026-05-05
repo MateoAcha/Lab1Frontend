@@ -16,9 +16,11 @@ public class InventoryPanelController : MonoBehaviour
     private TextMeshProUGUI _equippedWeaponText;
     private TextMeshProUGUI _equippedArmorText;
     private TextMeshProUGUI _equippedConsumableText;
+    private TextMeshProUGUI _equippedSkinText;
     private Coroutine _loadRoutine;
     private bool _built;
     private int _userId;
+    private SkinData[] _userSkins;
 
     // Inspect overlay
     private GameObject _inspectOverlay;
@@ -66,25 +68,35 @@ public class InventoryPanelController : MonoBehaviour
         }
 
         UserInventoryData response = null;
-        string error = null;
-
+        string inventoryError = null;
         yield return _apiClient.GetInventory(
             userId,
             onSuccess: data => response = data,
-            onError: message => error = message);
+            onError: message => inventoryError = message);
 
-        if (!string.IsNullOrWhiteSpace(error))
+        if (!string.IsNullOrWhiteSpace(inventoryError))
         {
-            SetState(error);
+            SetState(inventoryError);
             yield break;
         }
 
-        InventoryItemData[] items = response != null ? response.items : null;
+        UserSkinsData skinsResponse = null;
+        yield return _apiClient.GetSkins(
+            userId,
+            onSuccess: data => skinsResponse = data,
+            onError: _ => { });
 
+        _userSkins = skinsResponse?.skins;
+        PlayerLoadout.ApplySkin(_userSkins);
+
+        InventoryItemData[] items = response != null ? response.items : null;
         PlayerLoadout.ApplyFromItems(items);
         PopulateEquipped();
 
-        if (items == null || items.Length == 0)
+        bool hasItems = items != null && items.Length > 0;
+        bool hasSkins = _userSkins != null && _userSkins.Length > 0;
+
+        if (!hasItems && !hasSkins)
         {
             SetState("This player has no inventory items yet.");
             yield break;
@@ -92,8 +104,18 @@ public class InventoryPanelController : MonoBehaviour
 
         _stateText.gameObject.SetActive(false);
 
-        for (int i = 0; i < items.Length; i++)
-            CreateRow(items[i]);
+        if (hasItems)
+        {
+            for (int i = 0; i < items.Length; i++)
+                CreateRow(items[i]);
+        }
+
+        if (hasSkins)
+        {
+            CreateSectionHeader("── Skins ──");
+            for (int i = 0; i < _userSkins.Length; i++)
+                CreateSkinRow(_userSkins[i]);
+        }
     }
 
     private void EnsureBuilt()
@@ -413,6 +435,7 @@ public class InventoryPanelController : MonoBehaviour
         SetEquippedSlot(_equippedWeaponText, PlayerLoadout.EquippedWeapon);
         SetEquippedSlot(_equippedArmorText, PlayerLoadout.EquippedArmor);
         SetEquippedSlot(_equippedConsumableText, PlayerLoadout.EquippedConsumable);
+        SetEquippedSkinSlot(_equippedSkinText);
     }
 
     private void SetEquippedSlot(TextMeshProUGUI text, InventoryItemData item)
@@ -422,6 +445,109 @@ public class InventoryPanelController : MonoBehaviour
         string rarity = item != null && !string.IsNullOrWhiteSpace(item.rarity) ? item.rarity : "—";
         string detail = item != null && !string.IsNullOrWhiteSpace(item.detailSummary) ? item.detailSummary : "—";
         text.text = $"{itemName}\nRarity: {rarity}\n{detail}";
+    }
+
+    private void SetEquippedSkinSlot(TextMeshProUGUI text)
+    {
+        if (text == null) return;
+        if (PlayerLoadout.EquippedSkinId == 0 || string.IsNullOrWhiteSpace(PlayerLoadout.EquippedSkinName))
+            text.text = "(none)\nRarity: —\n—";
+        else
+            text.text = $"{PlayerLoadout.EquippedSkinName}\nEquipped";
+    }
+
+    private void CreateSectionHeader(string label)
+    {
+        GameObject header = CreateUIObject("SectionHeader", _contentRoot);
+        _rows.Add(header);
+
+        GetOrAddRectTransform(header).sizeDelta = new Vector2(0f, 36f);
+        GetOrAddImage(header).color = new Color(0.1f, 0.12f, 0.17f, 0f);
+
+        LayoutElement le = header.AddComponent<LayoutElement>();
+        le.preferredHeight = 36f;
+
+        TextMeshProUGUI text = CreateText(header.transform, label, 18, FontStyles.Bold, false);
+        text.alignment = TextAlignmentOptions.Center;
+        text.color = new Color(0.6f, 0.75f, 0.9f, 0.85f);
+    }
+
+    private void CreateSkinRow(SkinData skin)
+    {
+        if (skin == null) return;
+
+        GameObject row = CreateUIObject("SkinRow", _contentRoot);
+        _rows.Add(row);
+
+        bool equipped = skin.equipped;
+        Image rowImage = GetOrAddImage(row);
+        rowImage.color = equipped
+            ? new Color(0.18f, 0.26f, 0.35f, 0.98f)
+            : new Color(0.15f, 0.18f, 0.24f, 0.98f);
+
+        VerticalLayoutGroup group = row.AddComponent<VerticalLayoutGroup>();
+        group.padding = new RectOffset(18, 18, 10, 10);
+        group.spacing = 4f;
+        group.childAlignment = TextAnchor.UpperLeft;
+        group.childControlWidth = true;
+        group.childControlHeight = true;
+        group.childForceExpandWidth = true;
+        group.childForceExpandHeight = false;
+
+        ContentSizeFitter rowSize = row.AddComponent<ContentSizeFitter>();
+        rowSize.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+        rowSize.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
+
+        string equippedTag = equipped ? "  [EQUIPPED]" : "";
+        string name = !string.IsNullOrWhiteSpace(skin.skinName) ? skin.skinName : "Unknown Skin";
+        string rarity = !string.IsNullOrWhiteSpace(skin.rarity) ? skin.rarity : "—";
+
+        TextMeshProUGUI nameText = CreateText(
+            CreateSection("SkinName", row.transform, 38f).transform,
+            $"{name}{equippedTag}", 26, FontStyles.Bold, true);
+        nameText.color = equipped ? new Color(0.5f, 0.85f, 1f, 1f) : new Color(0.9f, 0.93f, 1f, 1f);
+
+        TextMeshProUGUI rarityText = CreateText(
+            CreateSection("SkinRarity", row.transform, 24f).transform,
+            $"Rarity: {rarity}", 17, FontStyles.Italic, false);
+        rarityText.color = new Color(0.76f, 0.86f, 0.77f, 1f);
+
+        if (!equipped)
+        {
+            SkinData captured = skin;
+            GameObject equipBtnObj = CreateStyledButton("SkinEquipBtn", row.transform,
+                "Equip Skin", new Color(0.12f, 0.4f, 0.6f, 1f), new Vector2(150f, 36f));
+            LayoutElement le = equipBtnObj.AddComponent<LayoutElement>();
+            le.preferredWidth = 150f;
+            le.preferredHeight = 36f;
+            equipBtnObj.GetComponent<Button>().onClick.AddListener(() => HandleEquipSkinPressed(captured));
+        }
+    }
+
+    private void HandleEquipSkinPressed(SkinData skin)
+    {
+        if (skin == null || _apiClient == null) return;
+        StartCoroutine(EquipSkinRoutine(skin));
+    }
+
+    private IEnumerator EquipSkinRoutine(SkinData skin)
+    {
+        string error = null;
+        yield return _apiClient.EquipSkin(
+            _userId, skin.skinId,
+            onSuccess: () => { },
+            onError: e => error = e);
+
+        if (!string.IsNullOrWhiteSpace(error))
+        {
+            Debug.LogWarning($"[Inventory] Equip skin failed: {error}");
+            yield break;
+        }
+
+        PlayerLoadout.ApplySkin(new[] { new SkinData { skinId = skin.skinId, skinName = skin.skinName, rarity = skin.rarity, equipped = true } });
+
+        if (_loadRoutine != null) StopCoroutine(_loadRoutine);
+        _loadRoutine = StartCoroutine(LoadInventoryRoutine(_userId));
     }
 
     private void HandleBackPressed()
@@ -470,6 +596,7 @@ public class InventoryPanelController : MonoBehaviour
         _equippedWeaponText = CreateEquippedSlot(equippedRoot.transform, "Weapon");
         _equippedArmorText = CreateEquippedSlot(equippedRoot.transform, "Armor");
         _equippedConsumableText = CreateEquippedSlot(equippedRoot.transform, "Consumable");
+        _equippedSkinText = CreateEquippedSlot(equippedRoot.transform, "Skin");
         PopulateEquipped();
     }
 

@@ -119,6 +119,48 @@ public class AuthApiClient
             onError?.Invoke(FormatError(request));
     }
 
+    public IEnumerator GetSkins(int userId, Action<UserSkinsData> onSuccess, Action<string> onError)
+    {
+        var request = UnityWebRequest.Get(_baseUrl + $"/users/{userId}/skins");
+        if (!string.IsNullOrWhiteSpace(AuthSession.AccessToken))
+            request.SetRequestHeader("Authorization", $"Bearer {AuthSession.AccessToken}");
+
+        Debug.Log($"[AuthApi] GET {_baseUrl}/users/{userId}/skins");
+        yield return request.SendWebRequest();
+
+        if (request.result != UnityWebRequest.Result.Success || request.responseCode < 200 || request.responseCode >= 300)
+        {
+            onError?.Invoke(FormatError(request));
+            yield break;
+        }
+
+        UserSkinsData data;
+        try { data = JsonUtility.FromJson<UserSkinsData>(request.downloadHandler.text); }
+        catch { onError?.Invoke("Unexpected skins response."); yield break; }
+
+        if (data == null) { onError?.Invoke("Empty skins response."); yield break; }
+        onSuccess?.Invoke(data);
+    }
+
+    public IEnumerator EquipSkin(int userId, int skinId, Action onSuccess, Action<string> onError)
+    {
+        var request = new UnityWebRequest(_baseUrl + $"/users/{userId}/skins/{skinId}/equip", "POST");
+        request.uploadHandler = new UploadHandlerRaw(new byte[0]);
+        request.downloadHandler = new DownloadHandlerBuffer();
+        request.SetRequestHeader("Content-Type", "application/json");
+        if (!string.IsNullOrWhiteSpace(AuthSession.AccessToken))
+            request.SetRequestHeader("Authorization", $"Bearer {AuthSession.AccessToken}");
+
+        Debug.Log($"[AuthApi] POST {_baseUrl}/users/{userId}/skins/{skinId}/equip");
+        yield return request.SendWebRequest();
+
+        if (request.result == UnityWebRequest.Result.Success
+            && request.responseCode >= 200 && request.responseCode < 300)
+            onSuccess?.Invoke();
+        else
+            onError?.Invoke(FormatError(request));
+    }
+
     public IEnumerator GetInventory(int userId, Action<UserInventoryData> onSuccess, Action<string> onError)
     {
         var request = UnityWebRequest.Get(_baseUrl + $"/users/{userId}/inventory");

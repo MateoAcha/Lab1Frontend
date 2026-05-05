@@ -17,6 +17,32 @@ public static class PlayerLoadout
     public static InventoryItemData EquippedWeapon { get; private set; }
     public static InventoryItemData EquippedArmor { get; private set; }
     public static InventoryItemData EquippedConsumable { get; private set; }
+    public static int EquippedSkinId { get; private set; } = 0;
+    public static string EquippedSkinName { get; private set; } = "";
+
+    public static void ApplySkin(SkinData[] skins)
+    {
+        if (skins == null) return;
+        foreach (SkinData skin in skins)
+        {
+            if (skin != null && skin.equipped)
+            {
+                EquippedSkinId = skin.skinId;
+                EquippedSkinName = skin.skinName ?? "";
+                return;
+            }
+        }
+    }
+
+    public static Color GetSkinColor()
+    {
+        return EquippedSkinId switch
+        {
+            2001 => new Color(1f, 0.25f, 0.25f, 1f),    // Crimson Edge
+            2002 => new Color(0.25f, 0.85f, 0.35f, 1f), // Field Green
+            _ => new Color(0.3f, 0.75f, 1f, 1f)
+        };
+    }
 
     public static void ApplyFromItems(InventoryItemData[] items)
     {

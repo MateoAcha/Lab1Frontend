@@ -31,13 +31,17 @@ public class GameBootstrap : MonoBehaviour
 
     private void Start()
     {
-        Cursor.visible = false;
-        Cursor.lockState = CursorLockMode.Confined;
+        bool isMultiplayer = MultiplayerState.IsMultiplayer;
+        MultiplayerState.Reset();
+        MultiplayerState.SetMultiplayer(isMultiplayer);
         SetupCamera();
-        SetupPlayer();
+        SetupPlayer(0, new Vector3(-1f, 0f, 0f));
+        if (MultiplayerState.IsMultiplayer)
+            SetupPlayer(1, new Vector3(1f, 0f, 0f));
         SetupRocks();
         SetupSpawner();
         SetupGameOverScreen();
+        SetupPauseMenu();
     }
 
     private void SetupCamera()
@@ -64,37 +68,57 @@ public class GameBootstrap : MonoBehaviour
         }
     }
 
-    private void SetupPlayer()
+    private void SetupPlayer(int index, Vector3 spawnOffset)
     {
-        if (PlayerController.main != null || FindObjectOfType<PlayerController>() != null)
-        {
+        if (index == 0 && (PlayerController.main != null || FindObjectOfType<PlayerController>() != null))
             return;
-        }
 
-        GameObject player = new GameObject("Player");
-        player.transform.position = Vector3.zero;
+        GameObject player = new GameObject(index == 0 ? "Player" : "Player2");
+        player.transform.position = spawnOffset;
         player.transform.localScale = new Vector3(playerSize, playerSize, 1f);
 
         SpriteRenderer renderer = player.AddComponent<SpriteRenderer>();
         renderer.sprite = SimpleSprite.Square;
-        renderer.color = new Color(0.3f, 0.75f, 1f, 1f);
         renderer.sortingOrder = 6;
-        if (playerMaterial != null)
+
+        if (index == 0)
         {
-            renderer.sharedMaterial = playerMaterial;
-            renderer.color = Color.white;
+            renderer.color = PlayerLoadout.GetSkinColor();
+            if (playerMaterial != null)
+            {
+                renderer.sharedMaterial = playerMaterial;
+                renderer.color = PlayerLoadout.GetSkinColor();
+            }
+        }
+        else
+        {
+            renderer.color = new Color(1f, 0.65f, 0.1f, 1f); // orange for P2
+            if (playerMaterial != null)
+            {
+                renderer.sharedMaterial = playerMaterial;
+                renderer.color = new Color(1f, 0.65f, 0.1f, 1f);
+            }
         }
 
         Health health = player.AddComponent<Health>();
-        health.hp = PlayerLoadout.MaxHP;
+        health.hp = index == 0 ? PlayerLoadout.MaxHP : 10f;
 
-        player.AddComponent<PlayerController>();
+        PlayerController pc = player.AddComponent<PlayerController>();
+        pc.playerIndex = index;
+
+        player.AddComponent<PlayerPointer>();
     }
 
     private void SetupGameOverScreen()
     {
         GameObject obj = new GameObject("GameOverScreen");
         obj.AddComponent<GameOverScreen>();
+    }
+
+    private void SetupPauseMenu()
+    {
+        GameObject obj = new GameObject("PauseMenu");
+        obj.AddComponent<PauseMenu>();
     }
 
     private void SetupSpawner()

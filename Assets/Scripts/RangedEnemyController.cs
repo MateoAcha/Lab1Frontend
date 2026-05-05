@@ -49,18 +49,12 @@ public class RangedEnemyController : MonoBehaviour
 
     private void Start()
     {
-        if (PlayerController.main != null)
-        {
-            player = PlayerController.main.transform;
-        }
+        player = MultiplayerState.GetNearestPlayer(transform.position);
     }
 
     private void Update()
     {
-        if (player == null && PlayerController.main != null)
-        {
-            player = PlayerController.main.transform;
-        }
+        player = MultiplayerState.GetNearestPlayer(transform.position);
 
         if (player == null)
         {

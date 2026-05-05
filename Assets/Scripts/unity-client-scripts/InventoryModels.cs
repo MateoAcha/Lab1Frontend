@@ -33,10 +33,27 @@ public class ShopItemData
     public string detailSummary;
     public int goldPrice;
     public int purchaseQuantity;
+    public int skinId;
 }
 
 [Serializable]
 public class ShopCatalogData
 {
     public ShopItemData[] items;
+}
+
+[Serializable]
+public class SkinData
+{
+    public int skinId;
+    public string skinName;
+    public string rarity;
+    public bool equipped;
+}
+
+[Serializable]
+public class UserSkinsData
+{
+    public int userId;
+    public SkinData[] skins;
 }

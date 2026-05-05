@@ -51,9 +51,10 @@ public class Health : MonoBehaviour
         {
             deathHandled = true;
 
-            if (GetComponent<PlayerController>() != null)
+            PlayerController pc = GetComponent<PlayerController>();
+            if (pc != null)
             {
-                GameStatsTracker.RegisterPlayerDied();
+                MultiplayerState.RegisterPlayerDeath(pc);
             }
             else if (GetComponent<RangedEnemyController>() != null)
             {

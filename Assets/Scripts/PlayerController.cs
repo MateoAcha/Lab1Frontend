@@ -7,6 +7,7 @@ public class PlayerController : MonoBehaviour
 {
     public static PlayerController main;
 
+    public int playerIndex = 0;
     public float speed = 5f;
     public float cooldown = 0.35f;
     public int damage = 1;
@@ -69,8 +70,6 @@ public class PlayerController : MonoBehaviour
 
     private void Awake()
     {
-        main = this;
-
         body = GetComponent<Rigidbody2D>();
         if (body == null)
         {
@@ -111,12 +110,16 @@ public class PlayerController : MonoBehaviour
         }
     }
 
+    private void Start()
+    {
+        if (playerIndex == 0) main = this;
+        MultiplayerState.RegisterPlayer(this);
+    }
+
     private void OnDestroy()
     {
-        if (main == this)
-        {
-            main = null;
-        }
+        if (main == this) main = null;
+        MultiplayerState.UnregisterPlayer(this);
     }
 
     private void Update()
@@ -160,9 +163,18 @@ public class PlayerController : MonoBehaviour
 
     private Vector2 ReadMove()
     {
+        if (playerIndex == 1)
+        {
+#if ENABLE_INPUT_SYSTEM
+            Gamepad pad = GetGamepad();
+            return pad != null ? Vector2.ClampMagnitude(pad.leftStick.ReadValue(), 1f) : Vector2.zero;
+#else
+            return Vector2.zero;
+#endif
+        }
+
 #if ENABLE_INPUT_SYSTEM
         Vector2 move = Vector2.zero;
-
         if (Keyboard.current != null)
         {
             if (Keyboard.current.aKey.isPressed || Keyboard.current.leftArrowKey.isPressed) move.x -= 1f;
@@ -170,16 +182,6 @@ public class PlayerController : MonoBehaviour
             if (Keyboard.current.sKey.isPressed || Keyboard.current.downArrowKey.isPressed) move.y -= 1f;
             if (Keyboard.current.wKey.isPressed || Keyboard.current.upArrowKey.isPressed) move.y += 1f;
         }
-
-        if (Gamepad.current != null)
-        {
-            Vector2 stick = Gamepad.current.leftStick.ReadValue();
-            if (stick.sqrMagnitude > move.sqrMagnitude)
-            {
-                move = stick;
-            }
-        }
-
         return Vector2.ClampMagnitude(move, 1f);
 #else
         return new Vector2(Input.GetAxisRaw("Horizontal"), Input.GetAxisRaw("Vertical")).normalized;
@@ -188,6 +190,15 @@ public class PlayerController : MonoBehaviour
 
     private bool ReadAttackDown()
     {
+        if (playerIndex == 1)
+        {
+#if ENABLE_INPUT_SYSTEM
+            Gamepad pad = GetGamepad();
+            return pad != null && pad.rightTrigger.wasPressedThisFrame;
+#else
+            return false;
+#endif
+        }
 #if ENABLE_INPUT_SYSTEM
         return Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame;
 #else
@@ -197,6 +208,15 @@ public class PlayerController : MonoBehaviour
 
     private bool ReadChargeDown()
     {
+        if (playerIndex == 1)
+        {
+#if ENABLE_INPUT_SYSTEM
+            Gamepad pad = GetGamepad();
+            return pad != null && pad.rightShoulder.wasPressedThisFrame;
+#else
+            return false;
+#endif
+        }
 #if ENABLE_INPUT_SYSTEM
         return Keyboard.current != null && Keyboard.current.eKey.wasPressedThisFrame;
 #else
@@ -206,6 +226,15 @@ public class PlayerController : MonoBehaviour
 
     private bool ReadBurstDown()
     {
+        if (playerIndex == 1)
+        {
+#if ENABLE_INPUT_SYSTEM
+            Gamepad pad = GetGamepad();
+            return pad != null && pad.leftShoulder.wasPressedThisFrame;
+#else
+            return false;
+#endif
+        }
 #if ENABLE_INPUT_SYSTEM
         return Keyboard.current != null && Keyboard.current.qKey.wasPressedThisFrame;
 #else
@@ -215,12 +244,29 @@ public class PlayerController : MonoBehaviour
 
     private bool ReadConsumableDown()
     {
+        if (playerIndex == 1)
+        {
+#if ENABLE_INPUT_SYSTEM
+            Gamepad pad = GetGamepad();
+            return pad != null && pad.buttonNorth.wasPressedThisFrame;
+#else
+            return false;
+#endif
+        }
 #if ENABLE_INPUT_SYSTEM
         return Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame;
 #else
         return Input.GetKeyDown(KeyCode.Space);
 #endif
     }
+
+#if ENABLE_INPUT_SYSTEM
+    private Gamepad GetGamepad()
+    {
+        var all = Gamepad.all;
+        return all.Count > 0 ? all[0] : null;
+    }
+#endif
 
     private void UseConsumable()
     {
@@ -242,18 +288,25 @@ public class PlayerController : MonoBehaviour
 
     private Vector2 ReadMouseAimDirection()
     {
-        Camera cam = Camera.main;
-        if (cam == null)
+        if (playerIndex == 1)
         {
+#if ENABLE_INPUT_SYSTEM
+            Gamepad pad = GetGamepad();
+            if (pad != null)
+            {
+                Vector2 stick = pad.rightStick.ReadValue();
+                if (stick.sqrMagnitude > 0.04f)
+                    return stick.normalized;
+            }
+#endif
             return look;
         }
+
+        Camera cam = Camera.main;
+        if (cam == null) return look;
 
 #if ENABLE_INPUT_SYSTEM
-        if (Mouse.current == null)
-        {
-            return look;
-        }
-
+        if (Mouse.current == null) return look;
         Vector3 screen = Mouse.current.position.ReadValue();
 #else
         Vector3 screen = Input.mousePosition;

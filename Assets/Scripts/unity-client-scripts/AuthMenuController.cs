@@ -58,6 +58,8 @@ public class AuthMenuController : MonoBehaviour
     private Button _shopButton;
     private Image _shopButtonImage;
     private TextMeshProUGUI _shopButtonText;
+    private GameObject _multiplayerPanel;
+    private bool _launchMultiplayer;
 
     private void OnApplicationQuit()
     {
@@ -82,6 +84,7 @@ public class AuthMenuController : MonoBehaviour
         ShowOnly(mainMenuPanel);
         EnsureInventoryUI();
         EnsureShopUI();
+        EnsureMultiplayerPanel();
 
         if (errorPanel != null)
         {
@@ -89,6 +92,67 @@ public class AuthMenuController : MonoBehaviour
         }
 
         SetAuthProof("Auth proof pending. Log in to run checks.");
+    }
+
+    private void Update()
+    {
+        TMP_InputField[] fields = GetActivePanelFields();
+        if (fields == null) return;
+
+#if ENABLE_INPUT_SYSTEM
+        var kb = UnityEngine.InputSystem.Keyboard.current;
+        if (kb == null) return;
+        bool up    = kb.upArrowKey.wasPressedThisFrame;
+        bool down  = kb.downArrowKey.wasPressedThisFrame;
+        bool enter = kb.enterKey.wasPressedThisFrame || kb.numpadEnterKey.wasPressedThisFrame;
+#else
+        bool up    = Input.GetKeyDown(KeyCode.UpArrow);
+        bool down  = Input.GetKeyDown(KeyCode.DownArrow);
+        bool enter = Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter);
+#endif
+
+        if (up)   NavigateFields(fields, -1);
+        if (down)  NavigateFields(fields,  1);
+        if (enter) SubmitActivePanel();
+    }
+
+    private TMP_InputField[] GetActivePanelFields()
+    {
+        if (loginPanel != null && loginPanel.activeSelf)
+            return new[] { loginUsernameInput, loginPasswordInput };
+        if (registerPanel != null && registerPanel.activeSelf)
+            return new[] { registerUsernameInput, registerEmailInput, registerPasswordInput };
+        return null;
+    }
+
+    private void NavigateFields(TMP_InputField[] fields, int direction)
+    {
+        int current = -1;
+        for (int i = 0; i < fields.Length; i++)
+        {
+            if (fields[i] != null && fields[i].isFocused) { current = i; break; }
+        }
+        int next = ((current + direction + fields.Length) % fields.Length);
+        fields[next]?.Select();
+        fields[next]?.ActivateInputField();
+    }
+
+    private void SubmitActivePanel()
+    {
+        if (loginPanel != null && loginPanel.activeSelf) SubmitLogin();
+        else if (registerPanel != null && registerPanel.activeSelf) SubmitRegister();
+    }
+
+    private void AutoFocusNextFrame(TMP_InputField field)
+    {
+        if (field != null) StartCoroutine(FocusNextFrame(field));
+    }
+
+    private IEnumerator FocusNextFrame(TMP_InputField field)
+    {
+        yield return null;
+        field.Select();
+        field.ActivateInputField();
     }
 
     public void OpenRegister()
@@ -101,6 +165,7 @@ public class AuthMenuController : MonoBehaviour
 
         Debug.Log("[AuthUI] Open Register panel");
         ShowOnly(registerPanel);
+        AutoFocusNextFrame(registerUsernameInput);
     }
 
     public void OpenLogin()
@@ -113,6 +178,7 @@ public class AuthMenuController : MonoBehaviour
 
         Debug.Log("[AuthUI] Open Login panel");
         ShowOnly(loginPanel);
+        AutoFocusNextFrame(loginUsernameInput);
     }
 
     public void BackToMain()
@@ -214,9 +280,32 @@ public class AuthMenuController : MonoBehaviour
         ShowOnly(profilePanel);
     }
 
+    public void OpenMultiplayer()
+    {
+        EnsureMultiplayerPanel();
+        ShowOnly(_multiplayerPanel);
+    }
+
     public void PlayGame()
     {
+        _launchMultiplayer = false;
         Debug.Log("[AuthUI] Play clicked.");
+        StartCoroutine(FetchLoadoutThenPlay());
+    }
+
+    public void PlayLocalMultiplayer()
+    {
+        _launchMultiplayer = true;
+        Debug.Log("[AuthUI] Local multiplayer clicked.");
+        StartCoroutine(FetchLoadoutThenPlay());
+    }
+
+    private IEnumerator FetchLoadoutThenPlay()
+    {
+        if (AuthSession.IsLoggedIn)
+            yield return FetchLoadoutSilently(AuthSession.UserId);
+
+        MultiplayerState.SetMultiplayer(_launchMultiplayer);
 
         if (gamePrefab != null)
         {
@@ -231,21 +320,18 @@ public class AuthMenuController : MonoBehaviour
             }
 
             if (menuRoot != null)
-            {
                 Destroy(menuRoot);
-            }
             else
-            {
                 Destroy(gameObject);
-            }
-            return;
+
+            yield break;
         }
 
         if (!string.IsNullOrWhiteSpace(gameplaySceneName))
         {
             Debug.LogWarning($"[AuthUI] gamePrefab is not assigned. Falling back to loading scene '{gameplaySceneName}'.");
             SceneManager.LoadScene(gameplaySceneName);
-            return;
+            yield break;
         }
 
         ShowError("Game prefab is not assigned.");
@@ -383,6 +469,17 @@ public class AuthMenuController : MonoBehaviour
             {
                 Debug.LogWarning($"[AuthUI] Silent inventory fetch failed: {err}");
             });
+
+        yield return _apiClient.GetSkins(userId,
+            onSuccess: data =>
+            {
+                PlayerLoadout.ApplySkin(data?.skins);
+                Debug.Log("[AuthUI] Skin applied from profile.");
+            },
+            onError: err =>
+            {
+                Debug.LogWarning($"[AuthUI] Silent skin fetch failed: {err}");
+            });
     }
 
     private void ShowError(string message)
@@ -502,6 +599,7 @@ public class AuthMenuController : MonoBehaviour
         if (statsPanel != null) statsPanel.SetActive(activePanel == statsPanel);
         if (_inventoryPanel != null) _inventoryPanel.SetActive(activePanel == _inventoryPanel);
         if (_shopPanel != null) _shopPanel.SetActive(activePanel == _shopPanel);
+        if (_multiplayerPanel != null) _multiplayerPanel.SetActive(activePanel == _multiplayerPanel);
     }
 
     private void RefreshSessionUI()
@@ -861,6 +959,189 @@ public class AuthMenuController : MonoBehaviour
             authProofText.text = message;
         }
         Debug.Log($"[AuthUI] {message.Replace('\n', ' ')}");
+    }
+
+    private void EnsureMultiplayerPanel()
+    {
+        if (_multiplayerPanel != null) return;
+
+        Transform panelParent = mainMenuPanel != null ? mainMenuPanel.transform.parent : transform;
+
+        _multiplayerPanel = new GameObject("MultiplayerPanel");
+        _multiplayerPanel.transform.SetParent(panelParent, false);
+
+        RectTransform bg = _multiplayerPanel.AddComponent<RectTransform>();
+        bg.anchorMin = Vector2.zero;
+        bg.anchorMax = Vector2.one;
+        bg.offsetMin = Vector2.zero;
+        bg.offsetMax = Vector2.zero;
+        _multiplayerPanel.AddComponent<Image>().color = new Color(0.06f, 0.08f, 0.12f, 0.97f);
+
+        // Title
+        GameObject titleObj = new GameObject("Title");
+        titleObj.transform.SetParent(_multiplayerPanel.transform, false);
+        RectTransform titleRect = titleObj.AddComponent<RectTransform>();
+        titleRect.anchorMin = new Vector2(0.5f, 1f);
+        titleRect.anchorMax = new Vector2(0.5f, 1f);
+        titleRect.pivot = new Vector2(0.5f, 1f);
+        titleRect.sizeDelta = new Vector2(700f, 70f);
+        titleRect.anchoredPosition = new Vector2(0f, -50f);
+        TextMeshProUGUI titleTmp = titleObj.AddComponent<TextMeshProUGUI>();
+        titleTmp.text = "Multiplayer";
+        titleTmp.font = TMP_Settings.defaultFontAsset;
+        titleTmp.fontSize = 48f;
+        titleTmp.fontStyle = FontStyles.Bold;
+        titleTmp.alignment = TextAlignmentOptions.Center;
+        titleTmp.color = Color.white;
+
+        // Back button
+        CreateMenuButton("BackBtn", _multiplayerPanel.transform,
+            "Back", new Vector2(110f, -40f), new Vector2(160f, 50f),
+            new Color(0.18f, 0.22f, 0.3f, 1f), BackToMain);
+
+        // Button container
+        GameObject container = new GameObject("ButtonContainer");
+        container.transform.SetParent(_multiplayerPanel.transform, false);
+        RectTransform containerRect = container.AddComponent<RectTransform>();
+        containerRect.anchorMin = new Vector2(0.5f, 0.5f);
+        containerRect.anchorMax = new Vector2(0.5f, 0.5f);
+        containerRect.pivot = new Vector2(0.5f, 0.5f);
+        containerRect.sizeDelta = new Vector2(900f, 340f);
+        containerRect.anchoredPosition = new Vector2(0f, 20f);
+        HorizontalLayoutGroup hg = container.AddComponent<HorizontalLayoutGroup>();
+        hg.spacing = 40f;
+        hg.childAlignment = TextAnchor.MiddleCenter;
+        hg.childControlWidth = false;
+        hg.childControlHeight = false;
+        hg.childForceExpandWidth = false;
+        hg.childForceExpandHeight = false;
+
+        // Local Multiplayer (enabled)
+        CreateModeCard(container.transform, "LOCAL\nMULTIPLAYER",
+            "Same screen,\ntwo controllers",
+            new Color(0.12f, 0.38f, 0.22f, 1f),
+            new Color(0.15f, 0.48f, 0.28f, 1f),
+            new Color(0.08f, 0.26f, 0.15f, 1f),
+            interactable: true, PlayLocalMultiplayer);
+
+        // Online Multiplayer (disabled / darkened)
+        CreateModeCard(container.transform, "ONLINE\nMULTIPLAYER",
+            "Coming soon",
+            new Color(0.18f, 0.18f, 0.22f, 1f),
+            new Color(0.18f, 0.18f, 0.22f, 1f),
+            new Color(0.18f, 0.18f, 0.22f, 1f),
+            interactable: false, null);
+
+        _multiplayerPanel.SetActive(false);
+    }
+
+    private void CreateModeCard(Transform parent, string title, string subtitle,
+        Color baseColor, Color hoverColor, Color pressColor,
+        bool interactable, UnityEngine.Events.UnityAction onClick)
+    {
+        GameObject card = new GameObject(title.Replace("\n", "") + "Card");
+        card.transform.SetParent(parent, false);
+        RectTransform rect = card.AddComponent<RectTransform>();
+        rect.sizeDelta = new Vector2(380f, 300f);
+
+        LayoutElement le = card.AddComponent<LayoutElement>();
+        le.preferredWidth = 380f;
+        le.preferredHeight = 300f;
+
+        Image img = card.AddComponent<Image>();
+        img.color = baseColor;
+
+        Button btn = card.AddComponent<Button>();
+        btn.targetGraphic = img;
+        btn.interactable = interactable;
+        ColorBlock cb = btn.colors;
+        cb.normalColor = baseColor;
+        cb.highlightedColor = hoverColor;
+        cb.pressedColor = pressColor;
+        cb.selectedColor = hoverColor;
+        cb.disabledColor = new Color(baseColor.r * 0.6f, baseColor.g * 0.6f, baseColor.b * 0.6f, 0.7f);
+        btn.colors = cb;
+        if (interactable && onClick != null)
+            btn.onClick.AddListener(onClick);
+
+        VerticalLayoutGroup vg = card.AddComponent<VerticalLayoutGroup>();
+        vg.padding = new RectOffset(24, 24, 36, 36);
+        vg.spacing = 16f;
+        vg.childAlignment = TextAnchor.MiddleCenter;
+        vg.childControlWidth = true;
+        vg.childControlHeight = true;
+        vg.childForceExpandWidth = true;
+        vg.childForceExpandHeight = false;
+
+        // Title
+        GameObject titleObj = new GameObject("Title");
+        titleObj.transform.SetParent(card.transform, false);
+        titleObj.AddComponent<LayoutElement>().preferredHeight = 110f;
+        TextMeshProUGUI titleTmp = titleObj.AddComponent<TextMeshProUGUI>();
+        titleTmp.text = title;
+        titleTmp.font = TMP_Settings.defaultFontAsset;
+        titleTmp.fontSize = 34f;
+        titleTmp.fontStyle = FontStyles.Bold;
+        titleTmp.alignment = TextAlignmentOptions.Center;
+        titleTmp.color = interactable ? Color.white : new Color(0.5f, 0.5f, 0.55f, 0.8f);
+        titleTmp.enableWordWrapping = true;
+        titleTmp.raycastTarget = false;
+
+        // Subtitle
+        GameObject subObj = new GameObject("Subtitle");
+        subObj.transform.SetParent(card.transform, false);
+        subObj.AddComponent<LayoutElement>().preferredHeight = 60f;
+        TextMeshProUGUI subTmp = subObj.AddComponent<TextMeshProUGUI>();
+        subTmp.text = subtitle;
+        subTmp.font = TMP_Settings.defaultFontAsset;
+        subTmp.fontSize = 22f;
+        subTmp.alignment = TextAlignmentOptions.Center;
+        subTmp.color = interactable ? new Color(0.8f, 0.92f, 0.82f, 0.9f) : new Color(0.4f, 0.4f, 0.45f, 0.7f);
+        subTmp.enableWordWrapping = true;
+        subTmp.raycastTarget = false;
+    }
+
+    private void CreateMenuButton(string name, Transform parent, string label,
+        Vector2 anchoredPos, Vector2 size, Color color,
+        UnityEngine.Events.UnityAction onClick)
+    {
+        GameObject obj = new GameObject(name);
+        obj.transform.SetParent(parent, false);
+        RectTransform rect = obj.AddComponent<RectTransform>();
+        rect.anchorMin = new Vector2(0f, 1f);
+        rect.anchorMax = new Vector2(0f, 1f);
+        rect.pivot = new Vector2(0f, 1f);
+        rect.sizeDelta = size;
+        rect.anchoredPosition = anchoredPos;
+
+        Image img = obj.AddComponent<Image>();
+        img.color = color;
+
+        Button btn = obj.AddComponent<Button>();
+        btn.targetGraphic = img;
+        ColorBlock cb = btn.colors;
+        cb.normalColor = color;
+        cb.highlightedColor = color * 1.1f;
+        cb.pressedColor = color * 0.88f;
+        cb.selectedColor = color;
+        btn.colors = cb;
+        btn.onClick.AddListener(onClick);
+
+        GameObject labelObj = new GameObject("Label");
+        labelObj.transform.SetParent(obj.transform, false);
+        RectTransform lr = labelObj.AddComponent<RectTransform>();
+        lr.anchorMin = Vector2.zero;
+        lr.anchorMax = Vector2.one;
+        lr.offsetMin = Vector2.zero;
+        lr.offsetMax = Vector2.zero;
+        TextMeshProUGUI tmp = labelObj.AddComponent<TextMeshProUGUI>();
+        tmp.text = label;
+        tmp.font = TMP_Settings.defaultFontAsset;
+        tmp.fontSize = 22f;
+        tmp.fontStyle = FontStyles.Bold;
+        tmp.alignment = TextAlignmentOptions.Center;
+        tmp.color = Color.white;
+        tmp.raycastTarget = false;
     }
 
     [Serializable]
