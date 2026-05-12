@@ -73,6 +73,8 @@ public class AuthMenuController : MonoBehaviour
     private TextMeshProUGUI _hostAddressText;
     private Coroutine _lobbyPollRoutine;
     private bool _isHostSession;
+    private Button _lobbyPlayButton;
+    private TextMeshProUGUI _lobbyWaitingText;
     private GameObject _joinSessionPanel;
     private TMP_InputField _joinServerUrlInput;
     private bool _launchMultiplayer;
@@ -947,6 +949,10 @@ public class AuthMenuController : MonoBehaviour
         }
 
         SetOtherPlayerWaiting();
+
+        if (_lobbyPlayButton  != null) _lobbyPlayButton.gameObject.SetActive(_isHostSession);
+        if (_lobbyWaitingText != null) _lobbyWaitingText.gameObject.SetActive(!_isHostSession);
+
         ShowOnly(_onlineLobbyPanel);
 
         if (_lobbyPollRoutine != null) StopCoroutine(_lobbyPollRoutine);
@@ -969,16 +975,15 @@ public class AuthMenuController : MonoBehaviour
 
         while (true)
         {
-            yield return _apiClient.LobbyPing(weapon, armor, item,
-                onSuccess: players =>
+            bool shouldLaunch = false;
+            yield return _apiClient.LobbyPing(weapon, armor, item, 0f, 0f,
+                onSuccess: (players, started) =>
                 {
                     LobbyPlayerData other = null;
                     foreach (LobbyPlayerData p in players)
                     {
-                        if (p != null && p.username != AuthSession.Username)
-                        { other = p; break; }
+                        if (p != null && p.username != AuthSession.Username) { other = p; break; }
                     }
-
                     if (other != null)
                     {
                         if (_otherNameText   != null) _otherNameText.text   = other.username;
@@ -990,11 +995,29 @@ public class AuthMenuController : MonoBehaviour
                     {
                         SetOtherPlayerWaiting();
                     }
+                    // Guest auto-launches when host starts the game
+                    if (started && !_isHostSession) shouldLaunch = true;
                 },
                 onError: _ => { });
 
-            yield return new WaitForSeconds(8f);
+            if (shouldLaunch) { PlayOnlineGame(); yield break; }
+            yield return new WaitForSeconds(3f);
         }
+    }
+
+    private void PlayOnlineGame()
+    {
+        if (_lobbyPollRoutine != null) { StopCoroutine(_lobbyPollRoutine); _lobbyPollRoutine = null; }
+        StartCoroutine(_apiClient.LobbyLeave());
+        MultiplayerState.SetOnline(true);
+        _launchMultiplayer = false;
+        StartCoroutine(FetchLoadoutThenPlay());
+    }
+
+    private IEnumerator HostStartGame()
+    {
+        yield return _apiClient.LobbyStart(onSuccess: () => { }, onError: _ => { });
+        PlayOnlineGame();
     }
 
     public void BackFromLobby()
@@ -1312,7 +1335,7 @@ public class AuthMenuController : MonoBehaviour
         (_otherNameText, _otherWeaponText, _otherArmorText, _otherItemText) =
             BuildPlayerCard(row.transform, "OTHER PLAYER", new Color(0.12f, 0.20f, 0.36f, 1f));
 
-        // Play button
+        // Play button (host only)
         GameObject playBtnObj = new GameObject("PlayButton");
         playBtnObj.transform.SetParent(_onlineLobbyPanel.transform, false);
         RectTransform playRect = playBtnObj.AddComponent<RectTransform>();
@@ -1322,14 +1345,14 @@ public class AuthMenuController : MonoBehaviour
         playRect.anchoredPosition = new Vector2(0f, 60f);
         Image playBtnImg = playBtnObj.AddComponent<Image>();
         playBtnImg.color = new Color(0.15f, 0.42f, 0.25f, 1f);
-        Button playBtn = playBtnObj.AddComponent<Button>();
-        playBtn.targetGraphic = playBtnImg;
-        ColorBlock cb = playBtn.colors;
+        _lobbyPlayButton = playBtnObj.AddComponent<Button>();
+        _lobbyPlayButton.targetGraphic = playBtnImg;
+        ColorBlock cb = _lobbyPlayButton.colors;
         cb.normalColor = new Color(0.15f, 0.42f, 0.25f, 1f);
         cb.highlightedColor = new Color(0.20f, 0.52f, 0.32f, 1f);
         cb.pressedColor = new Color(0.10f, 0.30f, 0.18f, 1f);
-        playBtn.colors = cb;
-        playBtn.onClick.AddListener(() => { if (_lobbyPollRoutine != null) { StopCoroutine(_lobbyPollRoutine); _lobbyPollRoutine = null; } PlayGame(); });
+        _lobbyPlayButton.colors = cb;
+        _lobbyPlayButton.onClick.AddListener(() => StartCoroutine(HostStartGame()));
 
         GameObject playLabel = new GameObject("Label");
         playLabel.transform.SetParent(playBtnObj.transform, false);
@@ -1337,10 +1360,26 @@ public class AuthMenuController : MonoBehaviour
         plr.anchorMin = Vector2.zero; plr.anchorMax = Vector2.one;
         plr.offsetMin = Vector2.zero; plr.offsetMax = Vector2.zero;
         TextMeshProUGUI playTmp = playLabel.AddComponent<TextMeshProUGUI>();
-        playTmp.text = "Play"; playTmp.font = TMP_Settings.defaultFontAsset;
+        playTmp.text = "Start Game"; playTmp.font = TMP_Settings.defaultFontAsset;
         playTmp.fontSize = 26f; playTmp.fontStyle = FontStyles.Bold;
         playTmp.alignment = TextAlignmentOptions.Center; playTmp.color = Color.white;
         playTmp.raycastTarget = false;
+
+        // Waiting label (guest only)
+        GameObject waitObj = new GameObject("WaitingText");
+        waitObj.transform.SetParent(_onlineLobbyPanel.transform, false);
+        RectTransform waitRect = waitObj.AddComponent<RectTransform>();
+        waitRect.anchorMin = new Vector2(0.5f, 0f); waitRect.anchorMax = new Vector2(0.5f, 0f);
+        waitRect.pivot = new Vector2(0.5f, 0f);
+        waitRect.sizeDelta = new Vector2(500f, 50f);
+        waitRect.anchoredPosition = new Vector2(0f, 68f);
+        _lobbyWaitingText = waitObj.AddComponent<TextMeshProUGUI>();
+        _lobbyWaitingText.text = "Waiting for host to start...";
+        _lobbyWaitingText.font = TMP_Settings.defaultFontAsset;
+        _lobbyWaitingText.fontSize = 22f;
+        _lobbyWaitingText.alignment = TextAlignmentOptions.Center;
+        _lobbyWaitingText.color = new Color(0.75f, 0.85f, 1f, 0.85f);
+        _lobbyWaitingText.raycastTarget = false;
 
         _onlineLobbyPanel.SetActive(false);
     }

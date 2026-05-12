@@ -28,22 +28,39 @@ public class PlayerPointer : MonoBehaviour
     {
         if (_pivot == null) return;
 
-        if (!MultiplayerState.IsMultiplayer)
+        bool isOnline = MultiplayerState.IsOnline;
+
+        if (!MultiplayerState.IsMultiplayer && !isOnline)
         {
             _pivot.gameObject.SetActive(false);
             return;
         }
 
-        Transform other = MultiplayerState.GetOtherPlayer(transform);
-        if (other == null)
+        Vector2 otherPos;
+
+        if (isOnline)
         {
-            _pivot.gameObject.SetActive(false);
-            return;
+            if (OnlinePlayerSync.Instance == null || !OnlinePlayerSync.Instance.HasRemotePlayer)
+            {
+                _pivot.gameObject.SetActive(false);
+                return;
+            }
+            otherPos = OnlinePlayerSync.Instance.RemotePlayerPosition;
+        }
+        else
+        {
+            Transform other = MultiplayerState.GetOtherPlayer(transform);
+            if (other == null)
+            {
+                _pivot.gameObject.SetActive(false);
+                return;
+            }
+            otherPos = other.position;
         }
 
         _pivot.gameObject.SetActive(true);
 
-        Vector2 dir = ((Vector2)other.position - (Vector2)transform.position).normalized;
+        Vector2 dir = (otherPos - (Vector2)transform.position).normalized;
         float angle = Mathf.Atan2(dir.x, dir.y) * Mathf.Rad2Deg;
         _pivot.localRotation = Quaternion.Euler(0f, 0f, -angle);
     }

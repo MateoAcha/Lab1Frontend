@@ -32,12 +32,19 @@ public class GameBootstrap : MonoBehaviour
     private void Start()
     {
         bool isMultiplayer = MultiplayerState.IsMultiplayer;
+        bool isOnline      = MultiplayerState.IsOnline;
         MultiplayerState.Reset();
         MultiplayerState.SetMultiplayer(isMultiplayer);
+        if (isOnline) MultiplayerState.SetOnline(true);
         SetupCamera();
         SetupPlayer(0, new Vector3(-1f, 0f, 0f));
         if (MultiplayerState.IsMultiplayer)
             SetupPlayer(1, new Vector3(1f, 0f, 0f));
+        if (isOnline && OnlinePlayerSync.Instance == null)
+        {
+            GameObject syncObj = new GameObject("OnlinePlayerSync");
+            syncObj.AddComponent<OnlinePlayerSync>();
+        }
         SetupRocks();
         SetupSpawner();
         SetupGameOverScreen();

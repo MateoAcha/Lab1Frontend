@@ -416,14 +416,31 @@ public class AuthApiClient
         return sb.ToString();
     }
 
-    public IEnumerator LobbyPing(string weapon, string armor, string item,
-        Action<LobbyPlayerData[]> onSuccess, Action<string> onError)
+    public IEnumerator LobbyStart(Action onSuccess, Action<string> onError)
+    {
+        var request = new UnityWebRequest(_baseUrl + "/lobby/start", "POST");
+        request.uploadHandler   = new UploadHandlerRaw(new byte[0]);
+        request.downloadHandler = new DownloadHandlerBuffer();
+        request.SetRequestHeader("Content-Type", "application/json");
+        if (!string.IsNullOrWhiteSpace(AuthSession.AccessToken))
+            request.SetRequestHeader("Authorization", $"Bearer {AuthSession.AccessToken}");
+        yield return request.SendWebRequest();
+        if (request.result == UnityWebRequest.Result.Success
+            && request.responseCode >= 200 && request.responseCode < 300)
+            onSuccess?.Invoke();
+        else
+            onError?.Invoke(FormatError(request));
+    }
+
+    public IEnumerator LobbyPing(string weapon, string armor, string item, float x, float y,
+        Action<LobbyPlayerData[], bool> onSuccess, Action<string> onError)
     {
         string json = JsonUtility.ToJson(new LobbyPingRequest
         {
             weapon = weapon ?? "",
             armor  = armor  ?? "",
-            item   = item   ?? ""
+            item   = item   ?? "",
+            x = x, y = y
         });
         var request = new UnityWebRequest(_baseUrl + "/lobby/ping", "POST");
         request.uploadHandler   = new UploadHandlerRaw(Encoding.UTF8.GetBytes(json));
@@ -445,7 +462,7 @@ public class AuthApiClient
         try { wrapper = JsonUtility.FromJson<LobbyResponseWrapper>(request.downloadHandler.text); }
         catch { onError?.Invoke("Unexpected lobby response."); yield break; }
 
-        onSuccess?.Invoke(wrapper?.players ?? new LobbyPlayerData[0]);
+        onSuccess?.Invoke(wrapper?.players ?? new LobbyPlayerData[0], wrapper?.started ?? false);
     }
 
     public IEnumerator LobbyLeave()
@@ -491,12 +508,15 @@ public class AuthApiClient
         public string weapon;
         public string armor;
         public string item;
+        public float x;
+        public float y;
     }
 
     [Serializable]
     private class LobbyResponseWrapper
     {
         public LobbyPlayerData[] players;
+        public bool started;
     }
 }
 
@@ -507,4 +527,6 @@ public class LobbyPlayerData
     public string weapon;
     public string armor;
     public string item;
+    public float x;
+    public float y;
 }
