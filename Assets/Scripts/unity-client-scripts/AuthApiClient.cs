@@ -416,6 +416,48 @@ public class AuthApiClient
         return sb.ToString();
     }
 
+    public IEnumerator LobbyPing(string weapon, string armor, string item,
+        Action<LobbyPlayerData[]> onSuccess, Action<string> onError)
+    {
+        string json = JsonUtility.ToJson(new LobbyPingRequest
+        {
+            weapon = weapon ?? "",
+            armor  = armor  ?? "",
+            item   = item   ?? ""
+        });
+        var request = new UnityWebRequest(_baseUrl + "/lobby/ping", "POST");
+        request.uploadHandler   = new UploadHandlerRaw(Encoding.UTF8.GetBytes(json));
+        request.downloadHandler = new DownloadHandlerBuffer();
+        request.SetRequestHeader("Content-Type", "application/json");
+        if (!string.IsNullOrWhiteSpace(AuthSession.AccessToken))
+            request.SetRequestHeader("Authorization", $"Bearer {AuthSession.AccessToken}");
+
+        yield return request.SendWebRequest();
+
+        if (request.result != UnityWebRequest.Result.Success
+            || request.responseCode < 200 || request.responseCode >= 300)
+        {
+            onError?.Invoke(FormatError(request));
+            yield break;
+        }
+
+        LobbyResponseWrapper wrapper;
+        try { wrapper = JsonUtility.FromJson<LobbyResponseWrapper>(request.downloadHandler.text); }
+        catch { onError?.Invoke("Unexpected lobby response."); yield break; }
+
+        onSuccess?.Invoke(wrapper?.players ?? new LobbyPlayerData[0]);
+    }
+
+    public IEnumerator LobbyLeave()
+    {
+        var request = new UnityWebRequest(_baseUrl + "/lobby/leave", "DELETE");
+        request.uploadHandler   = new UploadHandlerRaw(new byte[0]);
+        request.downloadHandler = new DownloadHandlerBuffer();
+        if (!string.IsNullOrWhiteSpace(AuthSession.AccessToken))
+            request.SetRequestHeader("Authorization", $"Bearer {AuthSession.AccessToken}");
+        yield return request.SendWebRequest();
+    }
+
     [Serializable]
     private class AddCoinsRequest
     {
@@ -443,4 +485,26 @@ public class AuthApiClient
         public string password;
     }
 
+    [Serializable]
+    private class LobbyPingRequest
+    {
+        public string weapon;
+        public string armor;
+        public string item;
+    }
+
+    [Serializable]
+    private class LobbyResponseWrapper
+    {
+        public LobbyPlayerData[] players;
+    }
+}
+
+[Serializable]
+public class LobbyPlayerData
+{
+    public string username;
+    public string weapon;
+    public string armor;
+    public string item;
 }

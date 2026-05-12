@@ -59,7 +59,20 @@ public class AuthMenuController : MonoBehaviour
     private Image _shopButtonImage;
     private TextMeshProUGUI _shopButtonText;
     private GameObject _multiplayerPanel;
+    private GameObject _onlineLobbyPanel;
+    private TextMeshProUGUI _myNameText;
+    private TextMeshProUGUI _myWeaponText;
+    private TextMeshProUGUI _myArmorText;
+    private TextMeshProUGUI _myItemText;
+    private TextMeshProUGUI _otherNameText;
+    private TextMeshProUGUI _otherWeaponText;
+    private TextMeshProUGUI _otherArmorText;
+    private TextMeshProUGUI _otherItemText;
+    private Coroutine _lobbyPollRoutine;
     private bool _launchMultiplayer;
+
+    private enum LoginReturn { MainMenu, OnlineLobby }
+    private LoginReturn _loginReturn = LoginReturn.MainMenu;
 
     private void OnApplicationQuit()
     {
@@ -176,6 +189,7 @@ public class AuthMenuController : MonoBehaviour
             return;
         }
 
+        _loginReturn = LoginReturn.MainMenu;
         Debug.Log("[AuthUI] Open Login panel");
         ShowOnly(loginPanel);
         AutoFocusNextFrame(loginUsernameInput);
@@ -284,6 +298,26 @@ public class AuthMenuController : MonoBehaviour
     {
         EnsureMultiplayerPanel();
         ShowOnly(_multiplayerPanel);
+    }
+
+    public void OpenOnlineMultiplayer()
+    {
+        _apiClient = new AuthApiClient(apiBaseUrl);
+        GameStatsTracker.SetApiBaseUrl(apiBaseUrl);
+
+        if (_inventoryPanelController != null)
+            _inventoryPanelController.Initialize(_apiClient, BackToProfile);
+        if (_shopPanelController != null)
+            _shopPanelController.Initialize(_apiClient, BackToProfile);
+
+        Debug.Log($"[AuthUI] Online — connecting to shared server: {apiBaseUrl}");
+
+        AuthSession.Logout();
+        RefreshSessionUI();
+
+        _loginReturn = LoginReturn.OnlineLobby;
+        ShowOnly(loginPanel);
+        AutoFocusNextFrame(loginUsernameInput);
     }
 
     public void PlayGame()
@@ -600,6 +634,7 @@ public class AuthMenuController : MonoBehaviour
         if (_inventoryPanel != null) _inventoryPanel.SetActive(activePanel == _inventoryPanel);
         if (_shopPanel != null) _shopPanel.SetActive(activePanel == _shopPanel);
         if (_multiplayerPanel != null) _multiplayerPanel.SetActive(activePanel == _multiplayerPanel);
+        if (_onlineLobbyPanel != null) _onlineLobbyPanel.SetActive(activePanel == _onlineLobbyPanel);
     }
 
     private void RefreshSessionUI()
@@ -823,23 +858,96 @@ public class AuthMenuController : MonoBehaviour
         RefreshSessionUI();
         Debug.Log($"[AuthUI] {source}. Logged as '{AuthSession.Username}' (id={AuthSession.UserId})");
 
+        bool goToLobby = _loginReturn == LoginReturn.OnlineLobby;
+        _loginReturn = LoginReturn.MainMenu;
+
         StartCoroutine(_apiClient.GetUserById(AuthSession.UserId,
             onSuccess: profile =>
             {
                 AuthSession.UpdateProfile(profile);
                 RefreshSessionUI();
-                ShowOnly(mainMenuPanel);
                 Debug.Log($"[AuthUI] Profile refreshed for '{AuthSession.Username}'.");
                 StartCoroutine(RunAuthProofChecks());
                 StartCoroutine(FetchLoadoutSilently(AuthSession.UserId));
+                if (goToLobby) ShowOnlineLobby();
+                else ShowOnly(mainMenuPanel);
             },
             onError: profileError =>
             {
                 Debug.LogWarning($"[AuthUI] Logged in, but profile refresh failed: {profileError}");
-                ShowOnly(mainMenuPanel);
                 StartCoroutine(RunAuthProofChecks());
                 StartCoroutine(FetchLoadoutSilently(AuthSession.UserId));
+                if (goToLobby) ShowOnlineLobby();
+                else ShowOnly(mainMenuPanel);
             }));
+    }
+
+    private void ShowOnlineLobby()
+    {
+        EnsureOnlineLobbyPanel();
+
+        // Fill your own side immediately from local data
+        if (_myNameText   != null) _myNameText.text   = AuthSession.Username;
+        if (_myWeaponText != null) _myWeaponText.text  = "Weapon: " + (PlayerLoadout.EquippedWeapon     != null ? PlayerLoadout.EquippedWeapon.itemName     : "None");
+        if (_myArmorText  != null) _myArmorText.text   = "Armor: "  + (PlayerLoadout.EquippedArmor      != null ? PlayerLoadout.EquippedArmor.itemName      : "None");
+        if (_myItemText   != null) _myItemText.text    = "Item: "   + (PlayerLoadout.EquippedConsumable != null ? PlayerLoadout.EquippedConsumable.itemName : "None");
+
+        SetOtherPlayerWaiting();
+        ShowOnly(_onlineLobbyPanel);
+
+        if (_lobbyPollRoutine != null) StopCoroutine(_lobbyPollRoutine);
+        _lobbyPollRoutine = StartCoroutine(LobbyPollLoop());
+    }
+
+    private void SetOtherPlayerWaiting()
+    {
+        if (_otherNameText   != null) _otherNameText.text   = "Waiting...";
+        if (_otherWeaponText != null) _otherWeaponText.text = "-";
+        if (_otherArmorText  != null) _otherArmorText.text  = "-";
+        if (_otherItemText   != null) _otherItemText.text   = "-";
+    }
+
+    private IEnumerator LobbyPollLoop()
+    {
+        string weapon = PlayerLoadout.EquippedWeapon     != null ? PlayerLoadout.EquippedWeapon.itemName     : "";
+        string armor  = PlayerLoadout.EquippedArmor      != null ? PlayerLoadout.EquippedArmor.itemName      : "";
+        string item   = PlayerLoadout.EquippedConsumable != null ? PlayerLoadout.EquippedConsumable.itemName : "";
+
+        while (true)
+        {
+            yield return _apiClient.LobbyPing(weapon, armor, item,
+                onSuccess: players =>
+                {
+                    LobbyPlayerData other = null;
+                    foreach (LobbyPlayerData p in players)
+                    {
+                        if (p != null && p.username != AuthSession.Username)
+                        { other = p; break; }
+                    }
+
+                    if (other != null)
+                    {
+                        if (_otherNameText   != null) _otherNameText.text   = other.username;
+                        if (_otherWeaponText != null) _otherWeaponText.text = "Weapon: " + (string.IsNullOrWhiteSpace(other.weapon) ? "None" : other.weapon);
+                        if (_otherArmorText  != null) _otherArmorText.text  = "Armor: "  + (string.IsNullOrWhiteSpace(other.armor)  ? "None" : other.armor);
+                        if (_otherItemText   != null) _otherItemText.text   = "Item: "   + (string.IsNullOrWhiteSpace(other.item)   ? "None" : other.item);
+                    }
+                    else
+                    {
+                        SetOtherPlayerWaiting();
+                    }
+                },
+                onError: _ => { });
+
+            yield return new WaitForSeconds(8f);
+        }
+    }
+
+    public void BackFromLobby()
+    {
+        if (_lobbyPollRoutine != null) { StopCoroutine(_lobbyPollRoutine); _lobbyPollRoutine = null; }
+        StartCoroutine(_apiClient.LobbyLeave());
+        OpenMultiplayer();
     }
 
     private IEnumerator RunAuthProofChecks()
@@ -961,6 +1069,140 @@ public class AuthMenuController : MonoBehaviour
         Debug.Log($"[AuthUI] {message.Replace('\n', ' ')}");
     }
 
+    private void EnsureOnlineLobbyPanel()
+    {
+        if (_onlineLobbyPanel != null) return;
+
+        Transform panelParent = mainMenuPanel != null ? mainMenuPanel.transform.parent : transform;
+
+        _onlineLobbyPanel = new GameObject("OnlineLobbyPanel");
+        _onlineLobbyPanel.transform.SetParent(panelParent, false);
+        RectTransform bg = _onlineLobbyPanel.AddComponent<RectTransform>();
+        bg.anchorMin = Vector2.zero; bg.anchorMax = Vector2.one;
+        bg.offsetMin = Vector2.zero; bg.offsetMax = Vector2.zero;
+        _onlineLobbyPanel.AddComponent<Image>().color = new Color(0.06f, 0.08f, 0.12f, 0.97f);
+
+        // Back button
+        CreateMenuButton("BackBtn", _onlineLobbyPanel.transform,
+            "Back", new Vector2(110f, -40f), new Vector2(160f, 50f),
+            new Color(0.18f, 0.22f, 0.3f, 1f), BackFromLobby);
+
+        // Title
+        GameObject titleObj = new GameObject("Title");
+        titleObj.transform.SetParent(_onlineLobbyPanel.transform, false);
+        RectTransform titleRect = titleObj.AddComponent<RectTransform>();
+        titleRect.anchorMin = new Vector2(0.5f, 1f); titleRect.anchorMax = new Vector2(0.5f, 1f);
+        titleRect.pivot = new Vector2(0.5f, 1f);
+        titleRect.sizeDelta = new Vector2(700f, 70f);
+        titleRect.anchoredPosition = new Vector2(0f, -50f);
+        TextMeshProUGUI titleTmp = titleObj.AddComponent<TextMeshProUGUI>();
+        titleTmp.text = "Online Lobby"; titleTmp.font = TMP_Settings.defaultFontAsset;
+        titleTmp.fontSize = 44f; titleTmp.fontStyle = FontStyles.Bold;
+        titleTmp.alignment = TextAlignmentOptions.Center; titleTmp.color = Color.white;
+
+        // Two-player card row
+        GameObject row = new GameObject("PlayerRow");
+        row.transform.SetParent(_onlineLobbyPanel.transform, false);
+        RectTransform rowRect = row.AddComponent<RectTransform>();
+        rowRect.anchorMin = new Vector2(0.5f, 0.5f); rowRect.anchorMax = new Vector2(0.5f, 0.5f);
+        rowRect.pivot = new Vector2(0.5f, 0.5f);
+        rowRect.sizeDelta = new Vector2(900f, 340f);
+        rowRect.anchoredPosition = new Vector2(0f, 30f);
+        HorizontalLayoutGroup hlg = row.AddComponent<HorizontalLayoutGroup>();
+        hlg.spacing = 30f; hlg.childAlignment = TextAnchor.MiddleCenter;
+        hlg.childControlWidth = false; hlg.childControlHeight = false;
+        hlg.childForceExpandWidth = false; hlg.childForceExpandHeight = false;
+
+        // Build left (you) and right (other) cards
+        (_myNameText, _myWeaponText, _myArmorText, _myItemText) =
+            BuildPlayerCard(row.transform, "YOU", new Color(0.10f, 0.28f, 0.18f, 1f));
+        (_otherNameText, _otherWeaponText, _otherArmorText, _otherItemText) =
+            BuildPlayerCard(row.transform, "OTHER PLAYER", new Color(0.12f, 0.20f, 0.36f, 1f));
+
+        // Play button
+        GameObject playBtnObj = new GameObject("PlayButton");
+        playBtnObj.transform.SetParent(_onlineLobbyPanel.transform, false);
+        RectTransform playRect = playBtnObj.AddComponent<RectTransform>();
+        playRect.anchorMin = new Vector2(0.5f, 0f); playRect.anchorMax = new Vector2(0.5f, 0f);
+        playRect.pivot = new Vector2(0.5f, 0f);
+        playRect.sizeDelta = new Vector2(300f, 60f);
+        playRect.anchoredPosition = new Vector2(0f, 60f);
+        Image playBtnImg = playBtnObj.AddComponent<Image>();
+        playBtnImg.color = new Color(0.15f, 0.42f, 0.25f, 1f);
+        Button playBtn = playBtnObj.AddComponent<Button>();
+        playBtn.targetGraphic = playBtnImg;
+        ColorBlock cb = playBtn.colors;
+        cb.normalColor = new Color(0.15f, 0.42f, 0.25f, 1f);
+        cb.highlightedColor = new Color(0.20f, 0.52f, 0.32f, 1f);
+        cb.pressedColor = new Color(0.10f, 0.30f, 0.18f, 1f);
+        playBtn.colors = cb;
+        playBtn.onClick.AddListener(() => { if (_lobbyPollRoutine != null) { StopCoroutine(_lobbyPollRoutine); _lobbyPollRoutine = null; } PlayGame(); });
+
+        GameObject playLabel = new GameObject("Label");
+        playLabel.transform.SetParent(playBtnObj.transform, false);
+        RectTransform plr = playLabel.AddComponent<RectTransform>();
+        plr.anchorMin = Vector2.zero; plr.anchorMax = Vector2.one;
+        plr.offsetMin = Vector2.zero; plr.offsetMax = Vector2.zero;
+        TextMeshProUGUI playTmp = playLabel.AddComponent<TextMeshProUGUI>();
+        playTmp.text = "Play"; playTmp.font = TMP_Settings.defaultFontAsset;
+        playTmp.fontSize = 26f; playTmp.fontStyle = FontStyles.Bold;
+        playTmp.alignment = TextAlignmentOptions.Center; playTmp.color = Color.white;
+        playTmp.raycastTarget = false;
+
+        _onlineLobbyPanel.SetActive(false);
+    }
+
+    private (TextMeshProUGUI name, TextMeshProUGUI weapon, TextMeshProUGUI armor, TextMeshProUGUI item)
+        BuildPlayerCard(Transform parent, string header, Color cardColor)
+    {
+        GameObject card = new GameObject(header + "Card");
+        card.transform.SetParent(parent, false);
+        RectTransform cr = card.AddComponent<RectTransform>();
+        cr.sizeDelta = new Vector2(420f, 320f);
+        card.AddComponent<LayoutElement>().preferredWidth = 420f;
+        card.AddComponent<Image>().color = cardColor;
+
+        VerticalLayoutGroup vg = card.AddComponent<VerticalLayoutGroup>();
+        vg.padding = new RectOffset(28, 28, 24, 24);
+        vg.spacing = 14f;
+        vg.childAlignment = TextAnchor.UpperCenter;
+        vg.childControlWidth = true; vg.childControlHeight = true;
+        vg.childForceExpandWidth = true; vg.childForceExpandHeight = false;
+
+        TextMeshProUGUI MakeLine(string label, float size = 22f, bool bold = false)
+        {
+            GameObject obj = new GameObject(label);
+            obj.transform.SetParent(card.transform, false);
+            obj.AddComponent<LayoutElement>().preferredHeight = size + 10f;
+            TextMeshProUGUI tmp = obj.AddComponent<TextMeshProUGUI>();
+            tmp.font = TMP_Settings.defaultFontAsset;
+            tmp.fontSize = size;
+            tmp.fontStyle = bold ? FontStyles.Bold : FontStyles.Normal;
+            tmp.color = Color.white;
+            tmp.alignment = TextAlignmentOptions.Center;
+            tmp.enableWordWrapping = true;
+            tmp.raycastTarget = false;
+            return tmp;
+        }
+
+        // Header label (not a data field)
+        TextMeshProUGUI hdr = MakeLine(header, 18f);
+        hdr.text = header;
+        hdr.color = new Color(0.8f, 0.9f, 1f, 0.7f);
+
+        TextMeshProUGUI nameText   = MakeLine("Name",   28f, true);
+        TextMeshProUGUI weaponText = MakeLine("Weapon", 20f);
+        TextMeshProUGUI armorText  = MakeLine("Armor",  20f);
+        TextMeshProUGUI itemText   = MakeLine("Item",   20f);
+
+        // Prefix each line with a label
+        weaponText.text = "Weapon: -";
+        armorText.text  = "Armor: -";
+        itemText.text   = "Item: -";
+
+        return (nameText, weaponText, armorText, itemText);
+    }
+
     private void EnsureMultiplayerPanel()
     {
         if (_multiplayerPanel != null) return;
@@ -1024,13 +1266,13 @@ public class AuthMenuController : MonoBehaviour
             new Color(0.08f, 0.26f, 0.15f, 1f),
             interactable: true, PlayLocalMultiplayer);
 
-        // Online Multiplayer (disabled / darkened)
+        // Online Multiplayer (LAN — connect to host's server)
         CreateModeCard(container.transform, "ONLINE\nMULTIPLAYER",
-            "Coming soon",
-            new Color(0.18f, 0.18f, 0.22f, 1f),
-            new Color(0.18f, 0.18f, 0.22f, 1f),
-            new Color(0.18f, 0.18f, 0.22f, 1f),
-            interactable: false, null);
+            "Connect to a\nfriend's server",
+            new Color(0.14f, 0.22f, 0.42f, 1f),
+            new Color(0.18f, 0.28f, 0.54f, 1f),
+            new Color(0.10f, 0.15f, 0.30f, 1f),
+            interactable: true, OpenOnlineMultiplayer);
 
         _multiplayerPanel.SetActive(false);
     }
