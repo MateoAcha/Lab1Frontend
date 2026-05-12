@@ -80,6 +80,21 @@ public class GameStateHost : MonoBehaviour
     {
         var p = new GameStatePayload();
 
+        // Include all placed rocks so the guest can mirror the layout.
+        GameObject rocksRoot = GameObject.Find("RuntimeRocks");
+        if (rocksRoot != null)
+        {
+            foreach (Transform t in rocksRoot.transform)
+            {
+                p.rocks.Add(new RockData
+                {
+                    x    = t.position.x,
+                    y    = t.position.y,
+                    size = t.localScale.x
+                });
+            }
+        }
+
         foreach (EnemyController e in FindObjectsOfType<EnemyController>())
         {
             Health h = e.GetComponent<Health>();
@@ -135,6 +150,7 @@ public class GameStateHost : MonoBehaviour
     {
         public List<EnemyData>      enemies     = new List<EnemyData>();
         public List<ProjectileData> projectiles = new List<ProjectileData>();
+        public List<RockData>       rocks       = new List<RockData>();
     }
 
     [Serializable]
@@ -150,4 +166,7 @@ public class GameStateHost : MonoBehaviour
         public int   id;
         public float x, y, vx, vy, life;
     }
+
+    [Serializable]
+    private class RockData { public float x, y, size; }
 }

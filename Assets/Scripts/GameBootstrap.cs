@@ -58,7 +58,8 @@ public class GameBootstrap : MonoBehaviour
                 new GameObject("GameStateGuest").AddComponent<GameStateGuest>();
             }
         }
-        SetupRocks();
+        // Guest skips local rock generation — GameStateGuest places them from host data.
+        if (!isOnline || isHost) SetupRocks();
         SetupSpawner();
         SetupGameOverScreen();
         SetupPauseMenu();
@@ -311,7 +312,7 @@ public class GameBootstrap : MonoBehaviour
         return Mathf.Max(0.2f, baseSize * scale);
     }
 
-    private void CreateRock(Transform parent, Vector2 position, float size, string baseName)
+    public void CreateRock(Transform parent, Vector2 position, float size, string baseName)
     {
         size = Mathf.Max(0.2f, size);
 
@@ -346,7 +347,7 @@ public class GameBootstrap : MonoBehaviour
         }
     }
 
-    private Sprite ResolveRockSprite()
+    public Sprite ResolveRockSprite()
     {
         if (rockSprite != null)
         {

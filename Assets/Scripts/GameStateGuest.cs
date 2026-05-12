@@ -16,9 +16,11 @@ public class GameStateGuest : MonoBehaviour
     private readonly Dictionary<int, GhostEnemy>      _ghostEnemies     = new Dictionary<int, GhostEnemy>();
     private readonly Dictionary<int, GhostProjectile> _ghostProjectiles = new Dictionary<int, GhostProjectile>();
 
-    private Material _meleeMat;
-    private Material _rangedMat;
-    private Material _projMat;
+    private Material      _meleeMat;
+    private Material      _rangedMat;
+    private Material      _projMat;
+    private GameBootstrap _bootstrap;
+    private bool          _rocksPlaced;
 
     private void Start()
     {
@@ -30,12 +32,12 @@ public class GameStateGuest : MonoBehaviour
         GameStatsTracker.StartMatch();
 
         // Grab materials from the bootstrap so ghost visuals match host visuals.
-        GameBootstrap bootstrap = FindObjectOfType<GameBootstrap>();
-        if (bootstrap != null)
+        _bootstrap = FindObjectOfType<GameBootstrap>();
+        if (_bootstrap != null)
         {
-            _meleeMat  = bootstrap.meleeEnemyMaterial;
-            _rangedMat = bootstrap.rangedEnemyMaterial;
-            _projMat   = bootstrap.enemyProjectileMaterial;
+            _meleeMat  = _bootstrap.meleeEnemyMaterial;
+            _rangedMat = _bootstrap.rangedEnemyMaterial;
+            _projMat   = _bootstrap.enemyProjectileMaterial;
         }
 
         StartCoroutine(PollLoop());
@@ -90,6 +92,9 @@ public class GameStateGuest : MonoBehaviour
         try { state = JsonUtility.FromJson<GameStatePayload>(req.downloadHandler.text); }
         catch { yield break; }
         if (state == null) yield break;
+
+        if (!_rocksPlaced && state.rocks != null && state.rocks.Length > 0)
+            PlaceRocks(state.rocks);
 
         ApplyEnemyState(state.enemies);
         ApplyProjectileState(state.projectiles);
@@ -165,6 +170,24 @@ public class GameStateGuest : MonoBehaviour
             if (!activeIds.Contains(kv.Key) && kv.Value != null)
                 Destroy(kv.Value.gameObject);
         }
+    }
+
+    // ── Rock placement ────────────────────────────────────────────────────────
+
+    private void PlaceRocks(RockData[] rocks)
+    {
+        if (_bootstrap == null) return;
+
+        const string rootName = "RuntimeRocks";
+        GameObject rocksRoot = GameObject.Find(rootName) ?? new GameObject(rootName);
+
+        // If rocks are already present (e.g., second call), skip.
+        if (rocksRoot.transform.childCount > 0) { _rocksPlaced = true; return; }
+
+        foreach (RockData r in rocks)
+            _bootstrap.CreateRock(rocksRoot.transform, new Vector2(r.x, r.y), r.size, "Rock");
+
+        _rocksPlaced = true;
     }
 
     // ── Ghost spawning ────────────────────────────────────────────────────────
@@ -245,6 +268,7 @@ public class GameStateGuest : MonoBehaviour
     {
         public EnemyData[]      enemies;
         public ProjectileData[] projectiles;
+        public RockData[]       rocks;
     }
 
     [Serializable]
@@ -260,4 +284,7 @@ public class GameStateGuest : MonoBehaviour
         public int   id;
         public float x, y, vx, vy, life;
     }
+
+    [Serializable]
+    private class RockData { public float x, y, size; }
 }

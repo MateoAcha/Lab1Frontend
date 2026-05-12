@@ -50,6 +50,19 @@ public static class MultiplayerState
             }
         }
 
+        // In online mode, also consider the remote player's ghost position
+        // so host-side enemies chase whichever player (local or remote) is closest.
+        if (IsOnline && RemotePlayerGhost.Instance != null
+            && OnlinePlayerSync.Instance != null && OnlinePlayerSync.Instance.HasRemotePlayer)
+        {
+            float sqDist = (RemotePlayerGhost.Instance.transform.position - position).sqrMagnitude;
+            if (sqDist < nearestSqDist)
+            {
+                nearestSqDist = sqDist;
+                nearest = RemotePlayerGhost.Instance.transform;
+            }
+        }
+
         if (nearest == null && PlayerController.main != null)
             nearest = PlayerController.main.transform;
 
