@@ -10,6 +10,14 @@ public class OnlinePlayerSync : MonoBehaviour
     public Vector3 RemotePlayerPosition { get; private set; }
     public bool HasRemotePlayer { get; private set; }
 
+    // Called by GameStateHost/GameStateGuest to push the other player's position
+    // at WebSocket speed (replaces the lobby ping value during gameplay).
+    public void SetRemotePosition(Vector3 pos)
+    {
+        RemotePlayerPosition = pos;
+        HasRemotePlayer = true;
+    }
+
     private void Awake()
     {
         if (Instance != null && Instance != this) { Destroy(gameObject); return; }

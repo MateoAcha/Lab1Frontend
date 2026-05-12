@@ -1,172 +1,192 @@
 using System;
 using System.Collections;
-using System.Collections.Generic;
 using System.Text;
+using System.Threading.Tasks;
 using UnityEngine;
-using UnityEngine.Networking;
 
 public class GameStateHost : MonoBehaviour
 {
-    private const float SyncInterval = 0.15f;
+    private const float SyncInterval = 0.05f; // 20 updates/sec
+
+    private GameWebSocketClient _ws;
 
     private void Start()
     {
+        StartCoroutine(ConnectThenSync());
+    }
+
+    private IEnumerator ConnectThenSync()
+    {
+        string wsUrl = BuildWsUrl();
+        _ws = new GameWebSocketClient();
+
+        Task connectTask = _ws.ConnectAsync(wsUrl);
+        yield return new WaitUntil(() => connectTask.IsCompleted);
+
+        if (connectTask.IsFaulted || !_ws.IsConnected)
+        {
+            Debug.LogWarning("GameStateHost: WebSocket connect failed – " + connectTask.Exception?.GetBaseException()?.Message);
+            yield break;
+        }
+
+        yield return Send("{\"type\":\"register\",\"role\":\"host\"}");
         StartCoroutine(SyncLoop());
     }
 
     private IEnumerator SyncLoop()
     {
-        while (true)
+        while (_ws.IsConnected)
         {
-            yield return FetchAndApplyKills();
-            yield return BroadcastState();
+            // Handle messages from guest (position updates, kills)
+            string msg;
+            while (_ws.TryReceive(out msg))
+                HandleGuestMessage(msg);
+
+            // Broadcast current game state to guest
+            yield return Send(BuildStateJson());
             yield return new WaitForSeconds(SyncInterval);
         }
     }
 
-    // ── Fetch guest kill reports and apply them to local enemies ──────────────
-
-    private IEnumerator FetchAndApplyKills()
+    private void HandleGuestMessage(string json)
     {
-        string url = GameStatsTracker.ApiBaseUrl.TrimEnd('/') + "/game/kills";
-        var req = UnityWebRequest.Get(url);
-        if (!string.IsNullOrWhiteSpace(AuthSession.AccessToken))
-            req.SetRequestHeader("Authorization", $"Bearer {AuthSession.AccessToken}");
-        yield return req.SendWebRequest();
-
-        if (req.result != UnityWebRequest.Result.Success
-            || req.responseCode < 200 || req.responseCode >= 300)
-            yield break;
-
-        try
+        if (json.Contains("\"pos\""))
         {
-            KillResponse kills = JsonUtility.FromJson<KillResponse>(req.downloadHandler.text);
-            if (kills?.ids != null && kills.ids.Length > 0)
-                ApplyKills(kills.ids);
+            try
+            {
+                PosMsg p = JsonUtility.FromJson<PosMsg>(json);
+                // Update remote ghost so enemies can target guest player
+                if (OnlinePlayerSync.Instance != null)
+                    OnlinePlayerSync.Instance.SetRemotePosition(new Vector3(p.x, p.y, 0f));
+            }
+            catch { }
         }
-        catch { }
+        else if (json.Contains("\"kill\""))
+        {
+            try
+            {
+                KillMsg k = JsonUtility.FromJson<KillMsg>(json);
+                ApplyGuestKill(k.id);
+            }
+            catch { }
+        }
     }
 
-    private void ApplyKills(int[] ids)
+    private void ApplyGuestKill(int hostId)
     {
-        var killSet = new HashSet<int>(ids);
-
         foreach (EnemyController e in FindObjectsOfType<EnemyController>())
-            if (killSet.Contains(e.gameObject.GetInstanceID()))
+        {
+            if (e.gameObject.GetInstanceID() == hostId)
+            {
                 e.GetComponent<Health>()?.Hit(9999f);
-
+                return;
+            }
+        }
         foreach (RangedEnemyController r in FindObjectsOfType<RangedEnemyController>())
-            if (killSet.Contains(r.gameObject.GetInstanceID()))
+        {
+            if (r.gameObject.GetInstanceID() == hostId)
+            {
                 r.GetComponent<Health>()?.Hit(9999f);
+                return;
+            }
+        }
     }
 
-    // ── Serialize and broadcast the current game state ────────────────────────
+    // ── State serialisation ───────────────────────────────────────────────────
 
-    private IEnumerator BroadcastState()
+    private string BuildStateJson()
     {
-        string json = JsonUtility.ToJson(BuildPayload());
-        string url  = GameStatsTracker.ApiBaseUrl.TrimEnd('/') + "/game/state";
+        var sb = new StringBuilder(2048);
+        sb.Append("{\"type\":\"state\"");
 
-        var req = new UnityWebRequest(url, "POST");
-        req.uploadHandler   = new UploadHandlerRaw(Encoding.UTF8.GetBytes(json));
-        req.downloadHandler = new DownloadHandlerBuffer();
-        req.SetRequestHeader("Content-Type", "application/json");
-        if (!string.IsNullOrWhiteSpace(AuthSession.AccessToken))
-            req.SetRequestHeader("Authorization", $"Bearer {AuthSession.AccessToken}");
-        yield return req.SendWebRequest();
-    }
+        // Host player position (so guest can render the ghost)
+        if (PlayerController.main != null)
+        {
+            Vector3 pos = PlayerController.main.transform.position;
+            sb.Append($",\"hostX\":{pos.x:F3},\"hostY\":{pos.y:F3}");
+        }
 
-    private GameStatePayload BuildPayload()
-    {
-        var p = new GameStatePayload();
-
-        // Include all placed rocks so the guest can mirror the layout.
+        // Rocks – always included so a late-joining guest can place them
+        sb.Append(",\"rocks\":[");
         GameObject rocksRoot = GameObject.Find("RuntimeRocks");
         if (rocksRoot != null)
         {
+            bool first = true;
             foreach (Transform t in rocksRoot.transform)
             {
-                p.rocks.Add(new RockData
-                {
-                    x    = t.position.x,
-                    y    = t.position.y,
-                    size = t.localScale.x
-                });
+                if (!first) sb.Append(',');
+                sb.Append($"{{\"x\":{t.position.x:F3},\"y\":{t.position.y:F3},\"size\":{t.localScale.x:F3}}}");
+                first = false;
             }
         }
+        sb.Append(']');
 
+        // Enemies
+        sb.Append(",\"enemies\":[");
+        bool fe = true;
         foreach (EnemyController e in FindObjectsOfType<EnemyController>())
         {
             Health h = e.GetComponent<Health>();
-            p.enemies.Add(new EnemyData
-            {
-                id    = e.gameObject.GetInstanceID(),
-                type  = 0,
-                x     = e.transform.position.x,
-                y     = e.transform.position.y,
-                hp    = h != null ? h.hp    : 0f,
-                maxHp = h != null ? h.maxHp : 2f,
-                size  = e.transform.localScale.x
-            });
+            if (!fe) sb.Append(',');
+            sb.Append($"{{\"id\":{e.gameObject.GetInstanceID()},\"type\":0");
+            sb.Append($",\"x\":{e.transform.position.x:F3},\"y\":{e.transform.position.y:F3}");
+            sb.Append($",\"hp\":{(h != null ? h.hp : 0f):F3},\"maxHp\":{(h != null ? h.maxHp : 2f):F3}");
+            sb.Append($",\"size\":{e.transform.localScale.x:F3}}}");
+            fe = false;
         }
-
         foreach (RangedEnemyController r in FindObjectsOfType<RangedEnemyController>())
         {
             Health h = r.GetComponent<Health>();
-            p.enemies.Add(new EnemyData
-            {
-                id    = r.gameObject.GetInstanceID(),
-                type  = 1,
-                x     = r.transform.position.x,
-                y     = r.transform.position.y,
-                hp    = h != null ? h.hp    : 0f,
-                maxHp = h != null ? h.maxHp : 2f,
-                size  = r.transform.localScale.x
-            });
+            if (!fe) sb.Append(',');
+            sb.Append($"{{\"id\":{r.gameObject.GetInstanceID()},\"type\":1");
+            sb.Append($",\"x\":{r.transform.position.x:F3},\"y\":{r.transform.position.y:F3}");
+            sb.Append($",\"hp\":{(h != null ? h.hp : 0f):F3},\"maxHp\":{(h != null ? h.maxHp : 2f):F3}");
+            sb.Append($",\"size\":{r.transform.localScale.x:F3}}}");
+            fe = false;
         }
+        sb.Append(']');
 
+        // Projectiles
+        sb.Append(",\"projectiles\":[");
+        bool fp = true;
         foreach (EnemyProjectile proj in FindObjectsOfType<EnemyProjectile>())
         {
-            p.projectiles.Add(new ProjectileData
-            {
-                id   = proj.gameObject.GetInstanceID(),
-                x    = proj.transform.position.x,
-                y    = proj.transform.position.y,
-                vx   = proj.direction.x * proj.speed,
-                vy   = proj.direction.y * proj.speed,
-                life = proj.RemainingLife
-            });
+            if (!fp) sb.Append(',');
+            sb.Append($"{{\"id\":{proj.gameObject.GetInstanceID()}");
+            sb.Append($",\"x\":{proj.transform.position.x:F3},\"y\":{proj.transform.position.y:F3}");
+            sb.Append($",\"vx\":{proj.direction.x * proj.speed:F3},\"vy\":{proj.direction.y * proj.speed:F3}");
+            sb.Append($",\"life\":{proj.RemainingLife:F3}}}");
+            fp = false;
         }
+        sb.Append("]}");
 
-        return p;
+        return sb.ToString();
     }
 
-    // ── Serializable types ────────────────────────────────────────────────────
+    // ── Helpers ───────────────────────────────────────────────────────────────
 
-    [Serializable] private class KillResponse { public int[] ids; }
-
-    [Serializable]
-    private class GameStatePayload
+    private IEnumerator Send(string json)
     {
-        public List<EnemyData>      enemies     = new List<EnemyData>();
-        public List<ProjectileData> projectiles = new List<ProjectileData>();
-        public List<RockData>       rocks       = new List<RockData>();
+        if (_ws == null || !_ws.IsConnected) yield break;
+        Task t = _ws.SendAsync(json);
+        yield return new WaitUntil(() => t.IsCompleted);
     }
 
-    [Serializable]
-    private class EnemyData
+    private static string BuildWsUrl()
     {
-        public int   id, type;
-        public float x, y, hp, maxHp, size;
+        string baseUrl = GameStatsTracker.ApiBaseUrl.TrimEnd('/');
+        string wsUrl   = baseUrl.Replace("https://", "wss://").Replace("http://", "ws://");
+        wsUrl += "/game-ws";
+        if (!string.IsNullOrWhiteSpace(AuthSession.AccessToken))
+            wsUrl += "?token=" + Uri.EscapeDataString(AuthSession.AccessToken);
+        return wsUrl;
     }
 
-    [Serializable]
-    private class ProjectileData
+    private void OnDestroy()
     {
-        public int   id;
-        public float x, y, vx, vy, life;
+        _ws?.Dispose();
     }
 
-    [Serializable]
-    private class RockData { public float x, y, size; }
+    [Serializable] private class PosMsg  { public string type; public float x, y; }
+    [Serializable] private class KillMsg { public string type; public int id; }
 }

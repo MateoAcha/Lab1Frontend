@@ -2,14 +2,14 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Text;
+using System.Threading.Tasks;
 using UnityEngine;
-using UnityEngine.Networking;
 
 public class GameStateGuest : MonoBehaviour
 {
-    private const float PollInterval = 0.15f;
+    private const float SendInterval = 0.05f; // 20 updates/sec
 
-    // GhostEnemy.OnDestroy() enqueues here; we send kill reports in the poll loop.
+    // GhostEnemy.OnDestroy() enqueues here; sent to host via WebSocket.
     private static readonly Queue<int> _killQueue = new Queue<int>();
     public static void EnqueueKill(int hostId) { _killQueue.Enqueue(hostId); }
 
@@ -22,16 +22,16 @@ public class GameStateGuest : MonoBehaviour
     private GameBootstrap _bootstrap;
     private bool          _rocksPlaced;
 
+    private GameWebSocketClient _ws;
+
     private void Start()
     {
-        // Disable local enemy spawner — host is the source of truth.
+        // Disable local enemy spawner – host is the source of truth.
         EnemySpawner spawner = FindObjectOfType<EnemySpawner>();
         if (spawner != null) spawner.enabled = false;
 
-        // Stats still need to be started for death tracking on the guest.
         GameStatsTracker.StartMatch();
 
-        // Grab materials from the bootstrap so ghost visuals match host visuals.
         _bootstrap = FindObjectOfType<GameBootstrap>();
         if (_bootstrap != null)
         {
@@ -40,101 +40,116 @@ public class GameStateGuest : MonoBehaviour
             _projMat   = _bootstrap.enemyProjectileMaterial;
         }
 
-        StartCoroutine(PollLoop());
+        StartCoroutine(ConnectThenRun());
     }
 
-    private void OnDestroy()
+    private IEnumerator ConnectThenRun()
     {
-        _killQueue.Clear();
-    }
+        string wsUrl = BuildWsUrl();
+        _ws = new GameWebSocketClient();
 
-    // ── Main poll loop ────────────────────────────────────────────────────────
+        Task connectTask = _ws.ConnectAsync(wsUrl);
+        yield return new WaitUntil(() => connectTask.IsCompleted);
 
-    private IEnumerator PollLoop()
-    {
-        while (true)
+        if (connectTask.IsFaulted || !_ws.IsConnected)
         {
-            // Send any pending kill reports first.
-            while (_killQueue.Count > 0)
-                yield return ReportKill(_killQueue.Dequeue());
+            Debug.LogWarning("GameStateGuest: WebSocket connect failed – " + connectTask.Exception?.GetBaseException()?.Message);
+            yield break;
+        }
 
-            yield return PollState();
-            yield return new WaitForSeconds(PollInterval);
+        yield return Send("{\"type\":\"register\",\"role\":\"guest\"}");
+        StartCoroutine(ReceiveLoop());
+        StartCoroutine(SendLoop());
+    }
+
+    // ── Receive loop: apply state snapshots from host ─────────────────────────
+
+    private IEnumerator ReceiveLoop()
+    {
+        while (_ws.IsConnected)
+        {
+            string msg;
+            while (_ws.TryReceive(out msg))
+                HandleHostMessage(msg);
+            yield return null; // check every frame
         }
     }
 
-    // ── Network calls ─────────────────────────────────────────────────────────
-
-    private IEnumerator ReportKill(int hostId)
+    private void HandleHostMessage(string json)
     {
-        string url = GameStatsTracker.ApiBaseUrl.TrimEnd('/') + $"/game/kill/{hostId}";
-        var req = new UnityWebRequest(url, "POST");
-        req.uploadHandler   = new UploadHandlerRaw(new byte[0]);
-        req.downloadHandler = new DownloadHandlerBuffer();
-        if (!string.IsNullOrWhiteSpace(AuthSession.AccessToken))
-            req.SetRequestHeader("Authorization", $"Bearer {AuthSession.AccessToken}");
-        yield return req.SendWebRequest();
+        try
+        {
+            StateMsg state = JsonUtility.FromJson<StateMsg>(json);
+            if (state == null) return;
+
+            // Update host player ghost position
+            if (OnlinePlayerSync.Instance != null)
+                OnlinePlayerSync.Instance.SetRemotePosition(new Vector3(state.hostX, state.hostY, 0f));
+
+            if (!_rocksPlaced && state.rocks != null && state.rocks.Length > 0)
+                PlaceRocks(state.rocks);
+
+            ApplyEnemyState(state.enemies);
+            ApplyProjectileState(state.projectiles);
+        }
+        catch { }
     }
 
-    private IEnumerator PollState()
+    // ── Send loop: send guest position + queued kills ─────────────────────────
+
+    private IEnumerator SendLoop()
     {
-        string url = GameStatsTracker.ApiBaseUrl.TrimEnd('/') + "/game/state";
-        var req = UnityWebRequest.Get(url);
-        if (!string.IsNullOrWhiteSpace(AuthSession.AccessToken))
-            req.SetRequestHeader("Authorization", $"Bearer {AuthSession.AccessToken}");
-        yield return req.SendWebRequest();
+        while (_ws.IsConnected)
+        {
+            // Send kill reports first
+            while (_killQueue.Count > 0)
+            {
+                int id = _killQueue.Dequeue();
+                yield return Send($"{{\"type\":\"kill\",\"id\":{id}}}");
+            }
 
-        if (req.result != UnityWebRequest.Result.Success
-            || req.responseCode < 200 || req.responseCode >= 300)
-            yield break;
+            // Send current position
+            if (PlayerController.main != null)
+            {
+                Vector3 pos = PlayerController.main.transform.position;
+                yield return Send($"{{\"type\":\"pos\",\"x\":{pos.x:F3},\"y\":{pos.y:F3}}}");
+            }
 
-        GameStatePayload state;
-        try { state = JsonUtility.FromJson<GameStatePayload>(req.downloadHandler.text); }
-        catch { yield break; }
-        if (state == null) yield break;
-
-        if (!_rocksPlaced && state.rocks != null && state.rocks.Length > 0)
-            PlaceRocks(state.rocks);
-
-        ApplyEnemyState(state.enemies);
-        ApplyProjectileState(state.projectiles);
+            yield return new WaitForSeconds(SendInterval);
+        }
     }
 
-    // ── Apply received state ──────────────────────────────────────────────────
+    // ── Apply enemy/projectile state ──────────────────────────────────────────
 
     private void ApplyEnemyState(EnemyData[] enemies)
     {
-        // Clean up destroyed ghosts from the dictionary.
+        // Remove null refs from dictionary
         var dead = new List<int>();
         foreach (var kv in _ghostEnemies)
             if (kv.Value == null) dead.Add(kv.Key);
         foreach (int k in dead) _ghostEnemies.Remove(k);
 
-        // Build a set of host IDs in this tick.
         var activeIds = new HashSet<int>();
         if (enemies != null)
         {
             foreach (EnemyData ed in enemies)
             {
                 activeIds.Add(ed.id);
-
                 if (_ghostEnemies.TryGetValue(ed.id, out GhostEnemy existing) && existing != null)
                 {
-                    // Update position and HP.
                     existing.SetTarget(new Vector3(ed.x, ed.y, 0f));
                     Health h = existing.GetComponent<Health>();
                     if (h != null) h.hp = Mathf.Max(0.01f, ed.hp);
                 }
                 else
                 {
-                    // Spawn new ghost.
                     GhostEnemy ghost = SpawnGhostEnemy(ed);
                     if (ghost != null) _ghostEnemies[ed.id] = ghost;
                 }
             }
         }
 
-        // Remove ghosts whose enemy disappeared from host state (host killed it).
+        // Destroy ghosts for enemies no longer in host state
         foreach (var kv in _ghostEnemies)
         {
             if (!activeIds.Contains(kv.Key) && kv.Value != null)
@@ -147,7 +162,6 @@ public class GameStateGuest : MonoBehaviour
 
     private void ApplyProjectileState(ProjectileData[] projectiles)
     {
-        // Clean up destroyed ghost projectiles.
         var dead = new List<int>();
         foreach (var kv in _ghostProjectiles)
             if (kv.Value == null) dead.Add(kv.Key);
@@ -164,7 +178,6 @@ public class GameStateGuest : MonoBehaviour
             }
         }
 
-        // Destroy ghost projectiles that are gone on the host.
         foreach (var kv in _ghostProjectiles)
         {
             if (!activeIds.Contains(kv.Key) && kv.Value != null)
@@ -180,8 +193,6 @@ public class GameStateGuest : MonoBehaviour
 
         const string rootName = "RuntimeRocks";
         GameObject rocksRoot = GameObject.Find(rootName) ?? new GameObject(rootName);
-
-        // If rocks are already present (e.g., second call), skip.
         if (rocksRoot.transform.childCount > 0) { _rocksPlaced = true; return; }
 
         foreach (RockData r in rocks)
@@ -197,7 +208,7 @@ public class GameStateGuest : MonoBehaviour
         if (ed.hp <= 0f) return null;
 
         bool isRanged = ed.type == 1;
-        float size = Mathf.Max(0.2f, ed.size);
+        float size    = Mathf.Max(0.2f, ed.size);
 
         GameObject go = new GameObject(isRanged ? "GhostEnemyRanged" : "GhostEnemyMelee");
         go.transform.position   = new Vector3(ed.x, ed.y, 0f);
@@ -217,17 +228,16 @@ public class GameStateGuest : MonoBehaviour
             if (_meleeMat != null) { sr.sharedMaterial = _meleeMat; sr.color = Color.white; }
         }
 
-        // Kinematic body + trigger collider so HitBox detects it and touch damage works.
-        Rigidbody2D body = go.AddComponent<Rigidbody2D>();
-        body.bodyType    = RigidbodyType2D.Kinematic;
+        Rigidbody2D body  = go.AddComponent<Rigidbody2D>();
+        body.bodyType     = RigidbodyType2D.Kinematic;
         body.gravityScale = 0f;
 
         BoxCollider2D col = go.AddComponent<BoxCollider2D>();
         col.isTrigger = true;
 
-        Health health = go.AddComponent<Health>();
-        health.maxHp  = Mathf.Max(0.1f, ed.maxHp);
-        health.hp     = Mathf.Clamp(ed.hp, 0.01f, health.maxHp);
+        Health health  = go.AddComponent<Health>();
+        health.maxHp   = Mathf.Max(0.1f, ed.maxHp);
+        health.hp      = Mathf.Clamp(ed.hp, 0.01f, health.maxHp);
 
         GhostEnemy ghost   = go.AddComponent<GhostEnemy>();
         ghost.HostId       = ed.id;
@@ -253,38 +263,52 @@ public class GameStateGuest : MonoBehaviour
         sr.sortingOrder = 9;
         if (_projMat != null) { sr.sharedMaterial = _projMat; sr.color = Color.white; }
 
-        GhostProjectile gp = go.AddComponent<GhostProjectile>();
-        gp.HostId        = pd.id;
-        gp.velocity      = new Vector2(pd.vx, pd.vy);
-        gp.remainingLife = pd.life;
+        GhostProjectile gp   = go.AddComponent<GhostProjectile>();
+        gp.HostId            = pd.id;
+        gp.velocity          = new Vector2(pd.vx, pd.vy);
+        gp.remainingLife     = pd.life;
 
         _ghostProjectiles[pd.id] = gp;
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private IEnumerator Send(string json)
+    {
+        if (_ws == null || !_ws.IsConnected) yield break;
+        Task t = _ws.SendAsync(json);
+        yield return new WaitUntil(() => t.IsCompleted);
+    }
+
+    private static string BuildWsUrl()
+    {
+        string baseUrl = GameStatsTracker.ApiBaseUrl.TrimEnd('/');
+        string wsUrl   = baseUrl.Replace("https://", "wss://").Replace("http://", "ws://");
+        wsUrl += "/game-ws";
+        if (!string.IsNullOrWhiteSpace(AuthSession.AccessToken))
+            wsUrl += "?token=" + Uri.EscapeDataString(AuthSession.AccessToken);
+        return wsUrl;
+    }
+
+    private void OnDestroy()
+    {
+        _killQueue.Clear();
+        _ws?.Dispose();
     }
 
     // ── Serializable types ────────────────────────────────────────────────────
 
     [Serializable]
-    private class GameStatePayload
+    private class StateMsg
     {
-        public EnemyData[]      enemies;
+        public string          type;
+        public float           hostX, hostY;
+        public EnemyData[]     enemies;
         public ProjectileData[] projectiles;
-        public RockData[]       rocks;
+        public RockData[]      rocks;
     }
 
-    [Serializable]
-    private class EnemyData
-    {
-        public int   id, type;
-        public float x, y, hp, maxHp, size;
-    }
-
-    [Serializable]
-    private class ProjectileData
-    {
-        public int   id;
-        public float x, y, vx, vy, life;
-    }
-
-    [Serializable]
-    private class RockData { public float x, y, size; }
+    [Serializable] private class EnemyData     { public int id, type; public float x, y, hp, maxHp, size; }
+    [Serializable] private class ProjectileData { public int id; public float x, y, vx, vy, life; }
+    [Serializable] private class RockData       { public float x, y, size; }
 }
