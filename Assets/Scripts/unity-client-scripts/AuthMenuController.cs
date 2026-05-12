@@ -1010,6 +1010,7 @@ public class AuthMenuController : MonoBehaviour
         if (_lobbyPollRoutine != null) { StopCoroutine(_lobbyPollRoutine); _lobbyPollRoutine = null; }
         StartCoroutine(_apiClient.LobbyLeave());
         MultiplayerState.SetOnline(true);
+        MultiplayerState.SetHost(_isHostSession);
         _launchMultiplayer = false;
         StartCoroutine(FetchLoadoutThenPlay());
     }

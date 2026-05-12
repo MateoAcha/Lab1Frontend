@@ -9,6 +9,8 @@ public class EnemyProjectile : MonoBehaviour
 
     private float dieAt;
 
+    public float RemainingLife => Mathf.Max(0f, dieAt - Time.time);
+
     private void Awake()
     {
         Rigidbody2D body = GetComponent<Rigidbody2D>();

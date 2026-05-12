@@ -33,17 +33,30 @@ public class GameBootstrap : MonoBehaviour
     {
         bool isMultiplayer = MultiplayerState.IsMultiplayer;
         bool isOnline      = MultiplayerState.IsOnline;
+        bool isHost        = MultiplayerState.IsHost;
         MultiplayerState.Reset();
         MultiplayerState.SetMultiplayer(isMultiplayer);
-        if (isOnline) MultiplayerState.SetOnline(true);
+        if (isOnline) { MultiplayerState.SetOnline(true); MultiplayerState.SetHost(isHost); }
         SetupCamera();
         SetupPlayer(0, new Vector3(-1f, 0f, 0f));
         if (MultiplayerState.IsMultiplayer)
             SetupPlayer(1, new Vector3(1f, 0f, 0f));
-        if (isOnline && OnlinePlayerSync.Instance == null)
+        if (isOnline)
         {
-            GameObject syncObj = new GameObject("OnlinePlayerSync");
-            syncObj.AddComponent<OnlinePlayerSync>();
+            if (OnlinePlayerSync.Instance == null)
+            {
+                GameObject syncObj = new GameObject("OnlinePlayerSync");
+                syncObj.AddComponent<OnlinePlayerSync>();
+            }
+            SetupRemotePlayerGhost();
+            if (isHost)
+            {
+                new GameObject("GameStateHost").AddComponent<GameStateHost>();
+            }
+            else
+            {
+                new GameObject("GameStateGuest").AddComponent<GameStateGuest>();
+            }
         }
         SetupRocks();
         SetupSpawner();
@@ -73,6 +86,20 @@ public class GameBootstrap : MonoBehaviour
         {
             cam.gameObject.AddComponent<CameraFollow>();
         }
+    }
+
+    private void SetupRemotePlayerGhost()
+    {
+        GameObject ghost = new GameObject("RemotePlayerGhost");
+        ghost.transform.localScale = new Vector3(playerSize, playerSize, 1f);
+
+        SpriteRenderer sr = ghost.AddComponent<SpriteRenderer>();
+        sr.sprite = SimpleSprite.Square;
+        sr.color = new Color(1f, 0.65f, 0.1f, 0.75f); // semi-transparent orange
+        sr.sortingOrder = 5;
+        if (playerMaterial != null) sr.sharedMaterial = playerMaterial;
+
+        ghost.AddComponent<RemotePlayerGhost>();
     }
 
     private void SetupPlayer(int index, Vector3 spawnOffset)

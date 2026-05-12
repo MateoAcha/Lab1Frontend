@@ -35,7 +35,13 @@ public class OnlinePlayerSync : MonoBehaviour
 
         while (true)
         {
-            Vector3 pos = PlayerController.main != null ? PlayerController.main.transform.position : Vector3.zero;
+            if (PlayerController.main == null)
+            {
+                yield return new WaitForSeconds(2f);
+                continue;
+            }
+
+            Vector3 pos = PlayerController.main.transform.position;
 
             string json = JsonUtility.ToJson(new PingBody
             {

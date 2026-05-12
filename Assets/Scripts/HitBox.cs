@@ -41,21 +41,16 @@ public class HitBox : MonoBehaviour
 
             EnemyController melee = other.GetComponent<EnemyController>();
             RangedEnemyController ranged = other.GetComponent<RangedEnemyController>();
+            GhostEnemy ghost = other.GetComponent<GhostEnemy>();
 
-            if (melee == null && ranged == null)
+            if (melee == null && ranged == null && ghost == null)
             {
                 return;
             }
 
-            if (melee != null)
-            {
-                melee.OnHit(transform.position);
-            }
-
-            if (ranged != null)
-            {
-                ranged.OnHit(transform.position);
-            }
+            if (melee != null)  melee.OnHit(transform.position);
+            if (ranged != null) ranged.OnHit(transform.position);
+            if (ghost != null)  ghost.OnHit(transform.position);
         }
 
         var health = other.GetComponent<Health>();
