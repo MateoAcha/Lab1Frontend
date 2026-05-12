@@ -6,6 +6,8 @@ using System;
 using System.Collections;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Net;
+using System.Net.Sockets;
 
 public class AuthMenuController : MonoBehaviour
 {
@@ -68,7 +70,11 @@ public class AuthMenuController : MonoBehaviour
     private TextMeshProUGUI _otherWeaponText;
     private TextMeshProUGUI _otherArmorText;
     private TextMeshProUGUI _otherItemText;
+    private TextMeshProUGUI _hostAddressText;
     private Coroutine _lobbyPollRoutine;
+    private bool _isHostSession;
+    private GameObject _joinSessionPanel;
+    private TMP_InputField _joinServerUrlInput;
     private bool _launchMultiplayer;
 
     private enum LoginReturn { MainMenu, OnlineLobby }
@@ -300,24 +306,58 @@ public class AuthMenuController : MonoBehaviour
         ShowOnly(_multiplayerPanel);
     }
 
-    public void OpenOnlineMultiplayer()
+    public void OpenCreateSession()
     {
-        _apiClient = new AuthApiClient(apiBaseUrl);
-        GameStatsTracker.SetApiBaseUrl(apiBaseUrl);
-
-        if (_inventoryPanelController != null)
-            _inventoryPanelController.Initialize(_apiClient, BackToProfile);
-        if (_shopPanelController != null)
-            _shopPanelController.Initialize(_apiClient, BackToProfile);
-
-        Debug.Log($"[AuthUI] Online — connecting to shared server: {apiBaseUrl}");
-
+        ApplyServerUrl(apiBaseUrl);
+        _isHostSession = true;
+        _loginReturn = LoginReturn.OnlineLobby;
         AuthSession.Logout();
         RefreshSessionUI();
-
-        _loginReturn = LoginReturn.OnlineLobby;
         ShowOnly(loginPanel);
         AutoFocusNextFrame(loginUsernameInput);
+    }
+
+    public void OpenJoinSession()
+    {
+        EnsureJoinSessionPanel();
+        if (_joinServerUrlInput != null) _joinServerUrlInput.text = "";
+        ShowOnly(_joinSessionPanel);
+        AutoFocusNextFrame(_joinServerUrlInput);
+    }
+
+    public void SubmitJoinSession()
+    {
+        string url = _joinServerUrlInput != null ? _joinServerUrlInput.text.Trim() : "";
+        if (string.IsNullOrWhiteSpace(url)) { ShowError("Please enter the host's address."); return; }
+        if (!url.StartsWith("http://") && !url.StartsWith("https://")) url = "http://" + url;
+
+        ApplyServerUrl(url);
+        _isHostSession = false;
+        _loginReturn = LoginReturn.OnlineLobby;
+        AuthSession.Logout();
+        RefreshSessionUI();
+        ShowOnly(loginPanel);
+        AutoFocusNextFrame(loginUsernameInput);
+    }
+
+    private void ApplyServerUrl(string url)
+    {
+        _apiClient = new AuthApiClient(url);
+        GameStatsTracker.SetApiBaseUrl(url);
+        if (_inventoryPanelController != null) _inventoryPanelController.Initialize(_apiClient, BackToProfile);
+        if (_shopPanelController != null) _shopPanelController.Initialize(_apiClient, BackToProfile);
+        Debug.Log($"[AuthUI] Server set to: {url}");
+    }
+
+    private string GetLocalIP()
+    {
+        try
+        {
+            using Socket s = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, 0);
+            s.Connect("8.8.8.8", 65530);
+            return ((IPEndPoint)s.LocalEndPoint).Address.ToString();
+        }
+        catch { return "Unknown"; }
     }
 
     public void PlayGame()
@@ -635,6 +675,7 @@ public class AuthMenuController : MonoBehaviour
         if (_shopPanel != null) _shopPanel.SetActive(activePanel == _shopPanel);
         if (_multiplayerPanel != null) _multiplayerPanel.SetActive(activePanel == _multiplayerPanel);
         if (_onlineLobbyPanel != null) _onlineLobbyPanel.SetActive(activePanel == _onlineLobbyPanel);
+        if (_joinSessionPanel != null) _joinSessionPanel.SetActive(activePanel == _joinSessionPanel);
     }
 
     private void RefreshSessionUI()
@@ -886,11 +927,24 @@ public class AuthMenuController : MonoBehaviour
     {
         EnsureOnlineLobbyPanel();
 
-        // Fill your own side immediately from local data
         if (_myNameText   != null) _myNameText.text   = AuthSession.Username;
-        if (_myWeaponText != null) _myWeaponText.text  = "Weapon: " + (PlayerLoadout.EquippedWeapon     != null ? PlayerLoadout.EquippedWeapon.itemName     : "None");
-        if (_myArmorText  != null) _myArmorText.text   = "Armor: "  + (PlayerLoadout.EquippedArmor      != null ? PlayerLoadout.EquippedArmor.itemName      : "None");
-        if (_myItemText   != null) _myItemText.text    = "Item: "   + (PlayerLoadout.EquippedConsumable != null ? PlayerLoadout.EquippedConsumable.itemName : "None");
+        if (_myWeaponText != null) _myWeaponText.text = "Weapon: " + (PlayerLoadout.EquippedWeapon     != null ? PlayerLoadout.EquippedWeapon.itemName     : "None");
+        if (_myArmorText  != null) _myArmorText.text  = "Armor: "  + (PlayerLoadout.EquippedArmor      != null ? PlayerLoadout.EquippedArmor.itemName      : "None");
+        if (_myItemText   != null) _myItemText.text   = "Item: "   + (PlayerLoadout.EquippedConsumable != null ? PlayerLoadout.EquippedConsumable.itemName : "None");
+
+        if (_hostAddressText != null)
+        {
+            if (_isHostSession)
+            {
+                string ip = GetLocalIP();
+                _hostAddressText.text = $"Your address:\nhttp://{ip}:8080";
+                _hostAddressText.gameObject.SetActive(true);
+            }
+            else
+            {
+                _hostAddressText.gameObject.SetActive(false);
+            }
+        }
 
         SetOtherPlayerWaiting();
         ShowOnly(_onlineLobbyPanel);
@@ -1069,6 +1123,128 @@ public class AuthMenuController : MonoBehaviour
         Debug.Log($"[AuthUI] {message.Replace('\n', ' ')}");
     }
 
+    private void EnsureJoinSessionPanel()
+    {
+        if (_joinSessionPanel != null) return;
+
+        Transform panelParent = mainMenuPanel != null ? mainMenuPanel.transform.parent : transform;
+
+        _joinSessionPanel = new GameObject("JoinSessionPanel");
+        _joinSessionPanel.transform.SetParent(panelParent, false);
+        RectTransform bg = _joinSessionPanel.AddComponent<RectTransform>();
+        bg.anchorMin = Vector2.zero; bg.anchorMax = Vector2.one;
+        bg.offsetMin = Vector2.zero; bg.offsetMax = Vector2.zero;
+        _joinSessionPanel.AddComponent<Image>().color = new Color(0.06f, 0.08f, 0.12f, 0.97f);
+
+        CreateMenuButton("BackBtn", _joinSessionPanel.transform,
+            "Back", new Vector2(110f, -40f), new Vector2(160f, 50f),
+            new Color(0.18f, 0.22f, 0.3f, 1f), OpenMultiplayer);
+
+        // Title
+        GameObject titleObj = new GameObject("Title");
+        titleObj.transform.SetParent(_joinSessionPanel.transform, false);
+        RectTransform titleRect = titleObj.AddComponent<RectTransform>();
+        titleRect.anchorMin = new Vector2(0.5f, 1f); titleRect.anchorMax = new Vector2(0.5f, 1f);
+        titleRect.pivot = new Vector2(0.5f, 1f);
+        titleRect.sizeDelta = new Vector2(700f, 70f);
+        titleRect.anchoredPosition = new Vector2(0f, -50f);
+        TextMeshProUGUI titleTmp = titleObj.AddComponent<TextMeshProUGUI>();
+        titleTmp.text = "Join Session"; titleTmp.font = TMP_Settings.defaultFontAsset;
+        titleTmp.fontSize = 44f; titleTmp.fontStyle = FontStyles.Bold;
+        titleTmp.alignment = TextAlignmentOptions.Center; titleTmp.color = Color.white;
+
+        // Card
+        GameObject card = new GameObject("Card");
+        card.transform.SetParent(_joinSessionPanel.transform, false);
+        RectTransform cardRect = card.AddComponent<RectTransform>();
+        cardRect.anchorMin = new Vector2(0.5f, 0.5f); cardRect.anchorMax = new Vector2(0.5f, 0.5f);
+        cardRect.pivot = new Vector2(0.5f, 0.5f);
+        cardRect.sizeDelta = new Vector2(680f, 280f);
+        cardRect.anchoredPosition = new Vector2(0f, 20f);
+        card.AddComponent<Image>().color = new Color(0.10f, 0.13f, 0.18f, 1f);
+        VerticalLayoutGroup vg = card.AddComponent<VerticalLayoutGroup>();
+        vg.padding = new RectOffset(40, 40, 36, 36); vg.spacing = 20f;
+        vg.childAlignment = TextAnchor.UpperCenter;
+        vg.childControlWidth = true; vg.childControlHeight = true;
+        vg.childForceExpandWidth = true; vg.childForceExpandHeight = false;
+
+        // Label
+        GameObject labelObj = new GameObject("Label");
+        labelObj.transform.SetParent(card.transform, false);
+        labelObj.AddComponent<LayoutElement>().preferredHeight = 30f;
+        TextMeshProUGUI labelTmp = labelObj.AddComponent<TextMeshProUGUI>();
+        labelTmp.text = "Host's Server Address";
+        labelTmp.font = TMP_Settings.defaultFontAsset; labelTmp.fontSize = 22f;
+        labelTmp.color = new Color(0.75f, 0.85f, 1f, 1f);
+        labelTmp.alignment = TextAlignmentOptions.Left; labelTmp.raycastTarget = false;
+
+        // Hint
+        GameObject hintObj = new GameObject("Hint");
+        hintObj.transform.SetParent(card.transform, false);
+        hintObj.AddComponent<LayoutElement>().preferredHeight = 26f;
+        TextMeshProUGUI hintTmp = hintObj.AddComponent<TextMeshProUGUI>();
+        hintTmp.text = "Copy it from the host's lobby screen, e.g. http://192.168.1.10:8080";
+        hintTmp.font = TMP_Settings.defaultFontAsset; hintTmp.fontSize = 16f;
+        hintTmp.color = new Color(0.6f, 0.7f, 0.8f, 0.8f);
+        hintTmp.alignment = TextAlignmentOptions.Left; hintTmp.raycastTarget = false;
+
+        // Input field
+        GameObject inputObj = new GameObject("ServerUrlInput");
+        inputObj.transform.SetParent(card.transform, false);
+        inputObj.AddComponent<LayoutElement>().preferredHeight = 56f;
+        inputObj.AddComponent<Image>().color = new Color(0.06f, 0.08f, 0.12f, 1f);
+        _joinServerUrlInput = inputObj.AddComponent<TMP_InputField>();
+
+        GameObject textArea = new GameObject("TextArea");
+        textArea.transform.SetParent(inputObj.transform, false);
+        RectTransform taRect = textArea.AddComponent<RectTransform>();
+        taRect.anchorMin = Vector2.zero; taRect.anchorMax = Vector2.one;
+        taRect.offsetMin = new Vector2(12f, 4f); taRect.offsetMax = new Vector2(-12f, -4f);
+        textArea.AddComponent<RectMask2D>();
+
+        GameObject textObj = new GameObject("Text");
+        textObj.transform.SetParent(textArea.transform, false);
+        RectTransform textRect = textObj.AddComponent<RectTransform>();
+        textRect.anchorMin = Vector2.zero; textRect.anchorMax = Vector2.one;
+        textRect.offsetMin = Vector2.zero; textRect.offsetMax = Vector2.zero;
+        TextMeshProUGUI textTmp = textObj.AddComponent<TextMeshProUGUI>();
+        textTmp.font = TMP_Settings.defaultFontAsset; textTmp.fontSize = 22f;
+        textTmp.color = Color.white; textTmp.enableWordWrapping = false;
+
+        _joinServerUrlInput.textViewport = taRect;
+        _joinServerUrlInput.textComponent = textTmp;
+        _joinServerUrlInput.fontAsset = TMP_Settings.defaultFontAsset;
+        _joinServerUrlInput.pointSize = 22f;
+
+        // Connect button
+        GameObject btnObj = new GameObject("ConnectButton");
+        btnObj.transform.SetParent(card.transform, false);
+        btnObj.AddComponent<LayoutElement>().preferredHeight = 54f;
+        Image btnImg = btnObj.AddComponent<Image>();
+        btnImg.color = new Color(0.14f, 0.22f, 0.42f, 1f);
+        Button btn = btnObj.AddComponent<Button>();
+        btn.targetGraphic = btnImg;
+        ColorBlock cb = btn.colors;
+        cb.normalColor = new Color(0.14f, 0.22f, 0.42f, 1f);
+        cb.highlightedColor = new Color(0.18f, 0.28f, 0.54f, 1f);
+        cb.pressedColor = new Color(0.10f, 0.15f, 0.30f, 1f);
+        btn.colors = cb;
+        btn.onClick.AddListener(SubmitJoinSession);
+
+        GameObject btnLabel = new GameObject("Label");
+        btnLabel.transform.SetParent(btnObj.transform, false);
+        RectTransform blr = btnLabel.AddComponent<RectTransform>();
+        blr.anchorMin = Vector2.zero; blr.anchorMax = Vector2.one;
+        blr.offsetMin = Vector2.zero; blr.offsetMax = Vector2.zero;
+        TextMeshProUGUI btnTmp = btnLabel.AddComponent<TextMeshProUGUI>();
+        btnTmp.text = "Connect & Log In"; btnTmp.font = TMP_Settings.defaultFontAsset;
+        btnTmp.fontSize = 22f; btnTmp.fontStyle = FontStyles.Bold;
+        btnTmp.alignment = TextAlignmentOptions.Center; btnTmp.color = Color.white;
+        btnTmp.raycastTarget = false;
+
+        _joinSessionPanel.SetActive(false);
+    }
+
     private void EnsureOnlineLobbyPanel()
     {
         if (_onlineLobbyPanel != null) return;
@@ -1099,6 +1275,23 @@ public class AuthMenuController : MonoBehaviour
         titleTmp.text = "Online Lobby"; titleTmp.font = TMP_Settings.defaultFontAsset;
         titleTmp.fontSize = 44f; titleTmp.fontStyle = FontStyles.Bold;
         titleTmp.alignment = TextAlignmentOptions.Center; titleTmp.color = Color.white;
+
+        // Host address (shown only when hosting)
+        GameObject addrObj = new GameObject("HostAddress");
+        addrObj.transform.SetParent(_onlineLobbyPanel.transform, false);
+        RectTransform addrRect = addrObj.AddComponent<RectTransform>();
+        addrRect.anchorMin = new Vector2(0.5f, 1f); addrRect.anchorMax = new Vector2(0.5f, 1f);
+        addrRect.pivot = new Vector2(0.5f, 1f);
+        addrRect.sizeDelta = new Vector2(700f, 70f);
+        addrRect.anchoredPosition = new Vector2(0f, -135f);
+        _hostAddressText = addrObj.AddComponent<TextMeshProUGUI>();
+        _hostAddressText.font = TMP_Settings.defaultFontAsset;
+        _hostAddressText.fontSize = 22f;
+        _hostAddressText.alignment = TextAlignmentOptions.Center;
+        _hostAddressText.color = new Color(0.6f, 1f, 0.7f, 1f);
+        _hostAddressText.enableWordWrapping = true;
+        _hostAddressText.raycastTarget = false;
+        addrObj.SetActive(false);
 
         // Two-player card row
         GameObject row = new GameObject("PlayerRow");
@@ -1248,7 +1441,7 @@ public class AuthMenuController : MonoBehaviour
         containerRect.anchorMin = new Vector2(0.5f, 0.5f);
         containerRect.anchorMax = new Vector2(0.5f, 0.5f);
         containerRect.pivot = new Vector2(0.5f, 0.5f);
-        containerRect.sizeDelta = new Vector2(900f, 340f);
+        containerRect.sizeDelta = new Vector2(1260f, 340f);
         containerRect.anchoredPosition = new Vector2(0f, 20f);
         HorizontalLayoutGroup hg = container.AddComponent<HorizontalLayoutGroup>();
         hg.spacing = 40f;
@@ -1258,7 +1451,7 @@ public class AuthMenuController : MonoBehaviour
         hg.childForceExpandWidth = false;
         hg.childForceExpandHeight = false;
 
-        // Local Multiplayer (enabled)
+        // Local Multiplayer
         CreateModeCard(container.transform, "LOCAL\nMULTIPLAYER",
             "Same screen,\ntwo controllers",
             new Color(0.12f, 0.38f, 0.22f, 1f),
@@ -1266,13 +1459,21 @@ public class AuthMenuController : MonoBehaviour
             new Color(0.08f, 0.26f, 0.15f, 1f),
             interactable: true, PlayLocalMultiplayer);
 
-        // Online Multiplayer (LAN — connect to host's server)
-        CreateModeCard(container.transform, "ONLINE\nMULTIPLAYER",
-            "Connect to a\nfriend's server",
+        // Create online session
+        CreateModeCard(container.transform, "CREATE\nSESSION",
+            "Host a game,\nshare your IP",
+            new Color(0.32f, 0.18f, 0.10f, 1f),
+            new Color(0.42f, 0.24f, 0.12f, 1f),
+            new Color(0.22f, 0.12f, 0.07f, 1f),
+            interactable: true, OpenCreateSession);
+
+        // Join online session
+        CreateModeCard(container.transform, "JOIN\nSESSION",
+            "Enter host's IP\nto connect",
             new Color(0.14f, 0.22f, 0.42f, 1f),
             new Color(0.18f, 0.28f, 0.54f, 1f),
             new Color(0.10f, 0.15f, 0.30f, 1f),
-            interactable: true, OpenOnlineMultiplayer);
+            interactable: true, OpenJoinSession);
 
         _multiplayerPanel.SetActive(false);
     }
