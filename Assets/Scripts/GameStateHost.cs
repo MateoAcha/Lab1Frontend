@@ -7,6 +7,9 @@ using UnityEngine;
 public class GameStateHost : MonoBehaviour
 {
     private const float SyncInterval = 0.05f;
+    private const float RockSyncInterval = 1f;
+    private const float RockSyncDuration = 10f;
+    private const int RocksPerChunk = 32;
 
     private GameWebSocketClient _ws;
     private PlayerController _remotePlayer;
@@ -17,10 +20,15 @@ public class GameStateHost : MonoBehaviour
     private int _nextEntityId = 1;
     private int _tick;
     private bool _sawRunActive;
+    private int _rockBatch;
+    private int _lastRockSyncCount = -1;
+    private float _nextRockSyncAt;
+    private float _rockSyncUntil;
 
     private void Start()
     {
         _remotePlayer = FindRemotePlayer();
+        _rockSyncUntil = Time.time + RockSyncDuration;
         StartCoroutine(ConnectThenSync());
     }
 
@@ -54,6 +62,10 @@ public class GameStateHost : MonoBehaviour
                 _sawRunActive = true;
 
             yield return Send(JsonUtility.ToJson(BuildState()));
+
+            if (ShouldSyncRocks())
+                yield return SendRockChunks();
+
             yield return new WaitForSeconds(SyncInterval);
         }
     }
@@ -128,7 +140,7 @@ public class GameStateHost : MonoBehaviour
             rangedKills = rangedKills,
             elapsedSeconds = seconds,
             players = BuildPlayers(),
-            rocks = BuildRocks(),
+            rocks = new OnlineRockState[0],
             enemies = BuildEnemies(),
             projectiles = BuildProjectiles()
         };
@@ -161,6 +173,51 @@ public class GameStateHost : MonoBehaviour
             maxHp = health != null ? Mathf.Max(health.maxHp, health.hp) : 0f,
             alive = alive
         };
+    }
+
+    private bool ShouldSyncRocks()
+    {
+        if (Time.time < _nextRockSyncAt)
+            return false;
+
+        int count = GetRockCount();
+        return Time.time < _rockSyncUntil || count != _lastRockSyncCount;
+    }
+
+    private IEnumerator SendRockChunks()
+    {
+        _nextRockSyncAt = Time.time + RockSyncInterval;
+
+        OnlineRockState[] rocks = BuildRocks();
+        _lastRockSyncCount = rocks.Length;
+        _rockBatch++;
+
+        int totalChunks = Mathf.Max(1, Mathf.CeilToInt(rocks.Length / (float)RocksPerChunk));
+        for (int chunk = 0; chunk < totalChunks; chunk++)
+        {
+            int start = chunk * RocksPerChunk;
+            int count = Mathf.Min(RocksPerChunk, rocks.Length - start);
+            OnlineRockState[] chunkRocks = new OnlineRockState[Mathf.Max(0, count)];
+            for (int i = 0; i < count; i++)
+                chunkRocks[i] = rocks[start + i];
+
+            var message = new OnlineRockChunkMessage
+            {
+                batch = _rockBatch,
+                chunk = chunk,
+                totalChunks = totalChunks,
+                totalRocks = rocks.Length,
+                rocks = chunkRocks
+            };
+
+            yield return Send(JsonUtility.ToJson(message));
+        }
+    }
+
+    private int GetRockCount()
+    {
+        GameObject rocksRoot = GameObject.Find("RuntimeRocks");
+        return rocksRoot != null ? rocksRoot.transform.childCount : 0;
     }
 
     private OnlineRockState[] BuildRocks()

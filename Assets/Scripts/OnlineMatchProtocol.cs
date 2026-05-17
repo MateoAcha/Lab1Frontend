@@ -38,6 +38,17 @@ public class OnlineMatchStateMessage
 }
 
 [Serializable]
+public class OnlineRockChunkMessage
+{
+    public string type = "rocks";
+    public int batch;
+    public int chunk;
+    public int totalChunks;
+    public int totalRocks;
+    public OnlineRockState[] rocks;
+}
+
+[Serializable]
 public class OnlinePlayerState
 {
     public int id;

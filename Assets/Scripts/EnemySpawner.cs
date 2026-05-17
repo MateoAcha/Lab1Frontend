@@ -18,6 +18,11 @@ public class EnemySpawner : MonoBehaviour
 
     public static float ElapsedTime { get; private set; }
 
+    public static void SetNetworkElapsedTime(float elapsedTime)
+    {
+        ElapsedTime = Mathf.Max(0f, elapsedTime);
+    }
+
     private float nextSpawn;
     private float startAt;
 

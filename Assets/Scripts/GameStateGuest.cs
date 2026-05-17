@@ -17,6 +17,7 @@ public class GameStateGuest : MonoBehaviour
     private GameBootstrap _bootstrap;
     private GameWebSocketClient _ws;
     private int _lastRockCount = -1;
+    private int _currentRockBatch = -1;
     private bool _matchCompleted;
 
     private void Start()
@@ -106,10 +107,19 @@ public class GameStateGuest : MonoBehaviour
 
     private void HandleHostMessage(string json)
     {
-        if (string.IsNullOrWhiteSpace(json) || !json.Contains("\"state\""))
+        if (string.IsNullOrWhiteSpace(json))
         {
             return;
         }
+
+        if (json.Contains("\"type\":\"rocks\""))
+        {
+            HandleRockChunk(json);
+            return;
+        }
+
+        if (!json.Contains("\"type\":\"state\""))
+            return;
 
         try
         {
@@ -125,8 +135,8 @@ public class GameStateGuest : MonoBehaviour
 
     private void ApplyState(OnlineMatchStateMessage state)
     {
+        EnemySpawner.SetNetworkElapsedTime(state.elapsedSeconds);
         ApplyPlayerStates(state.players, state.matchEnded);
-        ApplyRockState(state.rocks);
         ApplyEnemyState(state.enemies);
         ApplyProjectileState(state.projectiles);
 
@@ -138,6 +148,20 @@ public class GameStateGuest : MonoBehaviour
                 state.meleeKills,
                 state.rangedKills,
                 Mathf.Max(0, state.elapsedSeconds));
+        }
+    }
+
+    private void HandleRockChunk(string json)
+    {
+        try
+        {
+            OnlineRockChunkMessage chunk = JsonUtility.FromJson<OnlineRockChunkMessage>(json);
+            if (chunk == null) return;
+            ApplyRockChunk(chunk);
+        }
+        catch (Exception ex)
+        {
+            Debug.LogWarning("GameStateGuest: failed to parse rock chunk: " + ex.Message);
         }
     }
 
@@ -212,9 +236,9 @@ public class GameStateGuest : MonoBehaviour
         SetLocalPlayerVisibleAndControllable(false);
     }
 
-    private void ApplyRockState(OnlineRockState[] rocks)
+    private void ApplyRockChunk(OnlineRockChunkMessage chunk)
     {
-        if (_bootstrap == null || rocks == null || rocks.Length == 0 || rocks.Length == _lastRockCount)
+        if (_bootstrap == null || chunk.rocks == null)
         {
             return;
         }
@@ -222,19 +246,24 @@ public class GameStateGuest : MonoBehaviour
         const string rootName = "RuntimeRocks";
         GameObject rocksRoot = GameObject.Find(rootName) ?? new GameObject(rootName);
 
-        var children = new List<GameObject>();
-        foreach (Transform child in rocksRoot.transform)
-            children.Add(child.gameObject);
-        foreach (GameObject child in children)
-            Destroy(child);
+        if (chunk.batch != _currentRockBatch)
+        {
+            _currentRockBatch = chunk.batch;
+            _lastRockCount = 0;
 
-        foreach (OnlineRockState rock in rocks)
+            var children = new List<GameObject>();
+            foreach (Transform child in rocksRoot.transform)
+                children.Add(child.gameObject);
+            foreach (GameObject child in children)
+                Destroy(child);
+        }
+
+        foreach (OnlineRockState rock in chunk.rocks)
         {
             if (rock == null) continue;
             _bootstrap.CreateRock(rocksRoot.transform, new Vector2(rock.x, rock.y), rock.size, "Rock");
+            _lastRockCount++;
         }
-
-        _lastRockCount = rocks.Length;
     }
 
     private void ApplyEnemyState(OnlineEnemyState[] enemies)
