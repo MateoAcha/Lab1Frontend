@@ -40,12 +40,25 @@ public class PlayerPointer : MonoBehaviour
 
         if (isOnline)
         {
-            if (OnlinePlayerSync.Instance == null || !OnlinePlayerSync.Instance.HasRemotePlayer)
+            if (MultiplayerState.IsHost)
             {
-                _pivot.gameObject.SetActive(false);
-                return;
+                Transform other = MultiplayerState.GetOtherPlayer(transform);
+                if (other == null)
+                {
+                    _pivot.gameObject.SetActive(false);
+                    return;
+                }
+                otherPos = other.position;
             }
-            otherPos = OnlinePlayerSync.Instance.RemotePlayerPosition;
+            else
+            {
+                if (OnlinePlayerSync.Instance == null || !OnlinePlayerSync.Instance.HasRemotePlayer)
+                {
+                    _pivot.gameObject.SetActive(false);
+                    return;
+                }
+                otherPos = OnlinePlayerSync.Instance.RemotePlayerPosition;
+            }
         }
         else
         {

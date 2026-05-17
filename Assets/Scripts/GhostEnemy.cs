@@ -44,6 +44,5 @@ public class GhostEnemy : MonoBehaviour
         if (IsRanged) GameStatsTracker.RegisterRangedEnemyKilled();
         else          GameStatsTracker.RegisterMeleeEnemyKilled();
 
-        GameStateGuest.EnqueueKill(HostId);
     }
 }

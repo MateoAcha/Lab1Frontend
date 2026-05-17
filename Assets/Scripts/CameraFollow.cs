@@ -79,8 +79,23 @@ public class CameraFollow : MonoBehaviour
         HideDivider();
         _cam.rect = new Rect(0f, 0f, 1f, 1f);
 
-        if (PlayerController.main == null) return;
-        Vector3 target = PlayerController.main.transform.position;
+        Transform targetTransform = PlayerController.main != null && PlayerController.main.enabled
+            ? PlayerController.main.transform
+            : MultiplayerState.GetNearestPlayer(transform.position);
+
+        if (MultiplayerState.IsOnline
+            && OnlinePlayerSync.Instance != null
+            && OnlinePlayerSync.Instance.HasRemotePlayer
+            && (PlayerController.main == null || !PlayerController.main.enabled))
+        {
+            Vector3 remoteTarget = OnlinePlayerSync.Instance.RemotePlayerPosition;
+            remoteTarget.z = transform.position.z;
+            transform.position = Vector3.Lerp(transform.position, remoteTarget, Time.deltaTime * speed);
+            return;
+        }
+
+        if (targetTransform == null) return;
+        Vector3 target = targetTransform.position;
         target.z = transform.position.z;
         transform.position = Vector3.Lerp(transform.position, target, Time.deltaTime * speed);
     }

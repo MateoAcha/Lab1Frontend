@@ -48,7 +48,11 @@ public class GameBootstrap : MonoBehaviour
                 GameObject syncObj = new GameObject("OnlinePlayerSync");
                 syncObj.AddComponent<OnlinePlayerSync>();
             }
-            SetupRemotePlayerGhost();
+            if (isHost)
+                SetupPlayer(1, new Vector3(1f, 0f, 0f), true);
+            else
+                SetupRemotePlayerGhost();
+
             if (isHost)
             {
                 new GameObject("GameStateHost").AddComponent<GameStateHost>();
@@ -103,10 +107,10 @@ public class GameBootstrap : MonoBehaviour
         ghost.AddComponent<RemotePlayerGhost>();
     }
 
-    private void SetupPlayer(int index, Vector3 spawnOffset)
+    private PlayerController SetupPlayer(int index, Vector3 spawnOffset, bool externalInput = false)
     {
         if (index == 0 && (PlayerController.main != null || FindObjectOfType<PlayerController>() != null))
-            return;
+            return PlayerController.main;
 
         GameObject player = new GameObject(index == 0 ? "Player" : "Player2");
         player.transform.position = spawnOffset;
@@ -140,8 +144,10 @@ public class GameBootstrap : MonoBehaviour
 
         PlayerController pc = player.AddComponent<PlayerController>();
         pc.playerIndex = index;
+        pc.SetExternalInputEnabled(externalInput);
 
         player.AddComponent<PlayerPointer>();
+        return pc;
     }
 
     private void SetupGameOverScreen()

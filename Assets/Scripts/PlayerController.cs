@@ -37,8 +37,29 @@ public class PlayerController : MonoBehaviour
     private float nextBurstReady;
     private float nextConsumableReady;
     private float _speedBoostUntil;
+    private bool _useExternalInput;
+    private Vector2 _externalMove;
+    private Vector2 _externalAim = Vector2.down;
+    private bool _externalAttackDown;
+    private bool _externalChargeDown;
+    private bool _externalBurstDown;
+    private bool _externalConsumableDown;
+    private bool _hasNetworkLoadout;
+    private int _networkWeaponDamage = 1;
+    private int _networkConsumableQuantity;
+    private float _networkConsumableHealAmount;
+    private float _networkConsumableCooldown;
+    private bool _networkConsumableIsSpeedBoost;
+    private float _networkSpeedBoostDuration = 3f;
+    private float _networkSpeedBoostMultiplier = 2f;
 
     public float ConsumableCooldownRemaining => Mathf.Max(0f, nextConsumableReady - Time.time);
+    public Vector2 LastMoveInput { get; private set; }
+    public Vector2 LastAimDirection { get; private set; } = Vector2.down;
+    public int NetworkAttackSequence { get; private set; }
+    public int NetworkChargeSequence { get; private set; }
+    public int NetworkBurstSequence { get; private set; }
+    public int NetworkConsumableSequence { get; private set; }
 
     public float ChargeCooldownProgress01
     {
@@ -124,17 +145,23 @@ public class PlayerController : MonoBehaviour
 
     private void Update()
     {
-        if (ReadChargeDown() && Time.time >= nextChargeReady)
+        bool chargeDown = ReadChargeDown();
+        if (!_useExternalInput && chargeDown) NetworkChargeSequence++;
+        if (chargeDown && Time.time >= nextChargeReady)
         {
             ActivateCharge();
         }
 
-        if (ReadBurstDown() && Time.time >= nextBurstReady)
+        bool burstDown = ReadBurstDown();
+        if (!_useExternalInput && burstDown) NetworkBurstSequence++;
+        if (burstDown && Time.time >= nextBurstReady)
         {
             ActivateBurst();
         }
 
-        if (ReadConsumableDown() && Time.time >= nextConsumableReady)
+        bool consumableDown = ReadConsumableDown();
+        if (!_useExternalInput && consumableDown) NetworkConsumableSequence++;
+        if (consumableDown && Time.time >= nextConsumableReady)
         {
             UseConsumable();
         }
@@ -147,22 +174,101 @@ public class PlayerController : MonoBehaviour
         else
         {
             Vector2 move = ReadMove();
+            LastMoveInput = move;
             float activeSpeed = Time.time < _speedBoostUntil
-                ? speed * PlayerLoadout.SpeedBoostMultiplier
+                ? speed * GetSpeedBoostMultiplier()
                 : speed;
             body.linearVelocity = move * activeSpeed;
         }
 
-        if (ReadAttackDown() && Time.time >= nextAttack)
+        bool attackDown = ReadAttackDown();
+        if (!_useExternalInput && attackDown) NetworkAttackSequence++;
+        if (attackDown && Time.time >= nextAttack)
         {
             look = ReadMouseAimDirection();
+            LastAimDirection = look;
             Attack(look, 1f, 1f);
             nextAttack = Time.time + cooldown;
         }
     }
 
+    public void SetExternalInputEnabled(bool enabled)
+    {
+        _useExternalInput = enabled;
+        if (enabled)
+        {
+            _externalMove = Vector2.zero;
+            _externalAim = look.sqrMagnitude > 0.001f ? look : Vector2.down;
+        }
+    }
+
+    public void ApplyExternalInput(
+        Vector2 move,
+        Vector2 aim,
+        bool attackDown,
+        bool chargeDown,
+        bool burstDown,
+        bool consumableDown)
+    {
+        _useExternalInput = true;
+        _externalMove = Vector2.ClampMagnitude(move, 1f);
+        if (aim.sqrMagnitude > 0.001f)
+        {
+            _externalAim = aim.normalized;
+            LastAimDirection = _externalAim;
+        }
+
+        _externalAttackDown |= attackDown;
+        _externalChargeDown |= chargeDown;
+        _externalBurstDown |= burstDown;
+        _externalConsumableDown |= consumableDown;
+    }
+
+    public Vector2 GetAimDirectionForNetwork()
+    {
+        Vector2 aim = ReadMouseAimDirection();
+        if (aim.sqrMagnitude > 0.001f)
+        {
+            LastAimDirection = aim.normalized;
+        }
+        return LastAimDirection;
+    }
+
+    public void ConfigureNetworkLoadout(
+        int weaponDamage,
+        float maxHp,
+        int consumableQuantity,
+        float consumableHealAmount,
+        float consumableCooldown,
+        bool consumableIsSpeedBoost,
+        float speedBoostDuration,
+        float speedBoostMultiplier)
+    {
+        _hasNetworkLoadout = true;
+        _networkWeaponDamage = Mathf.Max(1, weaponDamage);
+        _networkConsumableQuantity = Mathf.Max(0, consumableQuantity);
+        _networkConsumableHealAmount = Mathf.Max(0f, consumableHealAmount);
+        _networkConsumableCooldown = Mathf.Max(0f, consumableCooldown);
+        _networkConsumableIsSpeedBoost = consumableIsSpeedBoost;
+        _networkSpeedBoostDuration = Mathf.Max(0f, speedBoostDuration);
+        _networkSpeedBoostMultiplier = Mathf.Max(1f, speedBoostMultiplier);
+
+        Health health = GetComponent<Health>();
+        if (health != null && maxHp > 0f)
+        {
+            bool wasFull = health.maxHp <= 0f || health.hp >= health.maxHp - 0.01f;
+            health.maxHp = maxHp;
+            health.hp = wasFull ? health.maxHp : Mathf.Min(health.hp, health.maxHp);
+        }
+    }
+
     private Vector2 ReadMove()
     {
+        if (_useExternalInput)
+        {
+            return _externalMove;
+        }
+
         if (playerIndex == 1)
         {
 #if ENABLE_INPUT_SYSTEM
@@ -190,6 +296,13 @@ public class PlayerController : MonoBehaviour
 
     private bool ReadAttackDown()
     {
+        if (_useExternalInput)
+        {
+            bool value = _externalAttackDown;
+            _externalAttackDown = false;
+            return value;
+        }
+
         if (playerIndex == 1)
         {
 #if ENABLE_INPUT_SYSTEM
@@ -208,6 +321,13 @@ public class PlayerController : MonoBehaviour
 
     private bool ReadChargeDown()
     {
+        if (_useExternalInput)
+        {
+            bool value = _externalChargeDown;
+            _externalChargeDown = false;
+            return value;
+        }
+
         if (playerIndex == 1)
         {
 #if ENABLE_INPUT_SYSTEM
@@ -226,6 +346,13 @@ public class PlayerController : MonoBehaviour
 
     private bool ReadBurstDown()
     {
+        if (_useExternalInput)
+        {
+            bool value = _externalBurstDown;
+            _externalBurstDown = false;
+            return value;
+        }
+
         if (playerIndex == 1)
         {
 #if ENABLE_INPUT_SYSTEM
@@ -244,6 +371,13 @@ public class PlayerController : MonoBehaviour
 
     private bool ReadConsumableDown()
     {
+        if (_useExternalInput)
+        {
+            bool value = _externalConsumableDown;
+            _externalConsumableDown = false;
+            return value;
+        }
+
         if (playerIndex == 1)
         {
 #if ENABLE_INPUT_SYSTEM
@@ -270,6 +404,12 @@ public class PlayerController : MonoBehaviour
 
     private void UseConsumable()
     {
+        if (_hasNetworkLoadout)
+        {
+            UseNetworkConsumable();
+            return;
+        }
+
         if (!PlayerLoadout.UseConsumable()) return;
 
         if (PlayerLoadout.ConsumableIsSpeedBoost)
@@ -286,8 +426,34 @@ public class PlayerController : MonoBehaviour
         nextConsumableReady = Time.time + Mathf.Max(0f, PlayerLoadout.ConsumableCooldown);
     }
 
+    private void UseNetworkConsumable()
+    {
+        if (_networkConsumableQuantity <= 0) return;
+        if (!_networkConsumableIsSpeedBoost && _networkConsumableHealAmount <= 0f) return;
+
+        _networkConsumableQuantity--;
+
+        if (_networkConsumableIsSpeedBoost)
+        {
+            _speedBoostUntil = Time.time + _networkSpeedBoostDuration;
+        }
+        else
+        {
+            Health health = GetComponent<Health>();
+            if (health != null)
+                health.Hit(-_networkConsumableHealAmount);
+        }
+
+        nextConsumableReady = Time.time + _networkConsumableCooldown;
+    }
+
     private Vector2 ReadMouseAimDirection()
     {
+        if (_useExternalInput)
+        {
+            return _externalAim.sqrMagnitude > 0.001f ? _externalAim.normalized : look;
+        }
+
         if (playerIndex == 1)
         {
 #if ENABLE_INPUT_SYSTEM
@@ -358,7 +524,7 @@ public class PlayerController : MonoBehaviour
         expansion.duration = Mathf.Max(0.01f, burstDuration);
         expansion.maxRadius = Mathf.Max(0.2f, burstRange);
         expansion.pushMultiplier = Mathf.Max(0f, burstPushMultiplier);
-        float scaledBurstDamage = PlayerLoadout.WeaponDamage * burstDamageMultiplier;
+        float scaledBurstDamage = GetWeaponDamage() * burstDamageMultiplier;
         expansion.damage = Mathf.Max(0f, scaledBurstDamage);
     }
 
@@ -390,6 +556,16 @@ public class PlayerController : MonoBehaviour
         HitBox hit = slash.AddComponent<HitBox>();
         hit.hitsPlayer = false;
         hit.life = lifeOverride > 0f ? lifeOverride : time;
-        hit.damage = Mathf.Max(1, Mathf.RoundToInt(PlayerLoadout.WeaponDamage * Mathf.Max(1f, damageMultiplier)));
+        hit.damage = Mathf.Max(1, Mathf.RoundToInt(GetWeaponDamage() * Mathf.Max(1f, damageMultiplier)));
+    }
+
+    private int GetWeaponDamage()
+    {
+        return _hasNetworkLoadout ? _networkWeaponDamage : PlayerLoadout.WeaponDamage;
+    }
+
+    private float GetSpeedBoostMultiplier()
+    {
+        return _hasNetworkLoadout ? _networkSpeedBoostMultiplier : PlayerLoadout.SpeedBoostMultiplier;
     }
 }

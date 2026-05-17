@@ -25,6 +25,12 @@ public static class GameStatsTracker
     public static int LastRunMeleeKills { get; private set; }
     public static int LastRunRangedKills { get; private set; }
     public static int LastRunTimeSeconds { get; private set; }
+    public static bool IsRunActive => _runActive;
+    public static int CurrentMeleeKills => _runMeleeKills;
+    public static int CurrentRangedKills => _runRangedKills;
+    public static int CurrentRunTimeSeconds => _runActive
+        ? Mathf.Max(0, Mathf.FloorToInt(Time.time - _runStartAt))
+        : LastRunTimeSeconds;
 
     private static bool _runActive;
     private static float _runStartAt;
@@ -74,10 +80,21 @@ public static class GameStatsTracker
             return;
         }
 
-        int meleeKills = _runMeleeKills;
-        int rangedKills = _runRangedKills;
-        int timePlayedSeconds = Mathf.Max(0, Mathf.FloorToInt(Time.time - _runStartAt));
+        CompleteRun(_runMeleeKills, _runRangedKills, Mathf.Max(0, Mathf.FloorToInt(Time.time - _runStartAt)));
+    }
 
+    public static void CompleteNetworkMatch(int meleeKills, int rangedKills, int timePlayedSeconds)
+    {
+        if (!_runActive)
+        {
+            return;
+        }
+
+        CompleteRun(meleeKills, rangedKills, timePlayedSeconds);
+    }
+
+    private static void CompleteRun(int meleeKills, int rangedKills, int timePlayedSeconds)
+    {
         PlayerStatsData stats = LoadStats();
 
         stats.matchesPlayed += 1;

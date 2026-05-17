@@ -1,32 +1,26 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Text;
 using System.Threading.Tasks;
 using UnityEngine;
 
 public class GameStateGuest : MonoBehaviour
 {
-    private const float SendInterval = 0.05f; // 20 updates/sec
+    private const float SendInterval = 0.05f;
 
-    // GhostEnemy.OnDestroy() enqueues here; sent to host via WebSocket.
-    private static readonly Queue<int> _killQueue = new Queue<int>();
-    public static void EnqueueKill(int hostId) { _killQueue.Enqueue(hostId); }
+    private readonly Dictionary<int, OnlineEntityReplica> _enemyReplicas = new Dictionary<int, OnlineEntityReplica>();
+    private readonly Dictionary<int, OnlineEntityReplica> _projectileReplicas = new Dictionary<int, OnlineEntityReplica>();
 
-    private readonly Dictionary<int, GhostEnemy>      _ghostEnemies     = new Dictionary<int, GhostEnemy>();
-    private readonly Dictionary<int, GhostProjectile> _ghostProjectiles = new Dictionary<int, GhostProjectile>();
-
-    private Material      _meleeMat;
-    private Material      _rangedMat;
-    private Material      _projMat;
+    private Material _meleeMat;
+    private Material _rangedMat;
+    private Material _projMat;
     private GameBootstrap _bootstrap;
-    private bool          _rocksPlaced;
-
     private GameWebSocketClient _ws;
+    private int _lastRockCount = -1;
+    private bool _matchCompleted;
 
     private void Start()
     {
-        // Disable local enemy spawner – host is the source of truth.
         EnemySpawner spawner = FindObjectOfType<EnemySpawner>();
         if (spawner != null) spawner.enabled = false;
 
@@ -35,9 +29,9 @@ public class GameStateGuest : MonoBehaviour
         _bootstrap = FindObjectOfType<GameBootstrap>();
         if (_bootstrap != null)
         {
-            _meleeMat  = _bootstrap.meleeEnemyMaterial;
+            _meleeMat = _bootstrap.meleeEnemyMaterial;
             _rangedMat = _bootstrap.rangedEnemyMaterial;
-            _projMat   = _bootstrap.enemyProjectileMaterial;
+            _projMat = _bootstrap.enemyProjectileMaterial;
         }
 
         StartCoroutine(ConnectThenRun());
@@ -53,7 +47,7 @@ public class GameStateGuest : MonoBehaviour
 
         if (connectTask.IsFaulted || !_ws.IsConnected)
         {
-            Debug.LogWarning("GameStateGuest: WebSocket connect failed – " + connectTask.Exception?.GetBaseException()?.Message);
+            Debug.LogWarning("GameStateGuest: WebSocket connect failed - " + connectTask.Exception?.GetBaseException()?.Message);
             yield break;
         }
 
@@ -62,8 +56,6 @@ public class GameStateGuest : MonoBehaviour
         StartCoroutine(SendLoop());
     }
 
-    // ── Receive loop: apply state snapshots from host ─────────────────────────
-
     private IEnumerator ReceiveLoop()
     {
         while (_ws.IsConnected)
@@ -71,151 +63,214 @@ public class GameStateGuest : MonoBehaviour
             string msg;
             while (_ws.TryReceive(out msg))
                 HandleHostMessage(msg);
-            yield return null; // check every frame
+
+            yield return null;
         }
     }
-
-    private void HandleHostMessage(string json)
-    {
-        try
-        {
-            StateMsg state = JsonUtility.FromJson<StateMsg>(json);
-            if (state == null) return;
-
-            // Update host player ghost position
-            if (OnlinePlayerSync.Instance != null)
-                OnlinePlayerSync.Instance.SetRemotePosition(new Vector3(state.hostX, state.hostY, 0f));
-
-            if (!_rocksPlaced && state.rocks != null && state.rocks.Length > 0)
-                PlaceRocks(state.rocks);
-
-            ApplyEnemyState(state.enemies);
-            ApplyProjectileState(state.projectiles);
-        }
-        catch { }
-    }
-
-    // ── Send loop: send guest position + queued kills ─────────────────────────
 
     private IEnumerator SendLoop()
     {
         while (_ws.IsConnected)
         {
-            // Send kill reports first
-            while (_killQueue.Count > 0)
-            {
-                int id = _killQueue.Dequeue();
-                yield return Send($"{{\"type\":\"kill\",\"id\":{id}}}");
-            }
-
-            // Send current position
-            if (PlayerController.main != null)
-            {
-                Vector3 pos = PlayerController.main.transform.position;
-                yield return Send($"{{\"type\":\"pos\",\"x\":{pos.x:F3},\"y\":{pos.y:F3}}}");
-            }
-
+            yield return Send(JsonUtility.ToJson(BuildInput()));
             yield return new WaitForSeconds(SendInterval);
         }
     }
 
-    // ── Apply enemy/projectile state ──────────────────────────────────────────
-
-    private void ApplyEnemyState(EnemyData[] enemies)
+    private OnlineMatchInputMessage BuildInput()
     {
-        // Remove null refs from dictionary
-        var dead = new List<int>();
-        foreach (var kv in _ghostEnemies)
-            if (kv.Value == null) dead.Add(kv.Key);
-        foreach (int k in dead) _ghostEnemies.Remove(k);
+        PlayerController player = PlayerController.main;
+        Vector2 move = player != null && player.enabled ? player.LastMoveInput : Vector2.zero;
+        Vector2 aim = player != null ? player.GetAimDirectionForNetwork() : Vector2.down;
 
-        var activeIds = new HashSet<int>();
-        if (enemies != null)
+        return new OnlineMatchInputMessage
         {
-            foreach (EnemyData ed in enemies)
-            {
-                activeIds.Add(ed.id);
-                if (_ghostEnemies.TryGetValue(ed.id, out GhostEnemy existing) && existing != null)
-                {
-                    existing.SetTarget(new Vector3(ed.x, ed.y, 0f));
-                    Health h = existing.GetComponent<Health>();
-                    if (h != null) h.hp = Mathf.Max(0.01f, ed.hp);
-                }
-                else
-                {
-                    GhostEnemy ghost = SpawnGhostEnemy(ed);
-                    if (ghost != null) _ghostEnemies[ed.id] = ghost;
-                }
-            }
+            moveX = move.x,
+            moveY = move.y,
+            aimX = aim.x,
+            aimY = aim.y,
+            attackSeq = player != null ? player.NetworkAttackSequence : 0,
+            chargeSeq = player != null ? player.NetworkChargeSequence : 0,
+            burstSeq = player != null ? player.NetworkBurstSequence : 0,
+            consumableSeq = player != null ? player.NetworkConsumableSequence : 0,
+            weaponDamage = Mathf.Max(1, PlayerLoadout.WeaponDamage),
+            maxHp = Mathf.Max(1f, PlayerLoadout.MaxHP),
+            consumableQuantity = Mathf.Max(0, PlayerLoadout.ConsumableQuantity),
+            consumableHealAmount = Mathf.Max(0f, PlayerLoadout.ConsumableHealAmount),
+            consumableCooldown = Mathf.Max(0f, PlayerLoadout.ConsumableCooldown),
+            consumableIsSpeedBoost = PlayerLoadout.ConsumableIsSpeedBoost,
+            speedBoostDuration = Mathf.Max(0f, PlayerLoadout.SpeedBoostDuration),
+            speedBoostMultiplier = Mathf.Max(1f, PlayerLoadout.SpeedBoostMultiplier)
+        };
+    }
+
+    private void HandleHostMessage(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json) || !json.Contains("\"state\""))
+        {
+            return;
         }
 
-        // Destroy ghosts for enemies no longer in host state
-        foreach (var kv in _ghostEnemies)
+        try
         {
-            if (!activeIds.Contains(kv.Key) && kv.Value != null)
-            {
-                kv.Value.KilledByHost = true;
-                Destroy(kv.Value.gameObject);
-            }
+            OnlineMatchStateMessage state = JsonUtility.FromJson<OnlineMatchStateMessage>(json);
+            if (state == null) return;
+            ApplyState(state);
+        }
+        catch (Exception ex)
+        {
+            Debug.LogWarning("GameStateGuest: failed to parse host state: " + ex.Message);
         }
     }
 
-    private void ApplyProjectileState(ProjectileData[] projectiles)
+    private void ApplyState(OnlineMatchStateMessage state)
     {
-        var dead = new List<int>();
-        foreach (var kv in _ghostProjectiles)
-            if (kv.Value == null) dead.Add(kv.Key);
-        foreach (int k in dead) _ghostProjectiles.Remove(k);
+        ApplyPlayerStates(state.players, state.matchEnded);
+        ApplyRockState(state.rocks);
+        ApplyEnemyState(state.enemies);
+        ApplyProjectileState(state.projectiles);
 
-        var activeIds = new HashSet<int>();
-        if (projectiles != null)
+        if (state.matchEnded && !_matchCompleted)
         {
-            foreach (ProjectileData pd in projectiles)
-            {
-                activeIds.Add(pd.id);
-                if (!_ghostProjectiles.ContainsKey(pd.id))
-                    SpawnGhostProjectile(pd);
-            }
-        }
-
-        foreach (var kv in _ghostProjectiles)
-        {
-            if (!activeIds.Contains(kv.Key) && kv.Value != null)
-                Destroy(kv.Value.gameObject);
+            _matchCompleted = true;
+            DisableLocalPlayer();
+            GameStatsTracker.CompleteNetworkMatch(
+                state.meleeKills,
+                state.rangedKills,
+                Mathf.Max(0, state.elapsedSeconds));
         }
     }
 
-    // ── Rock placement ────────────────────────────────────────────────────────
-
-    private void PlaceRocks(RockData[] rocks)
+    private void ApplyPlayerStates(OnlinePlayerState[] players, bool matchEnded)
     {
-        if (_bootstrap == null) return;
+        if (players == null) return;
+
+        foreach (OnlinePlayerState player in players)
+        {
+            if (player == null) continue;
+
+            if (player.id == 0)
+                ApplyRemoteHostPlayer(player);
+            else if (player.id == 1)
+                ApplyLocalGuestPlayer(player, matchEnded);
+        }
+    }
+
+    private void ApplyRemoteHostPlayer(OnlinePlayerState state)
+    {
+        if (OnlinePlayerSync.Instance == null) return;
+
+        if (!state.alive)
+        {
+            OnlinePlayerSync.Instance.ClearRemotePlayer();
+            return;
+        }
+
+        OnlinePlayerSync.Instance.SetRemotePosition(new Vector3(state.x, state.y, 0f));
+    }
+
+    private void ApplyLocalGuestPlayer(OnlinePlayerState state, bool matchEnded)
+    {
+        PlayerController player = PlayerController.main;
+        if (player == null) return;
+
+        Health health = player.GetComponent<Health>();
+        if (health != null)
+        {
+            health.maxHp = Mathf.Max(state.maxHp, state.hp);
+            health.hp = Mathf.Clamp(state.hp, 0f, Mathf.Max(health.maxHp, 0.01f));
+        }
+
+        Vector3 authoritative = new Vector3(state.x, state.y, player.transform.position.z);
+        float distance = Vector3.Distance(player.transform.position, authoritative);
+        player.transform.position = distance > 1.5f
+            ? authoritative
+            : Vector3.Lerp(player.transform.position, authoritative, 0.35f);
+
+        SetLocalPlayerVisibleAndControllable(state.alive && !matchEnded);
+    }
+
+    private void SetLocalPlayerVisibleAndControllable(bool alive)
+    {
+        PlayerController player = PlayerController.main;
+        if (player == null) return;
+
+        player.enabled = alive;
+
+        SpriteRenderer renderer = player.GetComponent<SpriteRenderer>();
+        if (renderer != null) renderer.enabled = alive;
+
+        Collider2D collider = player.GetComponent<Collider2D>();
+        if (collider != null) collider.enabled = alive;
+
+        Rigidbody2D body = player.GetComponent<Rigidbody2D>();
+        if (body != null && !alive) body.linearVelocity = Vector2.zero;
+    }
+
+    private void DisableLocalPlayer()
+    {
+        SetLocalPlayerVisibleAndControllable(false);
+    }
+
+    private void ApplyRockState(OnlineRockState[] rocks)
+    {
+        if (_bootstrap == null || rocks == null || rocks.Length == 0 || rocks.Length == _lastRockCount)
+        {
+            return;
+        }
 
         const string rootName = "RuntimeRocks";
         GameObject rocksRoot = GameObject.Find(rootName) ?? new GameObject(rootName);
-        if (rocksRoot.transform.childCount > 0) { _rocksPlaced = true; return; }
 
-        foreach (RockData r in rocks)
-            _bootstrap.CreateRock(rocksRoot.transform, new Vector2(r.x, r.y), r.size, "Rock");
+        var children = new List<GameObject>();
+        foreach (Transform child in rocksRoot.transform)
+            children.Add(child.gameObject);
+        foreach (GameObject child in children)
+            Destroy(child);
 
-        _rocksPlaced = true;
+        foreach (OnlineRockState rock in rocks)
+        {
+            if (rock == null) continue;
+            _bootstrap.CreateRock(rocksRoot.transform, new Vector2(rock.x, rock.y), rock.size, "Rock");
+        }
+
+        _lastRockCount = rocks.Length;
     }
 
-    // ── Ghost spawning ────────────────────────────────────────────────────────
-
-    private GhostEnemy SpawnGhostEnemy(EnemyData ed)
+    private void ApplyEnemyState(OnlineEnemyState[] enemies)
     {
-        if (ed.hp <= 0f) return null;
+        var activeIds = new HashSet<int>();
 
-        bool isRanged = ed.type == 1;
-        float size    = Mathf.Max(0.2f, ed.size);
+        if (enemies != null)
+        {
+            foreach (OnlineEnemyState enemy in enemies)
+            {
+                if (enemy == null || enemy.hp <= 0f) continue;
+                activeIds.Add(enemy.id);
 
-        GameObject go = new GameObject(isRanged ? "GhostEnemyRanged" : "GhostEnemyMelee");
-        go.transform.position   = new Vector3(ed.x, ed.y, 0f);
-        go.transform.localScale = new Vector3(size, size, 1f);
+                if (_enemyReplicas.TryGetValue(enemy.id, out OnlineEntityReplica replica) && replica != null)
+                {
+                    UpdateEnemyReplica(replica, enemy);
+                }
+                else
+                {
+                    _enemyReplicas[enemy.id] = SpawnEnemyReplica(enemy);
+                }
+            }
+        }
+
+        RemoveInactive(_enemyReplicas, activeIds);
+    }
+
+    private OnlineEntityReplica SpawnEnemyReplica(OnlineEnemyState enemy)
+    {
+        bool isRanged = enemy.type == 1;
+        GameObject go = new GameObject(isRanged ? "EnemyReplicaRanged" : "EnemyReplicaMelee");
+        go.transform.position = new Vector3(enemy.x, enemy.y, 0f);
+        go.transform.localScale = new Vector3(Mathf.Max(0.2f, enemy.size), Mathf.Max(0.2f, enemy.size), 1f);
 
         SpriteRenderer sr = go.AddComponent<SpriteRenderer>();
-        sr.sprite       = SimpleSprite.Square;
+        sr.sprite = SimpleSprite.Square;
         sr.sortingOrder = 5;
         if (isRanged)
         {
@@ -228,50 +283,86 @@ public class GameStateGuest : MonoBehaviour
             if (_meleeMat != null) { sr.sharedMaterial = _meleeMat; sr.color = Color.white; }
         }
 
-        Rigidbody2D body  = go.AddComponent<Rigidbody2D>();
-        body.bodyType     = RigidbodyType2D.Kinematic;
-        body.gravityScale = 0f;
+        Health health = go.AddComponent<Health>();
+        health.maxHp = Mathf.Max(0.1f, enemy.maxHp);
+        health.hp = Mathf.Clamp(enemy.hp, 0.01f, health.maxHp);
 
-        BoxCollider2D col = go.AddComponent<BoxCollider2D>();
-        col.isTrigger = true;
-
-        Health health  = go.AddComponent<Health>();
-        health.maxHp   = Mathf.Max(0.1f, ed.maxHp);
-        health.hp      = Mathf.Clamp(ed.hp, 0.01f, health.maxHp);
-
-        GhostEnemy ghost   = go.AddComponent<GhostEnemy>();
-        ghost.HostId       = ed.id;
-        ghost.IsRanged     = isRanged;
-        ghost.KilledByHost = false;
-        ghost.SetTarget(go.transform.position);
-
-        _ghostEnemies[ed.id] = ghost;
-        return ghost;
+        OnlineEntityReplica replica = go.AddComponent<OnlineEntityReplica>();
+        replica.SnapTo(go.transform.position);
+        return replica;
     }
 
-    private void SpawnGhostProjectile(ProjectileData pd)
+    private void UpdateEnemyReplica(OnlineEntityReplica replica, OnlineEnemyState enemy)
     {
-        if (pd.life <= 0f) return;
+        replica.transform.localScale = new Vector3(Mathf.Max(0.2f, enemy.size), Mathf.Max(0.2f, enemy.size), 1f);
+        replica.SetTarget(new Vector3(enemy.x, enemy.y, 0f));
 
-        GameObject go = new GameObject("GhostProjectile");
-        go.transform.position   = new Vector3(pd.x, pd.y, 0f);
+        Health health = replica.GetComponent<Health>();
+        if (health != null)
+        {
+            health.maxHp = Mathf.Max(0.1f, enemy.maxHp);
+            health.hp = Mathf.Clamp(enemy.hp, 0.01f, health.maxHp);
+        }
+    }
+
+    private void ApplyProjectileState(OnlineProjectileState[] projectiles)
+    {
+        var activeIds = new HashSet<int>();
+
+        if (projectiles != null)
+        {
+            foreach (OnlineProjectileState projectile in projectiles)
+            {
+                if (projectile == null || projectile.life <= 0f) continue;
+                activeIds.Add(projectile.id);
+
+                if (_projectileReplicas.TryGetValue(projectile.id, out OnlineEntityReplica replica) && replica != null)
+                {
+                    replica.SetTarget(new Vector3(projectile.x, projectile.y, 0f), 18f);
+                }
+                else
+                {
+                    _projectileReplicas[projectile.id] = SpawnProjectileReplica(projectile);
+                }
+            }
+        }
+
+        RemoveInactive(_projectileReplicas, activeIds);
+    }
+
+    private OnlineEntityReplica SpawnProjectileReplica(OnlineProjectileState projectile)
+    {
+        GameObject go = new GameObject("ProjectileReplica");
+        go.transform.position = new Vector3(projectile.x, projectile.y, 0f);
         go.transform.localScale = new Vector3(0.25f, 0.25f, 1f);
 
         SpriteRenderer sr = go.AddComponent<SpriteRenderer>();
-        sr.sprite       = SimpleSprite.Square;
-        sr.color        = new Color(1f, 0.55f, 0.15f, 1f);
+        sr.sprite = SimpleSprite.Square;
+        sr.color = new Color(1f, 0.55f, 0.15f, 1f);
         sr.sortingOrder = 9;
         if (_projMat != null) { sr.sharedMaterial = _projMat; sr.color = Color.white; }
 
-        GhostProjectile gp   = go.AddComponent<GhostProjectile>();
-        gp.HostId            = pd.id;
-        gp.velocity          = new Vector2(pd.vx, pd.vy);
-        gp.remainingLife     = pd.life;
-
-        _ghostProjectiles[pd.id] = gp;
+        OnlineEntityReplica replica = go.AddComponent<OnlineEntityReplica>();
+        replica.SnapTo(go.transform.position);
+        return replica;
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
+    private void RemoveInactive(Dictionary<int, OnlineEntityReplica> replicas, HashSet<int> activeIds)
+    {
+        var dead = new List<int>();
+        foreach (var kv in replicas)
+        {
+            if (!activeIds.Contains(kv.Key) || kv.Value == null)
+            {
+                if (kv.Value != null)
+                    Destroy(kv.Value.gameObject);
+                dead.Add(kv.Key);
+            }
+        }
+
+        foreach (int id in dead)
+            replicas.Remove(id);
+    }
 
     private IEnumerator Send(string json)
     {
@@ -283,7 +374,7 @@ public class GameStateGuest : MonoBehaviour
     private static string BuildWsUrl()
     {
         string baseUrl = GameStatsTracker.ApiBaseUrl.TrimEnd('/');
-        string wsUrl   = baseUrl.Replace("https://", "wss://").Replace("http://", "ws://");
+        string wsUrl = baseUrl.Replace("https://", "wss://").Replace("http://", "ws://");
         wsUrl += "/game-ws";
         if (!string.IsNullOrWhiteSpace(AuthSession.AccessToken))
             wsUrl += "?token=" + Uri.EscapeDataString(AuthSession.AccessToken);
@@ -292,23 +383,6 @@ public class GameStateGuest : MonoBehaviour
 
     private void OnDestroy()
     {
-        _killQueue.Clear();
         _ws?.Dispose();
     }
-
-    // ── Serializable types ────────────────────────────────────────────────────
-
-    [Serializable]
-    private class StateMsg
-    {
-        public string          type;
-        public float           hostX, hostY;
-        public EnemyData[]     enemies;
-        public ProjectileData[] projectiles;
-        public RockData[]      rocks;
-    }
-
-    [Serializable] private class EnemyData     { public int id, type; public float x, y, hp, maxHp, size; }
-    [Serializable] private class ProjectileData { public int id; public float x, y, vx, vy, life; }
-    [Serializable] private class RockData       { public float x, y, size; }
 }

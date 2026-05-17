@@ -1,0 +1,80 @@
+using System;
+
+[Serializable]
+public class OnlineMatchInputMessage
+{
+    public string type = "input";
+    public float moveX;
+    public float moveY;
+    public float aimX;
+    public float aimY = -1f;
+    public int attackSeq;
+    public int chargeSeq;
+    public int burstSeq;
+    public int consumableSeq;
+    public int weaponDamage = 1;
+    public float maxHp = 10f;
+    public int consumableQuantity;
+    public float consumableHealAmount;
+    public float consumableCooldown;
+    public bool consumableIsSpeedBoost;
+    public float speedBoostDuration = 3f;
+    public float speedBoostMultiplier = 2f;
+}
+
+[Serializable]
+public class OnlineMatchStateMessage
+{
+    public string type = "state";
+    public int tick;
+    public bool matchEnded;
+    public int meleeKills;
+    public int rangedKills;
+    public int elapsedSeconds;
+    public OnlinePlayerState[] players;
+    public OnlineRockState[] rocks;
+    public OnlineEnemyState[] enemies;
+    public OnlineProjectileState[] projectiles;
+}
+
+[Serializable]
+public class OnlinePlayerState
+{
+    public int id;
+    public float x;
+    public float y;
+    public float hp;
+    public float maxHp;
+    public bool alive;
+}
+
+[Serializable]
+public class OnlineRockState
+{
+    public float x;
+    public float y;
+    public float size;
+}
+
+[Serializable]
+public class OnlineEnemyState
+{
+    public int id;
+    public int type;
+    public float x;
+    public float y;
+    public float hp;
+    public float maxHp;
+    public float size;
+}
+
+[Serializable]
+public class OnlineProjectileState
+{
+    public int id;
+    public float x;
+    public float y;
+    public float vx;
+    public float vy;
+    public float life;
+}
