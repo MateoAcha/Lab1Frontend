@@ -6,10 +6,7 @@ using UnityEngine;
 
 public class GameStateHost : MonoBehaviour
 {
-    private const float SyncInterval = 0.05f;
-    private const float RockSyncInterval = 1f;
-    private const float RockSyncDuration = 10f;
-    private const int RocksPerChunk = 32;
+    private const float SyncInterval = 1f / 15f;
 
     private GameWebSocketClient _ws;
     private PlayerController _remotePlayer;
@@ -20,15 +17,10 @@ public class GameStateHost : MonoBehaviour
     private int _nextEntityId = 1;
     private int _tick;
     private bool _sawRunActive;
-    private int _rockBatch;
-    private int _lastRockSyncCount = -1;
-    private float _nextRockSyncAt;
-    private float _rockSyncUntil;
 
     private void Start()
     {
         _remotePlayer = FindRemotePlayer();
-        _rockSyncUntil = Time.time + RockSyncDuration;
         StartCoroutine(ConnectThenSync());
     }
 
@@ -62,10 +54,6 @@ public class GameStateHost : MonoBehaviour
                 _sawRunActive = true;
 
             yield return Send(JsonUtility.ToJson(BuildState()));
-
-            if (ShouldSyncRocks())
-                yield return SendRockChunks();
-
             yield return new WaitForSeconds(SyncInterval);
         }
     }
@@ -140,7 +128,6 @@ public class GameStateHost : MonoBehaviour
             rangedKills = rangedKills,
             elapsedSeconds = seconds,
             players = BuildPlayers(),
-            rocks = new OnlineRockState[0],
             enemies = BuildEnemies(),
             projectiles = BuildProjectiles()
         };
@@ -163,96 +150,45 @@ public class GameStateHost : MonoBehaviour
         Health health = player != null ? player.GetComponent<Health>() : null;
         bool alive = player != null && health != null && health.hp > 0f;
         Vector3 pos = player != null ? player.transform.position : Vector3.zero;
+        Rigidbody2D body = player != null ? player.GetComponent<Rigidbody2D>() : null;
+        Vector2 velocity = body != null ? body.linearVelocity : Vector2.zero;
 
         return new OnlinePlayerState
         {
             id = id,
             x = pos.x,
             y = pos.y,
+            vx = velocity.x,
+            vy = velocity.y,
             hp = health != null ? health.hp : 0f,
             maxHp = health != null ? Mathf.Max(health.maxHp, health.hp) : 0f,
             alive = alive
         };
     }
 
-    private bool ShouldSyncRocks()
-    {
-        if (Time.time < _nextRockSyncAt)
-            return false;
-
-        int count = GetRockCount();
-        return Time.time < _rockSyncUntil || count != _lastRockSyncCount;
-    }
-
-    private IEnumerator SendRockChunks()
-    {
-        _nextRockSyncAt = Time.time + RockSyncInterval;
-
-        OnlineRockState[] rocks = BuildRocks();
-        _lastRockSyncCount = rocks.Length;
-        _rockBatch++;
-
-        int totalChunks = Mathf.Max(1, Mathf.CeilToInt(rocks.Length / (float)RocksPerChunk));
-        for (int chunk = 0; chunk < totalChunks; chunk++)
-        {
-            int start = chunk * RocksPerChunk;
-            int count = Mathf.Min(RocksPerChunk, rocks.Length - start);
-            OnlineRockState[] chunkRocks = new OnlineRockState[Mathf.Max(0, count)];
-            for (int i = 0; i < count; i++)
-                chunkRocks[i] = rocks[start + i];
-
-            var message = new OnlineRockChunkMessage
-            {
-                batch = _rockBatch,
-                chunk = chunk,
-                totalChunks = totalChunks,
-                totalRocks = rocks.Length,
-                rocks = chunkRocks
-            };
-
-            yield return Send(JsonUtility.ToJson(message));
-        }
-    }
-
-    private int GetRockCount()
-    {
-        GameObject rocksRoot = GameObject.Find("RuntimeRocks");
-        return rocksRoot != null ? rocksRoot.transform.childCount : 0;
-    }
-
-    private OnlineRockState[] BuildRocks()
-    {
-        GameObject rocksRoot = GameObject.Find("RuntimeRocks");
-        if (rocksRoot == null)
-        {
-            return new OnlineRockState[0];
-        }
-
-        var rocks = new List<OnlineRockState>(rocksRoot.transform.childCount);
-        foreach (Transform t in rocksRoot.transform)
-        {
-            rocks.Add(new OnlineRockState
-            {
-                x = t.position.x,
-                y = t.position.y,
-                size = t.localScale.x
-            });
-        }
-
-        return rocks.ToArray();
-    }
-
     private OnlineEnemyState[] BuildEnemies()
     {
         var enemies = new List<OnlineEnemyState>();
 
-        foreach (EnemyController enemy in FindObjectsOfType<EnemyController>())
+        for (int i = OnlineNetworkRegistry.MeleeEnemies.Count - 1; i >= 0; i--)
         {
+            EnemyController enemy = OnlineNetworkRegistry.MeleeEnemies[i];
+            if (enemy == null)
+            {
+                OnlineNetworkRegistry.MeleeEnemies.RemoveAt(i);
+                continue;
+            }
             AddEnemyState(enemies, enemy.gameObject, 0);
         }
 
-        foreach (RangedEnemyController enemy in FindObjectsOfType<RangedEnemyController>())
+        for (int i = OnlineNetworkRegistry.RangedEnemies.Count - 1; i >= 0; i--)
         {
+            RangedEnemyController enemy = OnlineNetworkRegistry.RangedEnemies[i];
+            if (enemy == null)
+            {
+                OnlineNetworkRegistry.RangedEnemies.RemoveAt(i);
+                continue;
+            }
             AddEnemyState(enemies, enemy.gameObject, 1);
         }
 
@@ -265,6 +201,8 @@ public class GameStateHost : MonoBehaviour
 
         Health health = enemy.GetComponent<Health>();
         if (health != null && health.hp <= 0f) return;
+        Rigidbody2D body = enemy.GetComponent<Rigidbody2D>();
+        Vector2 velocity = body != null ? body.linearVelocity : Vector2.zero;
 
         enemies.Add(new OnlineEnemyState
         {
@@ -272,6 +210,8 @@ public class GameStateHost : MonoBehaviour
             type = type,
             x = enemy.transform.position.x,
             y = enemy.transform.position.y,
+            vx = velocity.x,
+            vy = velocity.y,
             hp = health != null ? health.hp : 1f,
             maxHp = health != null ? Mathf.Max(health.maxHp, health.hp) : 1f,
             size = enemy.transform.localScale.x
@@ -282,9 +222,15 @@ public class GameStateHost : MonoBehaviour
     {
         var projectiles = new List<OnlineProjectileState>();
 
-        foreach (EnemyProjectile projectile in FindObjectsOfType<EnemyProjectile>())
+        for (int i = OnlineNetworkRegistry.Projectiles.Count - 1; i >= 0; i--)
         {
-            if (projectile == null) continue;
+            EnemyProjectile projectile = OnlineNetworkRegistry.Projectiles[i];
+            if (projectile == null)
+            {
+                OnlineNetworkRegistry.Projectiles.RemoveAt(i);
+                continue;
+            }
+
             projectiles.Add(new OnlineProjectileState
             {
                 id = GetOrAssignId(projectile.gameObject),
@@ -313,13 +259,7 @@ public class GameStateHost : MonoBehaviour
 
     private PlayerController FindRemotePlayer()
     {
-        foreach (PlayerController player in FindObjectsOfType<PlayerController>())
-        {
-            if (player != null && player.playerIndex == 1)
-                return player;
-        }
-
-        return null;
+        return MultiplayerState.GetPlayerByIndex(1);
     }
 
     private IEnumerator Send(string json)

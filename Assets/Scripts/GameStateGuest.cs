@@ -7,6 +7,8 @@ using UnityEngine;
 public class GameStateGuest : MonoBehaviour
 {
     private const float SendInterval = 0.05f;
+    private const float InputHeartbeatInterval = 0.5f;
+    private const float InputChangeThreshold = 0.001f;
 
     private readonly Dictionary<int, OnlineEntityReplica> _enemyReplicas = new Dictionary<int, OnlineEntityReplica>();
     private readonly Dictionary<int, OnlineEntityReplica> _projectileReplicas = new Dictionary<int, OnlineEntityReplica>();
@@ -14,11 +16,10 @@ public class GameStateGuest : MonoBehaviour
     private Material _meleeMat;
     private Material _rangedMat;
     private Material _projMat;
-    private GameBootstrap _bootstrap;
     private GameWebSocketClient _ws;
-    private int _lastRockCount = -1;
-    private int _currentRockBatch = -1;
     private bool _matchCompleted;
+    private OnlineMatchInputMessage _lastSentInput;
+    private float _nextInputHeartbeatAt;
 
     private void Start()
     {
@@ -27,12 +28,12 @@ public class GameStateGuest : MonoBehaviour
 
         GameStatsTracker.StartMatch();
 
-        _bootstrap = FindObjectOfType<GameBootstrap>();
-        if (_bootstrap != null)
+        GameBootstrap bootstrap = FindObjectOfType<GameBootstrap>();
+        if (bootstrap != null)
         {
-            _meleeMat = _bootstrap.meleeEnemyMaterial;
-            _rangedMat = _bootstrap.rangedEnemyMaterial;
-            _projMat = _bootstrap.enemyProjectileMaterial;
+            _meleeMat = bootstrap.meleeEnemyMaterial;
+            _rangedMat = bootstrap.rangedEnemyMaterial;
+            _projMat = bootstrap.enemyProjectileMaterial;
         }
 
         StartCoroutine(ConnectThenRun());
@@ -73,7 +74,14 @@ public class GameStateGuest : MonoBehaviour
     {
         while (_ws.IsConnected)
         {
-            yield return Send(JsonUtility.ToJson(BuildInput()));
+            OnlineMatchInputMessage input = BuildInput();
+            if (ShouldSendInput(input))
+            {
+                yield return Send(JsonUtility.ToJson(input));
+                _lastSentInput = input;
+                _nextInputHeartbeatAt = Time.time + InputHeartbeatInterval;
+            }
+
             yield return new WaitForSeconds(SendInterval);
         }
     }
@@ -105,16 +113,30 @@ public class GameStateGuest : MonoBehaviour
         };
     }
 
+    private bool ShouldSendInput(OnlineMatchInputMessage input)
+    {
+        if (_lastSentInput == null)
+            return true;
+
+        if (Time.time >= _nextInputHeartbeatAt)
+            return true;
+
+        if (Mathf.Abs(input.moveX - _lastSentInput.moveX) > InputChangeThreshold) return true;
+        if (Mathf.Abs(input.moveY - _lastSentInput.moveY) > InputChangeThreshold) return true;
+        if (Mathf.Abs(input.aimX - _lastSentInput.aimX) > InputChangeThreshold) return true;
+        if (Mathf.Abs(input.aimY - _lastSentInput.aimY) > InputChangeThreshold) return true;
+        if (input.attackSeq != _lastSentInput.attackSeq) return true;
+        if (input.chargeSeq != _lastSentInput.chargeSeq) return true;
+        if (input.burstSeq != _lastSentInput.burstSeq) return true;
+        if (input.consumableSeq != _lastSentInput.consumableSeq) return true;
+
+        return false;
+    }
+
     private void HandleHostMessage(string json)
     {
         if (string.IsNullOrWhiteSpace(json))
         {
-            return;
-        }
-
-        if (json.Contains("\"type\":\"rocks\""))
-        {
-            HandleRockChunk(json);
             return;
         }
 
@@ -151,20 +173,6 @@ public class GameStateGuest : MonoBehaviour
         }
     }
 
-    private void HandleRockChunk(string json)
-    {
-        try
-        {
-            OnlineRockChunkMessage chunk = JsonUtility.FromJson<OnlineRockChunkMessage>(json);
-            if (chunk == null) return;
-            ApplyRockChunk(chunk);
-        }
-        catch (Exception ex)
-        {
-            Debug.LogWarning("GameStateGuest: failed to parse rock chunk: " + ex.Message);
-        }
-    }
-
     private void ApplyPlayerStates(OnlinePlayerState[] players, bool matchEnded)
     {
         if (players == null) return;
@@ -190,7 +198,9 @@ public class GameStateGuest : MonoBehaviour
             return;
         }
 
-        OnlinePlayerSync.Instance.SetRemotePosition(new Vector3(state.x, state.y, 0f));
+        OnlinePlayerSync.Instance.SetRemoteState(
+            new Vector3(state.x, state.y, 0f),
+            new Vector3(state.vx, state.vy, 0f));
     }
 
     private void ApplyLocalGuestPlayer(OnlinePlayerState state, bool matchEnded)
@@ -207,9 +217,9 @@ public class GameStateGuest : MonoBehaviour
 
         Vector3 authoritative = new Vector3(state.x, state.y, player.transform.position.z);
         float distance = Vector3.Distance(player.transform.position, authoritative);
-        player.transform.position = distance > 1.5f
+        player.transform.position = distance > 2f
             ? authoritative
-            : Vector3.Lerp(player.transform.position, authoritative, 0.35f);
+            : Vector3.Lerp(player.transform.position, authoritative, 0.18f);
 
         SetLocalPlayerVisibleAndControllable(state.alive && !matchEnded);
     }
@@ -234,36 +244,6 @@ public class GameStateGuest : MonoBehaviour
     private void DisableLocalPlayer()
     {
         SetLocalPlayerVisibleAndControllable(false);
-    }
-
-    private void ApplyRockChunk(OnlineRockChunkMessage chunk)
-    {
-        if (_bootstrap == null || chunk.rocks == null)
-        {
-            return;
-        }
-
-        const string rootName = "RuntimeRocks";
-        GameObject rocksRoot = GameObject.Find(rootName) ?? new GameObject(rootName);
-
-        if (chunk.batch != _currentRockBatch)
-        {
-            _currentRockBatch = chunk.batch;
-            _lastRockCount = 0;
-
-            var children = new List<GameObject>();
-            foreach (Transform child in rocksRoot.transform)
-                children.Add(child.gameObject);
-            foreach (GameObject child in children)
-                Destroy(child);
-        }
-
-        foreach (OnlineRockState rock in chunk.rocks)
-        {
-            if (rock == null) continue;
-            _bootstrap.CreateRock(rocksRoot.transform, new Vector2(rock.x, rock.y), rock.size, "Rock");
-            _lastRockCount++;
-        }
     }
 
     private void ApplyEnemyState(OnlineEnemyState[] enemies)
@@ -324,7 +304,10 @@ public class GameStateGuest : MonoBehaviour
     private void UpdateEnemyReplica(OnlineEntityReplica replica, OnlineEnemyState enemy)
     {
         replica.transform.localScale = new Vector3(Mathf.Max(0.2f, enemy.size), Mathf.Max(0.2f, enemy.size), 1f);
-        replica.SetTarget(new Vector3(enemy.x, enemy.y, 0f));
+        replica.SetTarget(
+            new Vector3(enemy.x, enemy.y, 0f),
+            new Vector3(enemy.vx, enemy.vy, 0f),
+            14f);
 
         Health health = replica.GetComponent<Health>();
         if (health != null)
@@ -347,7 +330,10 @@ public class GameStateGuest : MonoBehaviour
 
                 if (_projectileReplicas.TryGetValue(projectile.id, out OnlineEntityReplica replica) && replica != null)
                 {
-                    replica.SetTarget(new Vector3(projectile.x, projectile.y, 0f), 18f);
+                    replica.SetTarget(
+                        new Vector3(projectile.x, projectile.y, 0f),
+                        new Vector3(projectile.vx, projectile.vy, 0f),
+                        20f);
                 }
                 else
                 {

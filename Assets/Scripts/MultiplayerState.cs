@@ -34,6 +34,16 @@ public static class MultiplayerState
         return null;
     }
 
+    public static PlayerController GetPlayerByIndex(int playerIndex)
+    {
+        foreach (PlayerController p in _players)
+        {
+            if (p != null && p.playerIndex == playerIndex)
+                return p;
+        }
+        return null;
+    }
+
     public static Transform GetNearestPlayer(Vector3 position)
     {
         Transform nearest = null;

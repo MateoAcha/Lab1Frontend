@@ -28,9 +28,12 @@ public class RemotePlayerGhost : MonoBehaviour
         if (_sr != null) _sr.enabled = visible;
         if (!visible) return;
 
+        Vector3 target = OnlinePlayerSync.Instance.RemotePlayerPosition
+            + OnlinePlayerSync.Instance.RemotePlayerVelocity * 0.08f;
+
         transform.position = Vector3.Lerp(
             transform.position,
-            OnlinePlayerSync.Instance.RemotePlayerPosition,
-            Time.deltaTime * 8f);
+            target,
+            Time.deltaTime * 12f);
     }
 }

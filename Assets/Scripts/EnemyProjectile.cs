@@ -11,6 +11,16 @@ public class EnemyProjectile : MonoBehaviour
 
     public float RemainingLife => Mathf.Max(0f, dieAt - Time.time);
 
+    private void OnEnable()
+    {
+        OnlineNetworkRegistry.Register(this);
+    }
+
+    private void OnDisable()
+    {
+        OnlineNetworkRegistry.Unregister(this);
+    }
+
     private void Awake()
     {
         Rigidbody2D body = GetComponent<Rigidbody2D>();

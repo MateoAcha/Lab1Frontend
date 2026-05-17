@@ -2,6 +2,8 @@ using UnityEngine;
 
 public class GameBootstrap : MonoBehaviour
 {
+    private const int RockLayoutSeed = 834927;
+
     public float playerSize = 1f;
     public float meleeEnemySize = 0.8f;
     public float rangedEnemySize = 0.75f;
@@ -62,8 +64,7 @@ public class GameBootstrap : MonoBehaviour
                 new GameObject("GameStateGuest").AddComponent<GameStateGuest>();
             }
         }
-        // Guest skips local rock generation — GameStateGuest places them from host data.
-        if (!isOnline || isHost) SetupRocks();
+        SetupRocks();
         SetupSpawner();
         SetupGameOverScreen();
         SetupPauseMenu();
@@ -233,10 +234,10 @@ public class GameBootstrap : MonoBehaviour
         float halfHeight = height * 0.5f;
 
         SpawnBorderRocks(rocksRoot.transform, halfWidth, halfHeight);
-        StartCoroutine(SpawnInteriorRocksAsync(rocksRoot.transform, width, height, halfWidth, halfHeight));
+        SpawnInteriorRocks(rocksRoot.transform, width, height, halfWidth, halfHeight);
     }
 
-    private System.Collections.IEnumerator SpawnInteriorRocksAsync(Transform parent, float width, float height, float halfWidth, float halfHeight)
+    private void SpawnInteriorRocks(Transform parent, float width, float height, float halfWidth, float halfHeight)
     {
         float usableHalfWidth = Mathf.Max(0.25f, halfWidth - borderInset - rockBaseSize * 0.5f);
         float usableHalfHeight = Mathf.Max(0.25f, halfHeight - borderInset - rockBaseSize * 0.5f);
@@ -244,21 +245,16 @@ public class GameBootstrap : MonoBehaviour
         int targetCount = Mathf.RoundToInt((width * height / 100f) * Mathf.Max(0f, rocksPer100Units));
         int maxAttempts = Mathf.Max(24, targetCount * 10);
         int spawned = 0;
-        const int attemptsPerFrame = 50;
-        int attemptsThisFrame = 0;
+        var rng = new System.Random(RockLayoutSeed);
+        var placed = new System.Collections.Generic.List<Vector3>(targetCount);
+        foreach (Transform existing in parent)
+            placed.Add(new Vector3(existing.position.x, existing.position.y, existing.localScale.x));
 
         for (int i = 0; i < maxAttempts && spawned < targetCount; i++)
         {
-            if (attemptsThisFrame >= attemptsPerFrame)
-            {
-                attemptsThisFrame = 0;
-                yield return null;
-            }
-            attemptsThisFrame++;
-
             Vector2 pos = new Vector2(
-                Random.Range(-usableHalfWidth, usableHalfWidth),
-                Random.Range(-usableHalfHeight, usableHalfHeight));
+                Range(rng, -usableHalfWidth, usableHalfWidth),
+                Range(rng, -usableHalfHeight, usableHalfHeight));
 
             if (pos.sqrMagnitude < centerSafeRadius * centerSafeRadius)
             {
@@ -269,20 +265,43 @@ public class GameBootstrap : MonoBehaviour
             float edgeY = usableHalfHeight > 0.001f ? Mathf.Abs(pos.y) / usableHalfHeight : 1f;
             float edge01 = Mathf.Clamp01(Mathf.Max(edgeX, edgeY));
             float chance = Mathf.Lerp(centerRockChance, edgeRockChance, edge01 * edge01);
-            if (Random.value > chance)
+            if (rng.NextDouble() > chance)
             {
                 continue;
             }
 
-            float size = GetRockSize(rockBaseSize);
-            if (Physics2D.OverlapBox(pos, Vector2.one * (size * 0.9f), 0f) != null)
+            float size = GetRockSize(rockBaseSize, rng);
+            if (OverlapsPlacedRock(placed, pos, size))
             {
                 continue;
             }
 
             CreateRock(parent, pos, size, "Rock");
+            placed.Add(new Vector3(pos.x, pos.y, size));
             spawned++;
         }
+    }
+
+    private static float Range(System.Random rng, float min, float max)
+    {
+        return Mathf.Lerp(min, max, (float)rng.NextDouble());
+    }
+
+    private static bool OverlapsPlacedRock(System.Collections.Generic.List<Vector3> placed, Vector2 pos, float size)
+    {
+        float radius = size * 0.55f;
+        foreach (Vector3 rock in placed)
+        {
+            float otherRadius = rock.z * 0.55f;
+            float minDistance = radius + otherRadius;
+            Vector2 other = new Vector2(rock.x, rock.y);
+            if ((pos - other).sqrMagnitude < minDistance * minDistance)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void SpawnBorderRocks(Transform parent, float halfWidth, float halfHeight)
@@ -313,8 +332,15 @@ public class GameBootstrap : MonoBehaviour
 
     private float GetRockSize(float baseSize)
     {
+        return GetRockSize(baseSize, null);
+    }
+
+    private float GetRockSize(float baseSize, System.Random rng)
+    {
         float jitter = Mathf.Max(0f, rockSizeJitter);
-        float scale = Random.Range(1f - jitter, 1f + jitter);
+        float scale = rng != null
+            ? Range(rng, 1f - jitter, 1f + jitter)
+            : Random.Range(1f - jitter, 1f + jitter);
         return Mathf.Max(0.2f, baseSize * scale);
     }
 

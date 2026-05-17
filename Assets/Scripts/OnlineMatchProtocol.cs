@@ -32,20 +32,8 @@ public class OnlineMatchStateMessage
     public int rangedKills;
     public int elapsedSeconds;
     public OnlinePlayerState[] players;
-    public OnlineRockState[] rocks;
     public OnlineEnemyState[] enemies;
     public OnlineProjectileState[] projectiles;
-}
-
-[Serializable]
-public class OnlineRockChunkMessage
-{
-    public string type = "rocks";
-    public int batch;
-    public int chunk;
-    public int totalChunks;
-    public int totalRocks;
-    public OnlineRockState[] rocks;
 }
 
 [Serializable]
@@ -54,17 +42,11 @@ public class OnlinePlayerState
     public int id;
     public float x;
     public float y;
+    public float vx;
+    public float vy;
     public float hp;
     public float maxHp;
     public bool alive;
-}
-
-[Serializable]
-public class OnlineRockState
-{
-    public float x;
-    public float y;
-    public float size;
 }
 
 [Serializable]
@@ -74,6 +56,8 @@ public class OnlineEnemyState
     public int type;
     public float x;
     public float y;
+    public float vx;
+    public float vy;
     public float hp;
     public float maxHp;
     public float size;

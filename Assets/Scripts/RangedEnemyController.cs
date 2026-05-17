@@ -25,6 +25,16 @@ public class RangedEnemyController : MonoBehaviour
     private float nextTouchDamageAt;
     private float recoilUntil;
 
+    private void OnEnable()
+    {
+        OnlineNetworkRegistry.Register(this);
+    }
+
+    private void OnDisable()
+    {
+        OnlineNetworkRegistry.Unregister(this);
+    }
+
     private void Awake()
     {
         body = GetComponent<Rigidbody2D>();
