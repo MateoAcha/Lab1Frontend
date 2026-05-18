@@ -12,6 +12,14 @@ public class InventoryItemData
     public int quantity;
     public string acquiredAt;
     public string detailSummary;
+    public string weaponType;
+    public string weaponColor;
+    public string weapon_type;
+    public string weapon_color;
+    public string weaponSubtype;
+    public string weapon_subtype;
+    public string weaponClass;
+    public string weapon_class;
 }
 
 [Serializable]
@@ -31,6 +39,14 @@ public class ShopItemData
     public string rarity;
     public string description;
     public string detailSummary;
+    public string weaponType;
+    public string weaponColor;
+    public string weapon_type;
+    public string weapon_color;
+    public string weaponSubtype;
+    public string weapon_subtype;
+    public string weaponClass;
+    public string weapon_class;
     public int goldPrice;
     public int purchaseQuantity;
     public int skinId;

@@ -5,6 +5,7 @@ public static class OnlineNetworkRegistry
     public static readonly List<EnemyController> MeleeEnemies = new List<EnemyController>();
     public static readonly List<RangedEnemyController> RangedEnemies = new List<RangedEnemyController>();
     public static readonly List<EnemyProjectile> Projectiles = new List<EnemyProjectile>();
+    public static readonly List<PlayerProjectile> PlayerProjectiles = new List<PlayerProjectile>();
 
     public static void Register(EnemyController enemy)
     {
@@ -37,5 +38,16 @@ public static class OnlineNetworkRegistry
     public static void Unregister(EnemyProjectile projectile)
     {
         Projectiles.Remove(projectile);
+    }
+
+    public static void Register(PlayerProjectile projectile)
+    {
+        if (projectile != null && !PlayerProjectiles.Contains(projectile))
+            PlayerProjectiles.Add(projectile);
+    }
+
+    public static void Unregister(PlayerProjectile projectile)
+    {
+        PlayerProjectiles.Remove(projectile);
     }
 }

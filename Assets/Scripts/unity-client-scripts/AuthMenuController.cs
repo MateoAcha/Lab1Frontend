@@ -11,6 +11,8 @@ using System.Net.Sockets;
 
 public class AuthMenuController : MonoBehaviour
 {
+    private const string LastOnlineServerPrefsKey = "auth_last_online_server_url";
+
     [Header("Panels")]
     public GameObject mainMenuPanel;
     public GameObject registerPanel;
@@ -39,6 +41,19 @@ public class AuthMenuController : MonoBehaviour
     public GameObject profileButton;
     public GameObject logoutButton;
 
+    [Header("Daily Coins")]
+    public Button dailyCoinsButton;
+    public TextMeshProUGUI dailyCoinsTimerText;
+    public Color dailyCoinsClaimableColor = new Color(0.14f, 0.42f, 0.22f, 1f);
+    public Color dailyCoinsClaimedColor = new Color(0.20f, 0.23f, 0.29f, 1f);
+    public string dailyCoinsClaimableText = "Claim Daily Coins";
+    public string dailyCoinsClaimedText = "Already Claimed";
+    public string dailyCoinsLoadingText = "Checking...";
+    public string dailyCoinsClaimingText = "Claiming...";
+
+    [Header("Skin Visuals")]
+    public SkinVisualDatabase skinVisualDatabase;
+
     [Header("Play")]
     public GameObject gamePrefab;
     public Transform gameParent;
@@ -60,6 +75,35 @@ public class AuthMenuController : MonoBehaviour
     private Button _shopButton;
     private Image _shopButtonImage;
     private TextMeshProUGUI _shopButtonText;
+    private Button _statsCardButton;
+    private Image _statsCardImage;
+    private TextMeshProUGUI _statsCardText;
+    private Button _profileBackButton;
+    private Image _profileBackButtonImage;
+    private Button _profileLogoutButton;
+    private Image _profileLogoutButtonImage;
+    private bool _profileUiStyled;
+    private bool _loginUiStyled;
+    private bool _registerUiStyled;
+    private string _currentServerUrl;
+    private string _lastOnlineServerUrl;
+    private Button _loginLocalServerButton;
+    private Image _loginLocalServerImage;
+    private Button _loginOnlineServerButton;
+    private Image _loginOnlineServerImage;
+    private TextMeshProUGUI _loginServerInfoText;
+    private Button _registerLocalServerButton;
+    private Image _registerLocalServerImage;
+    private Button _registerOnlineServerButton;
+    private Image _registerOnlineServerImage;
+    private TextMeshProUGUI _registerServerInfoText;
+    private TextMeshProUGUI _dailyCoinsButtonText;
+    private Coroutine _dailyCoinsStatusRoutine;
+    private DailyCoinsStatusData _dailyCoinsStatus;
+    private string _dailyCoinsStatusServerUrl = "";
+    private float _dailyCoinsStatusReceivedAt;
+    private bool _dailyCoinsUiHooked;
+    private bool _dailyCoinsClaimInFlight;
     private GameObject _multiplayerPanel;
     private GameObject _onlineLobbyPanel;
     private TextMeshProUGUI _myNameText;
@@ -84,14 +128,15 @@ public class AuthMenuController : MonoBehaviour
 
     private void OnApplicationQuit()
     {
-        AuthSession.Logout();
     }
 
     private void Start()
     {
-        _apiClient = new AuthApiClient(apiBaseUrl);
-        GameStatsTracker.SetApiBaseUrl(apiBaseUrl);
-        AuthSession.LoadFromPrefs();
+        _lastOnlineServerUrl = PlayerPrefs.GetString(LastOnlineServerPrefsKey, "");
+        AuthSession.LoadFromPrefs(apiBaseUrl);
+        ApplyServerUrl(string.IsNullOrWhiteSpace(AuthSession.CurrentServerUrl)
+            ? apiBaseUrl
+            : AuthSession.CurrentServerUrl);
 
         if (loginPasswordInput != null)
         {
@@ -101,10 +146,10 @@ public class AuthMenuController : MonoBehaviour
 
         Debug.Log($"[AuthUI] Menu initialized. LoggedIn={AuthSession.IsLoggedIn}, User='{AuthSession.Username}'");
 
+        EnsureAuthScreensUI();
         RefreshSessionUI();
         ShowOnly(mainMenuPanel);
-        EnsureInventoryUI();
-        EnsureShopUI();
+        EnsureProfileUI();
         EnsureMultiplayerPanel();
 
         if (errorPanel != null)
@@ -117,6 +162,8 @@ public class AuthMenuController : MonoBehaviour
 
     private void Update()
     {
+        UpdateDailyCoinsCountdown();
+
         TMP_InputField[] fields = GetActivePanelFields();
         if (fields == null) return;
 
@@ -185,6 +232,7 @@ public class AuthMenuController : MonoBehaviour
         }
 
         Debug.Log("[AuthUI] Open Register panel");
+        EnsureAuthScreensUI();
         ShowOnly(registerPanel);
         AutoFocusNextFrame(registerUsernameInput);
     }
@@ -199,6 +247,7 @@ public class AuthMenuController : MonoBehaviour
 
         _loginReturn = LoginReturn.MainMenu;
         Debug.Log("[AuthUI] Open Login panel");
+        EnsureAuthScreensUI();
         ShowOnly(loginPanel);
         AutoFocusNextFrame(loginUsernameInput);
     }
@@ -214,6 +263,7 @@ public class AuthMenuController : MonoBehaviour
         if (!AuthSession.IsLoggedIn)
         {
             Debug.Log("[AuthUI] Open Profile clicked while logged out. Redirecting to Login panel.");
+            EnsureAuthScreensUI();
             ShowOnly(loginPanel);
             return;
         }
@@ -225,6 +275,7 @@ public class AuthMenuController : MonoBehaviour
         }
 
         Debug.Log("[AuthUI] Open Profile panel");
+        EnsureProfileUI();
         ShowOnly(profilePanel);
     }
 
@@ -299,6 +350,7 @@ public class AuthMenuController : MonoBehaviour
         }
 
         Debug.Log("[AuthUI] Back to Profile panel");
+        EnsureProfileUI();
         ShowOnly(profilePanel);
     }
 
@@ -313,10 +365,8 @@ public class AuthMenuController : MonoBehaviour
         ApplyServerUrl(apiBaseUrl);
         _isHostSession = true;
         _loginReturn = LoginReturn.OnlineLobby;
-        AuthSession.Logout();
         RefreshSessionUI();
-        ShowOnly(loginPanel);
-        AutoFocusNextFrame(loginUsernameInput);
+        ContinueToLobbyOrLogin();
     }
 
     public void OpenJoinSession()
@@ -334,21 +384,67 @@ public class AuthMenuController : MonoBehaviour
         if (!url.StartsWith("http://") && !url.StartsWith("https://")) url = "http://" + url;
 
         ApplyServerUrl(url);
+        _lastOnlineServerUrl = AuthSession.NormalizeServerUrl(url);
+        PlayerPrefs.SetString(LastOnlineServerPrefsKey, _lastOnlineServerUrl);
+        PlayerPrefs.Save();
         _isHostSession = false;
         _loginReturn = LoginReturn.OnlineLobby;
-        AuthSession.Logout();
         RefreshSessionUI();
+        ContinueToLobbyOrLogin();
+    }
+
+    private void ContinueToLobbyOrLogin()
+    {
+        if (AuthSession.IsLoggedIn)
+        {
+            ShowOnlineLobby();
+            return;
+        }
+
+        EnsureAuthScreensUI();
         ShowOnly(loginPanel);
         AutoFocusNextFrame(loginUsernameInput);
     }
 
     private void ApplyServerUrl(string url)
     {
-        _apiClient = new AuthApiClient(url);
-        GameStatsTracker.SetApiBaseUrl(url);
+        _currentServerUrl = AuthSession.NormalizeServerUrl(url);
+        AuthSession.SwitchServer(_currentServerUrl);
+        _apiClient = new AuthApiClient(_currentServerUrl);
+        GameStatsTracker.SetApiBaseUrl(_currentServerUrl);
         if (_inventoryPanelController != null) _inventoryPanelController.Initialize(_apiClient, BackToProfile);
         if (_shopPanelController != null) _shopPanelController.Initialize(_apiClient, BackToProfile);
-        Debug.Log($"[AuthUI] Server set to: {url}");
+        RefreshAuthServerIndicators();
+        Debug.Log($"[AuthUI] Server set to: {_currentServerUrl}");
+    }
+
+    private bool IsUsingLocalServer()
+    {
+        return string.Equals(
+            AuthSession.NormalizeServerUrl(_currentServerUrl),
+            AuthSession.NormalizeServerUrl(apiBaseUrl),
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private string GetCompactServerUrl(string url)
+    {
+        string normalized = AuthSession.NormalizeServerUrl(url);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return "unknown";
+        }
+
+        const string http = "http://";
+        const string https = "https://";
+        if (normalized.StartsWith(http, StringComparison.OrdinalIgnoreCase))
+        {
+            return normalized.Substring(http.Length);
+        }
+        if (normalized.StartsWith(https, StringComparison.OrdinalIgnoreCase))
+        {
+            return normalized.Substring(https.Length);
+        }
+        return normalized;
     }
 
     private string GetLocalIP()
@@ -686,9 +782,13 @@ public class AuthMenuController : MonoBehaviour
 
         if (sessionText != null)
         {
+            string serverLabel = IsUsingLocalServer()
+                ? "Local DB"
+                : $"Online DB: {GetCompactServerUrl(_currentServerUrl)}";
+
             sessionText.text = loggedIn
-                ? $"Logged in as {AuthSession.Username}"
-                : "Not logged in";
+                ? $"Logged in as {AuthSession.Username}  ·  {serverLabel}"
+                : $"Not logged in  ·  {serverLabel}";
         }
 
         if (registerButton != null) registerButton.SetActive(!loggedIn);
@@ -697,6 +797,10 @@ public class AuthMenuController : MonoBehaviour
         if (logoutButton != null) logoutButton.SetActive(loggedIn);
         RefreshInventoryButtonState(loggedIn);
         RefreshShopButtonState(loggedIn);
+        RefreshStatsCardState(loggedIn);
+        RefreshProfileTopButtonState(loggedIn);
+        RefreshAuthServerIndicators();
+        RefreshDailyCoinsUI();
 
         if (!loggedIn)
         {
@@ -710,10 +814,969 @@ public class AuthMenuController : MonoBehaviour
         }
     }
 
+    private void RefreshDailyCoinsUI()
+    {
+        EnsureDailyCoinsUI();
+
+        if (dailyCoinsButton == null)
+        {
+            return;
+        }
+
+        bool loggedIn = AuthSession.IsLoggedIn;
+        dailyCoinsButton.gameObject.SetActive(loggedIn);
+        if (dailyCoinsTimerText != null)
+        {
+            dailyCoinsTimerText.gameObject.SetActive(false);
+        }
+
+        if (!loggedIn)
+        {
+            _dailyCoinsStatus = null;
+            _dailyCoinsStatusServerUrl = "";
+            _dailyCoinsClaimInFlight = false;
+            dailyCoinsButton.interactable = false;
+            return;
+        }
+
+        bool currentStatus = _dailyCoinsStatus != null
+            && string.Equals(_dailyCoinsStatusServerUrl, _currentServerUrl, StringComparison.OrdinalIgnoreCase);
+
+        if (!currentStatus)
+        {
+            SetDailyCoinsButtonState(dailyCoinsLoadingText, dailyCoinsClaimedColor, false);
+            RequestDailyCoinsStatus();
+            return;
+        }
+
+        ApplyDailyCoinsStatusVisual();
+    }
+
+    private void EnsureDailyCoinsUI()
+    {
+        if (dailyCoinsButton == null)
+        {
+            if (dailyCoinsTimerText != null)
+            {
+                dailyCoinsTimerText.gameObject.SetActive(false);
+            }
+            return;
+        }
+
+        if (_dailyCoinsButtonText == null)
+        {
+            _dailyCoinsButtonText = dailyCoinsButton.GetComponentInChildren<TextMeshProUGUI>(true);
+        }
+
+        if (!_dailyCoinsUiHooked)
+        {
+            _dailyCoinsUiHooked = true;
+            dailyCoinsButton.onClick.AddListener(ClaimDailyCoins);
+        }
+    }
+
+    private void RequestDailyCoinsStatus()
+    {
+        if (_dailyCoinsStatusRoutine != null || _apiClient == null || !AuthSession.IsLoggedIn)
+        {
+            return;
+        }
+
+        _dailyCoinsStatusRoutine = StartCoroutine(LoadDailyCoinsStatus());
+    }
+
+    private IEnumerator LoadDailyCoinsStatus()
+    {
+        DailyCoinsStatusData status = null;
+        string error = null;
+        yield return _apiClient.GetDailyCoinsStatus(
+            data => status = data,
+            err => error = err);
+
+        _dailyCoinsStatusRoutine = null;
+
+        if (!string.IsNullOrWhiteSpace(error))
+        {
+            Debug.LogWarning($"[AuthUI] Daily coins status failed: {error}");
+            SetDailyCoinsButtonState("Daily unavailable", dailyCoinsClaimedColor, false);
+            yield break;
+        }
+
+        SetDailyCoinsStatus(status);
+    }
+
+    private void ClaimDailyCoins()
+    {
+        if (_dailyCoinsClaimInFlight || !AuthSession.IsLoggedIn || _apiClient == null)
+        {
+            return;
+        }
+
+        if (_dailyCoinsStatus != null && !_dailyCoinsStatus.claimable && GetDailyCoinsRemainingSeconds() > 0)
+        {
+            return;
+        }
+
+        _dailyCoinsClaimInFlight = true;
+        SetDailyCoinsButtonState(dailyCoinsClaimingText, dailyCoinsClaimedColor, false);
+        StartCoroutine(ClaimDailyCoinsRoutine());
+    }
+
+    private IEnumerator ClaimDailyCoinsRoutine()
+    {
+        DailyCoinsStatusData status = null;
+        string error = null;
+        yield return _apiClient.ClaimDailyCoins(
+            data => status = data,
+            err => error = err);
+
+        _dailyCoinsClaimInFlight = false;
+
+        if (!string.IsNullOrWhiteSpace(error))
+        {
+            Debug.LogWarning($"[AuthUI] Daily coins claim failed: {error}");
+            ShowError(error);
+            RequestDailyCoinsStatus();
+            yield break;
+        }
+
+        SetDailyCoinsStatus(status);
+    }
+
+    private void SetDailyCoinsStatus(DailyCoinsStatusData status)
+    {
+        _dailyCoinsStatus = status ?? new DailyCoinsStatusData();
+        _dailyCoinsStatusServerUrl = _currentServerUrl;
+        _dailyCoinsStatusReceivedAt = Time.realtimeSinceStartup;
+        ApplyDailyCoinsStatusVisual();
+    }
+
+    private void ApplyDailyCoinsStatusVisual()
+    {
+        if (dailyCoinsButton == null || _dailyCoinsStatus == null || !AuthSession.IsLoggedIn)
+        {
+            return;
+        }
+
+        long remaining = GetDailyCoinsRemainingSeconds();
+        bool claimable = _dailyCoinsStatus.claimable || remaining <= 0;
+        if (claimable)
+        {
+            SetDailyCoinsButtonState(dailyCoinsClaimableText, dailyCoinsClaimableColor, true);
+            if (dailyCoinsTimerText != null)
+            {
+                dailyCoinsTimerText.gameObject.SetActive(false);
+            }
+            return;
+        }
+
+        SetDailyCoinsButtonState(dailyCoinsClaimedText, dailyCoinsClaimedColor, false);
+        if (dailyCoinsTimerText != null)
+        {
+            dailyCoinsTimerText.gameObject.SetActive(true);
+            dailyCoinsTimerText.text = FormatDailyCoinsTime(remaining);
+        }
+    }
+
+    private void UpdateDailyCoinsCountdown()
+    {
+        if (!AuthSession.IsLoggedIn || _dailyCoinsStatus == null || dailyCoinsTimerText == null)
+        {
+            return;
+        }
+
+        if (!string.Equals(_dailyCoinsStatusServerUrl, _currentServerUrl, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        if (_dailyCoinsStatus.claimable)
+        {
+            return;
+        }
+
+        long remaining = GetDailyCoinsRemainingSeconds();
+        if (remaining <= 0)
+        {
+            _dailyCoinsStatus.claimable = true;
+            _dailyCoinsStatus.remainingSeconds = 0;
+            ApplyDailyCoinsStatusVisual();
+            return;
+        }
+
+        if (dailyCoinsTimerText.gameObject.activeSelf)
+        {
+            dailyCoinsTimerText.text = FormatDailyCoinsTime(remaining);
+        }
+    }
+
+    private long GetDailyCoinsRemainingSeconds()
+    {
+        if (_dailyCoinsStatus == null)
+        {
+            return 0;
+        }
+
+        float elapsed = Mathf.Max(0f, Time.realtimeSinceStartup - _dailyCoinsStatusReceivedAt);
+        return Math.Max(0L, _dailyCoinsStatus.remainingSeconds - Mathf.FloorToInt(elapsed));
+    }
+
+    private void SetDailyCoinsButtonState(string label, Color color, bool interactable)
+    {
+        if (dailyCoinsButton == null)
+        {
+            return;
+        }
+
+        dailyCoinsButton.interactable = interactable;
+
+        Image image = dailyCoinsButton.targetGraphic as Image;
+        if (image == null)
+        {
+            image = dailyCoinsButton.GetComponent<Image>();
+        }
+
+        if (image != null)
+        {
+            image.color = color;
+        }
+
+        ColorBlock colors = dailyCoinsButton.colors;
+        colors.normalColor = color;
+        colors.highlightedColor = color * 1.10f;
+        colors.pressedColor = color * 0.90f;
+        colors.selectedColor = color;
+        colors.disabledColor = color;
+        dailyCoinsButton.colors = colors;
+
+        if (_dailyCoinsButtonText != null)
+        {
+            _dailyCoinsButtonText.text = label;
+        }
+    }
+
+    private string FormatDailyCoinsTime(long totalSeconds)
+    {
+        long safeSeconds = Math.Max(0L, totalSeconds);
+        long hours = safeSeconds / 3600;
+        long minutes = (safeSeconds % 3600) / 60;
+        long seconds = safeSeconds % 60;
+        return $"{hours:00}:{minutes:00}:{seconds:00}";
+    }
+
+    private void EnsureAuthScreensUI()
+    {
+        StyleLoginPanel();
+        StyleRegisterPanel();
+    }
+
+    private void StyleLoginPanel()
+    {
+        if (_loginUiStyled || loginPanel == null) return;
+        _loginUiStyled = true;
+
+        StyleAuthPanelRoot(loginPanel);
+        StyleAuthTitle(loginPanel, "LoginText", "LOGIN", new Vector2(0f, -128f));
+        EnsureAuthServerChoice(loginPanel, true, -206f);
+
+        StyleAuthInput(loginUsernameInput, "Username", new Vector2(0f, 82f));
+        StyleAuthInput(loginPasswordInput, "Password", new Vector2(0f, -20f));
+
+        StyleAuthButton(loginPanel, "LoginSubmitButton", "Login",
+            new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+            new Vector2(0f, -150f), new Vector2(620f, 64f),
+            new Color(0.12f, 0.40f, 0.52f, 1f),
+            SubmitLogin);
+
+        StyleAuthButton(loginPanel, "BackButton", "Back",
+            new Vector2(0f, 1f), new Vector2(0f, 1f),
+            new Vector2(16f, -16f), new Vector2(130f, 46f),
+            new Color(0.18f, 0.23f, 0.30f, 1f),
+            BackToMain);
+    }
+
+    private void StyleRegisterPanel()
+    {
+        if (_registerUiStyled || registerPanel == null) return;
+        _registerUiStyled = true;
+
+        StyleAuthPanelRoot(registerPanel);
+        StyleAuthTitle(registerPanel, "RegisterText", "REGISTER", new Vector2(0f, -104f));
+        EnsureAuthServerChoice(registerPanel, false, -184f);
+
+        StyleAuthInput(registerUsernameInput, "Username", new Vector2(0f, 126f));
+        StyleAuthInput(registerEmailInput, "Email", new Vector2(0f, 28f));
+        StyleAuthInput(registerPasswordInput, "Password", new Vector2(0f, -70f));
+
+        StyleAuthButton(registerPanel, "RegisterSubmitButton", "Register",
+            new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+            new Vector2(0f, -200f), new Vector2(620f, 64f),
+            new Color(0.12f, 0.40f, 0.52f, 1f),
+            SubmitRegister);
+
+        StyleAuthButton(registerPanel, "BackButton", "Back",
+            new Vector2(0f, 1f), new Vector2(0f, 1f),
+            new Vector2(16f, -16f), new Vector2(130f, 46f),
+            new Color(0.18f, 0.23f, 0.30f, 1f),
+            OpenLogin);
+    }
+
+    private void StyleAuthPanelRoot(GameObject panel)
+    {
+        RectTransform rect = GetOrAddComponent<RectTransform>(panel);
+        rect.anchorMin = Vector2.zero;
+        rect.anchorMax = Vector2.one;
+        rect.offsetMin = Vector2.zero;
+        rect.offsetMax = Vector2.zero;
+
+        Image background = GetOrAddComponent<Image>(panel);
+        background.color = new Color(0.07f, 0.10f, 0.14f, 0.97f);
+    }
+
+    private void StyleAuthTitle(GameObject panel, string objectName, string title, Vector2 position)
+    {
+        Transform titleTransform = panel.transform.Find(objectName);
+        GameObject titleObj;
+        if (titleTransform != null)
+        {
+            titleObj = titleTransform.gameObject;
+        }
+        else
+        {
+            titleObj = new GameObject(objectName);
+            titleObj.transform.SetParent(panel.transform, false);
+        }
+
+        RectTransform rect = GetOrAddComponent<RectTransform>(titleObj);
+        rect.anchorMin = new Vector2(0.5f, 1f);
+        rect.anchorMax = new Vector2(0.5f, 1f);
+        rect.pivot = new Vector2(0.5f, 1f);
+        rect.sizeDelta = new Vector2(620f, 72f);
+        rect.anchoredPosition = position;
+
+        TextMeshProUGUI text = GetOrAddComponent<TextMeshProUGUI>(titleObj);
+        text.text = title;
+        text.font = TMP_Settings.defaultFontAsset;
+        text.fontSize = 46f;
+        text.fontStyle = FontStyles.Bold;
+        text.alignment = TextAlignmentOptions.Center;
+        text.color = new Color(0.95f, 0.97f, 1f, 1f);
+        text.raycastTarget = false;
+    }
+
+    private void EnsureAuthServerChoice(GameObject panel, bool forLogin, float y)
+    {
+        (Button localButton, Image localImage) = CreateAuthServerChoiceButton(
+            panel, forLogin ? "LoginLocalServerButton" : "RegisterLocalServerButton",
+            "Local DB", new Vector2(-142f, y), UseLocalAuthServer);
+
+        (Button onlineButton, Image onlineImage) = CreateAuthServerChoiceButton(
+            panel, forLogin ? "LoginOnlineServerButton" : "RegisterOnlineServerButton",
+            "Online DB", new Vector2(142f, y), UseOnlineAuthServer);
+
+        TextMeshProUGUI infoText = CreateAuthServerInfo(panel,
+            forLogin ? "LoginServerInfo" : "RegisterServerInfo",
+            new Vector2(0f, y - 40f));
+
+        if (forLogin)
+        {
+            _loginLocalServerButton = localButton;
+            _loginLocalServerImage = localImage;
+            _loginOnlineServerButton = onlineButton;
+            _loginOnlineServerImage = onlineImage;
+            _loginServerInfoText = infoText;
+        }
+        else
+        {
+            _registerLocalServerButton = localButton;
+            _registerLocalServerImage = localImage;
+            _registerOnlineServerButton = onlineButton;
+            _registerOnlineServerImage = onlineImage;
+            _registerServerInfoText = infoText;
+        }
+
+        RefreshAuthServerIndicators();
+    }
+
+    private (Button, Image) CreateAuthServerChoiceButton(
+        GameObject panel, string name, string label, Vector2 position, UnityEngine.Events.UnityAction onClick)
+    {
+        Transform existing = panel.transform.Find(name);
+        GameObject obj;
+        bool created = false;
+        if (existing != null)
+        {
+            obj = existing.gameObject;
+        }
+        else
+        {
+            obj = new GameObject(name);
+            obj.transform.SetParent(panel.transform, false);
+            created = true;
+        }
+
+        RectTransform rect = GetOrAddComponent<RectTransform>(obj);
+        rect.anchorMin = new Vector2(0.5f, 1f);
+        rect.anchorMax = new Vector2(0.5f, 1f);
+        rect.pivot = new Vector2(0.5f, 1f);
+        rect.sizeDelta = new Vector2(260f, 38f);
+        rect.anchoredPosition = position;
+
+        Image image = GetOrAddComponent<Image>(obj);
+        Button button = GetOrAddComponent<Button>(obj);
+        button.targetGraphic = image;
+        if (created)
+        {
+            button.onClick.AddListener(onClick);
+        }
+
+        TextMeshProUGUI text = GetOrCreateButtonLabel(obj.transform);
+        text.text = label;
+        text.font = TMP_Settings.defaultFontAsset;
+        text.fontSize = 18f;
+        text.fontStyle = FontStyles.Bold;
+        text.alignment = TextAlignmentOptions.Center;
+        text.raycastTarget = false;
+
+        return (button, image);
+    }
+
+    private TextMeshProUGUI CreateAuthServerInfo(GameObject panel, string name, Vector2 position)
+    {
+        Transform existing = panel.transform.Find(name);
+        GameObject obj = existing != null ? existing.gameObject : new GameObject(name);
+        if (existing == null)
+        {
+            obj.transform.SetParent(panel.transform, false);
+        }
+
+        RectTransform rect = GetOrAddComponent<RectTransform>(obj);
+        rect.anchorMin = new Vector2(0.5f, 1f);
+        rect.anchorMax = new Vector2(0.5f, 1f);
+        rect.pivot = new Vector2(0.5f, 1f);
+        rect.sizeDelta = new Vector2(620f, 28f);
+        rect.anchoredPosition = position;
+
+        TextMeshProUGUI text = GetOrAddComponent<TextMeshProUGUI>(obj);
+        text.font = TMP_Settings.defaultFontAsset;
+        text.fontSize = 15f;
+        text.fontStyle = FontStyles.Italic;
+        text.alignment = TextAlignmentOptions.Center;
+        text.raycastTarget = false;
+        return text;
+    }
+
+    private void UseLocalAuthServer()
+    {
+        ApplyServerUrl(apiBaseUrl);
+        RefreshSessionUI();
+    }
+
+    private void UseOnlineAuthServer()
+    {
+        string targetUrl = !string.IsNullOrWhiteSpace(_lastOnlineServerUrl)
+            ? _lastOnlineServerUrl
+            : "";
+
+        if (string.IsNullOrWhiteSpace(targetUrl))
+        {
+            OpenJoinSession();
+            return;
+        }
+
+        ApplyServerUrl(targetUrl);
+        RefreshSessionUI();
+    }
+
+    private void RefreshAuthServerIndicators()
+    {
+        bool local = IsUsingLocalServer();
+        string modeText = local ? "Using local database" : $"Using online database: {GetCompactServerUrl(_currentServerUrl)}";
+
+        RefreshAuthChoiceVisual(_loginLocalServerButton, _loginLocalServerImage, local);
+        RefreshAuthChoiceVisual(_loginOnlineServerButton, _loginOnlineServerImage, !local);
+        RefreshAuthChoiceVisual(_registerLocalServerButton, _registerLocalServerImage, local);
+        RefreshAuthChoiceVisual(_registerOnlineServerButton, _registerOnlineServerImage, !local);
+
+        if (_loginServerInfoText != null)
+        {
+            _loginServerInfoText.text = modeText;
+            _loginServerInfoText.color = local
+                ? new Color(0.66f, 0.78f, 0.84f, 0.86f)
+                : new Color(0.74f, 0.82f, 1f, 0.90f);
+        }
+
+        if (_registerServerInfoText != null)
+        {
+            _registerServerInfoText.text = modeText;
+            _registerServerInfoText.color = local
+                ? new Color(0.66f, 0.78f, 0.84f, 0.86f)
+                : new Color(0.74f, 0.82f, 1f, 0.90f);
+        }
+    }
+
+    private void RefreshAuthChoiceVisual(Button button, Image image, bool active)
+    {
+        if (button == null || image == null) return;
+
+        Color color = active
+            ? new Color(0.12f, 0.40f, 0.52f, 1f)
+            : new Color(0.18f, 0.22f, 0.28f, 1f);
+        image.color = color;
+
+        ColorBlock colors = button.colors;
+        colors.normalColor = color;
+        colors.highlightedColor = color * 1.10f;
+        colors.pressedColor = color * 0.90f;
+        colors.selectedColor = color;
+        colors.disabledColor = new Color(color.r * 0.65f, color.g * 0.65f, color.b * 0.65f, 0.8f);
+        button.colors = colors;
+    }
+
+    private void StyleAuthInput(TMP_InputField input, string placeholder, Vector2 position)
+    {
+        if (input == null) return;
+
+        RectTransform rect = GetOrAddComponent<RectTransform>(input.gameObject);
+        rect.anchorMin = new Vector2(0.5f, 0.5f);
+        rect.anchorMax = new Vector2(0.5f, 0.5f);
+        rect.pivot = new Vector2(0.5f, 0.5f);
+        rect.sizeDelta = new Vector2(620f, 74f);
+        rect.anchoredPosition = position;
+
+        Image background = GetOrAddComponent<Image>(input.gameObject);
+        background.color = new Color(0.11f, 0.14f, 0.19f, 1f);
+        input.targetGraphic = background;
+
+        ColorBlock colors = input.colors;
+        colors.normalColor = new Color(0.11f, 0.14f, 0.19f, 1f);
+        colors.highlightedColor = new Color(0.15f, 0.20f, 0.27f, 1f);
+        colors.selectedColor = new Color(0.15f, 0.20f, 0.27f, 1f);
+        colors.pressedColor = new Color(0.10f, 0.13f, 0.18f, 1f);
+        colors.disabledColor = new Color(0.09f, 0.10f, 0.12f, 0.7f);
+        input.colors = colors;
+        input.caretColor = new Color(0.82f, 0.92f, 1f, 1f);
+        input.selectionColor = new Color(0.20f, 0.50f, 0.62f, 0.55f);
+
+        if (input.textViewport != null)
+        {
+            input.textViewport.offsetMin = new Vector2(22f, 8f);
+            input.textViewport.offsetMax = new Vector2(-22f, -8f);
+        }
+
+        if (input.textComponent != null)
+        {
+            input.textComponent.font = TMP_Settings.defaultFontAsset;
+            input.textComponent.fontSize = 28f;
+            input.textComponent.color = new Color(0.96f, 0.98f, 1f, 1f);
+            input.textComponent.alignment = TextAlignmentOptions.MidlineLeft;
+            input.textComponent.enableWordWrapping = false;
+            input.textComponent.raycastTarget = false;
+        }
+
+        if (input.placeholder is TextMeshProUGUI placeholderText)
+        {
+            placeholderText.text = placeholder;
+            placeholderText.font = TMP_Settings.defaultFontAsset;
+            placeholderText.fontSize = 26f;
+            placeholderText.fontStyle = FontStyles.Italic;
+            placeholderText.color = new Color(0.66f, 0.72f, 0.80f, 0.88f);
+            placeholderText.alignment = TextAlignmentOptions.MidlineLeft;
+            placeholderText.raycastTarget = false;
+        }
+    }
+
+    private void StyleAuthButton(
+        GameObject panel, string objectName, string label,
+        Vector2 anchor, Vector2 pivot,
+        Vector2 position, Vector2 size, Color color,
+        UnityEngine.Events.UnityAction fallbackAction)
+    {
+        Transform buttonTransform = panel.transform.Find(objectName);
+        GameObject buttonObj;
+        bool created = false;
+        if (buttonTransform != null)
+        {
+            buttonObj = buttonTransform.gameObject;
+        }
+        else
+        {
+            buttonObj = new GameObject(objectName);
+            buttonObj.transform.SetParent(panel.transform, false);
+            created = true;
+        }
+
+        RectTransform rect = GetOrAddComponent<RectTransform>(buttonObj);
+        rect.anchorMin = anchor;
+        rect.anchorMax = anchor;
+        rect.pivot = pivot;
+        rect.sizeDelta = size;
+        rect.anchoredPosition = position;
+
+        Image image = GetOrAddComponent<Image>(buttonObj);
+        image.color = color;
+
+        Button button = GetOrAddComponent<Button>(buttonObj);
+        button.targetGraphic = image;
+        ColorBlock colors = button.colors;
+        colors.normalColor = color;
+        colors.highlightedColor = color * 1.10f;
+        colors.pressedColor = color * 0.90f;
+        colors.selectedColor = color;
+        colors.disabledColor = new Color(color.r * 0.6f, color.g * 0.6f, color.b * 0.6f, 0.7f);
+        button.colors = colors;
+        if (created && fallbackAction != null)
+        {
+            button.onClick.AddListener(fallbackAction);
+        }
+
+        TextMeshProUGUI text = GetOrCreateButtonLabel(buttonObj.transform);
+        text.text = label;
+        text.font = TMP_Settings.defaultFontAsset;
+        text.fontSize = 24f;
+        text.fontStyle = FontStyles.Bold;
+        text.alignment = TextAlignmentOptions.Center;
+        text.color = Color.white;
+        text.raycastTarget = false;
+    }
+
     private void EnsureInventoryUI()
     {
         EnsureInventoryButton();
         EnsureInventoryPanel();
+    }
+
+    private void EnsureProfileUI()
+    {
+        if (profilePanel == null) return;
+
+        StyleProfilePanel();
+        EnsureStatsCardButton();
+        EnsureInventoryUI();
+        EnsureShopUI();
+
+        bool loggedIn = AuthSession.IsLoggedIn;
+        RefreshStatsCardState(loggedIn);
+        RefreshInventoryButtonState(loggedIn);
+        RefreshShopButtonState(loggedIn);
+        RefreshProfileTopButtonState(loggedIn);
+    }
+
+    private void StyleProfilePanel()
+    {
+        if (_profileUiStyled || profilePanel == null) return;
+        _profileUiStyled = true;
+
+        RectTransform rect = GetOrAddComponent<RectTransform>(profilePanel);
+        rect.anchorMin = Vector2.zero;
+        rect.anchorMax = Vector2.one;
+        rect.offsetMin = Vector2.zero;
+        rect.offsetMax = Vector2.zero;
+
+        Image background = GetOrAddComponent<Image>(profilePanel);
+        background.color = new Color(0.07f, 0.10f, 0.14f, 0.97f);
+
+        StyleProfileTitle();
+        EnsureProfileBackButton();
+        EnsureProfileLogoutButton();
+    }
+
+    private void StyleProfileTitle()
+    {
+        Transform titleTransform = profilePanel.transform.Find("ProfileText");
+        GameObject titleObj;
+        if (titleTransform != null)
+        {
+            titleObj = titleTransform.gameObject;
+        }
+        else
+        {
+            titleObj = new GameObject("ProfileText");
+            titleObj.transform.SetParent(profilePanel.transform, false);
+        }
+
+        RectTransform titleRect = GetOrAddComponent<RectTransform>(titleObj);
+        titleRect.anchorMin = new Vector2(0.5f, 1f);
+        titleRect.anchorMax = new Vector2(0.5f, 1f);
+        titleRect.pivot = new Vector2(0.5f, 1f);
+        titleRect.sizeDelta = new Vector2(500f, 60f);
+        titleRect.anchoredPosition = new Vector2(0f, -18f);
+
+        TextMeshProUGUI titleText = GetOrAddComponent<TextMeshProUGUI>(titleObj);
+        titleText.text = "PROFILE";
+        titleText.font = TMP_Settings.defaultFontAsset;
+        titleText.fontSize = 36f;
+        titleText.fontStyle = FontStyles.Bold;
+        titleText.alignment = TextAlignmentOptions.Center;
+        titleText.color = new Color(0.95f, 0.97f, 1f, 1f);
+        titleText.raycastTarget = false;
+    }
+
+    private void EnsureProfileBackButton()
+    {
+        Transform backTransform = profilePanel.transform.Find("BackButton");
+        if (backTransform != null)
+        {
+            (_profileBackButton, _profileBackButtonImage) = StyleProfileSmallButton(
+                backTransform.gameObject, "Back",
+                new Vector2(0f, 1f), new Vector2(0f, 1f),
+                new Vector2(16f, -16f), new Vector2(130f, 46f),
+                new Color(0.18f, 0.23f, 0.30f, 1f));
+            return;
+        }
+
+        GameObject backObj = CreateProfileSmallButton(
+            "BackButton", "Back",
+            new Vector2(0f, 1f), new Vector2(0f, 1f),
+            new Vector2(16f, -16f), new Vector2(130f, 46f),
+            new Color(0.18f, 0.23f, 0.30f, 1f),
+            BackToMain);
+        (_profileBackButton, _profileBackButtonImage) = (backObj.GetComponent<Button>(), backObj.GetComponent<Image>());
+    }
+
+    private void EnsureProfileLogoutButton()
+    {
+        Transform logoutTransform = logoutButton != null
+            ? logoutButton.transform
+            : profilePanel.transform.Find("MainLogoutButton");
+
+        if (logoutTransform != null)
+        {
+            logoutButton = logoutTransform.gameObject;
+            (_profileLogoutButton, _profileLogoutButtonImage) = StyleProfileSmallButton(
+                logoutTransform.gameObject, "Logout",
+                new Vector2(1f, 1f), new Vector2(1f, 1f),
+                new Vector2(-16f, -16f), new Vector2(150f, 46f),
+                new Color(0.34f, 0.15f, 0.16f, 1f));
+            return;
+        }
+
+        GameObject logoutObj = CreateProfileSmallButton(
+            "MainLogoutButton", "Logout",
+            new Vector2(1f, 1f), new Vector2(1f, 1f),
+            new Vector2(-16f, -16f), new Vector2(150f, 46f),
+            new Color(0.34f, 0.15f, 0.16f, 1f),
+            Logout);
+        logoutButton = logoutObj;
+        (_profileLogoutButton, _profileLogoutButtonImage) = (logoutObj.GetComponent<Button>(), logoutObj.GetComponent<Image>());
+    }
+
+    private void EnsureStatsCardButton()
+    {
+        if (_statsCardButton != null || profilePanel == null) return;
+
+        Transform statsTransform = profilePanel.transform.Find("StatsButton");
+        if (statsTransform != null)
+        {
+            (_statsCardButton, _statsCardImage, _statsCardText) = StyleProfileCardButton(
+                statsTransform.gameObject,
+                "STATS", "Review your\nmatch records",
+                new Vector2(-550f, -134f), new Vector2(480f, 760f),
+                new Color(0.22f, 0.25f, 0.34f, 1f),
+                new Color(0.28f, 0.32f, 0.42f, 1f),
+                new Color(0.15f, 0.17f, 0.24f, 1f));
+        }
+        else
+        {
+            (_statsCardButton, _statsCardImage, _statsCardText) = CreateCardButton(
+                "StatsButton", profilePanel.transform,
+                "STATS", "Review your\nmatch records",
+                new Vector2(-550f, -134f), new Vector2(480f, 760f),
+                new Color(0.22f, 0.25f, 0.34f, 1f),
+                new Color(0.28f, 0.32f, 0.42f, 1f),
+                new Color(0.15f, 0.17f, 0.24f, 1f),
+                OpenStats);
+        }
+    }
+
+    private (Button btn, Image img, TextMeshProUGUI label) StyleProfileCardButton(
+        GameObject obj,
+        string title, string subtitle,
+        Vector2 position, Vector2 size,
+        Color baseColor, Color hoverColor, Color pressColor)
+    {
+        RectTransform rect = GetOrAddComponent<RectTransform>(obj);
+        rect.anchorMin = new Vector2(0.5f, 0.5f);
+        rect.anchorMax = new Vector2(0.5f, 0.5f);
+        rect.pivot = new Vector2(0.5f, 0.5f);
+        rect.sizeDelta = size;
+        rect.anchoredPosition = position;
+
+        Image img = GetOrAddComponent<Image>(obj);
+        img.color = baseColor;
+
+        Button btn = GetOrAddComponent<Button>(obj);
+        btn.targetGraphic = img;
+        ColorBlock colors = btn.colors;
+        colors.normalColor = baseColor;
+        colors.highlightedColor = hoverColor;
+        colors.pressedColor = pressColor;
+        colors.selectedColor = hoverColor;
+        colors.disabledColor = new Color(0.15f, 0.15f, 0.17f, 0.85f);
+        btn.colors = colors;
+
+        DisableExistingChildren(obj.transform);
+
+        GameObject content = new GameObject("StyledContent");
+        content.transform.SetParent(obj.transform, false);
+        RectTransform contentRect = content.AddComponent<RectTransform>();
+        contentRect.anchorMin = Vector2.zero;
+        contentRect.anchorMax = Vector2.one;
+        contentRect.offsetMin = Vector2.zero;
+        contentRect.offsetMax = Vector2.zero;
+
+        VerticalLayoutGroup layout = content.AddComponent<VerticalLayoutGroup>();
+        layout.padding = new RectOffset(28, 28, 40, 40);
+        layout.spacing = 20f;
+        layout.childAlignment = TextAnchor.MiddleCenter;
+        layout.childControlWidth = true;
+        layout.childControlHeight = true;
+        layout.childForceExpandWidth = true;
+        layout.childForceExpandHeight = false;
+
+        GameObject titleObj = new GameObject("Title");
+        titleObj.transform.SetParent(content.transform, false);
+        titleObj.AddComponent<LayoutElement>().preferredHeight = 80f;
+        TextMeshProUGUI titleText = titleObj.AddComponent<TextMeshProUGUI>();
+        titleText.text = title;
+        titleText.font = TMP_Settings.defaultFontAsset;
+        titleText.fontSize = 52f;
+        titleText.fontStyle = FontStyles.Bold;
+        titleText.alignment = TextAlignmentOptions.Center;
+        titleText.color = Color.white;
+        titleText.raycastTarget = false;
+
+        GameObject subtitleObj = new GameObject("Subtitle");
+        subtitleObj.transform.SetParent(content.transform, false);
+        subtitleObj.AddComponent<LayoutElement>().preferredHeight = 60f;
+        TextMeshProUGUI subtitleText = subtitleObj.AddComponent<TextMeshProUGUI>();
+        subtitleText.text = subtitle;
+        subtitleText.font = TMP_Settings.defaultFontAsset;
+        subtitleText.fontSize = 26f;
+        subtitleText.fontStyle = FontStyles.Normal;
+        subtitleText.alignment = TextAlignmentOptions.Center;
+        subtitleText.color = new Color(0.85f, 0.90f, 1f, 0.85f);
+        subtitleText.enableWordWrapping = true;
+        subtitleText.raycastTarget = false;
+
+        return (btn, img, titleText);
+    }
+
+    private (Button btn, Image img) StyleProfileSmallButton(
+        GameObject obj, string label,
+        Vector2 anchor, Vector2 pivot,
+        Vector2 position, Vector2 size, Color color)
+    {
+        RectTransform rect = GetOrAddComponent<RectTransform>(obj);
+        rect.anchorMin = anchor;
+        rect.anchorMax = anchor;
+        rect.pivot = pivot;
+        rect.sizeDelta = size;
+        rect.anchoredPosition = position;
+
+        Image image = GetOrAddComponent<Image>(obj);
+        image.color = color;
+
+        Button button = GetOrAddComponent<Button>(obj);
+        button.targetGraphic = image;
+        ColorBlock colors = button.colors;
+        colors.normalColor = color;
+        colors.highlightedColor = color * 1.10f;
+        colors.pressedColor = color * 0.90f;
+        colors.selectedColor = color;
+        colors.disabledColor = new Color(color.r * 0.6f, color.g * 0.6f, color.b * 0.6f, 0.7f);
+        button.colors = colors;
+
+        TextMeshProUGUI text = GetOrCreateButtonLabel(obj.transform);
+        text.text = label;
+        text.font = TMP_Settings.defaultFontAsset;
+        text.fontSize = 20f;
+        text.fontStyle = FontStyles.Bold;
+        text.alignment = TextAlignmentOptions.Center;
+        text.color = Color.white;
+        text.raycastTarget = false;
+
+        return (button, image);
+    }
+
+    private GameObject CreateProfileSmallButton(
+        string name, string label,
+        Vector2 anchor, Vector2 pivot,
+        Vector2 position, Vector2 size, Color color,
+        UnityEngine.Events.UnityAction onClick)
+    {
+        GameObject obj = new GameObject(name);
+        obj.transform.SetParent(profilePanel.transform, false);
+        (Button button, _) = StyleProfileSmallButton(obj, label, anchor, pivot, position, size, color);
+        button.onClick.AddListener(onClick);
+        return obj;
+    }
+
+    private TextMeshProUGUI GetOrCreateButtonLabel(Transform buttonTransform)
+    {
+        TextMeshProUGUI text = buttonTransform.GetComponentInChildren<TextMeshProUGUI>(true);
+        GameObject labelObj;
+        if (text != null)
+        {
+            labelObj = text.gameObject;
+            labelObj.SetActive(true);
+        }
+        else
+        {
+            labelObj = new GameObject("Label");
+            labelObj.transform.SetParent(buttonTransform, false);
+            text = labelObj.AddComponent<TextMeshProUGUI>();
+        }
+
+        RectTransform labelRect = GetOrAddComponent<RectTransform>(labelObj);
+        labelRect.anchorMin = Vector2.zero;
+        labelRect.anchorMax = Vector2.one;
+        labelRect.offsetMin = Vector2.zero;
+        labelRect.offsetMax = Vector2.zero;
+        return text;
+    }
+
+    private void DisableExistingChildren(Transform parent)
+    {
+        for (int i = 0; i < parent.childCount; i++)
+        {
+            parent.GetChild(i).gameObject.SetActive(false);
+        }
+    }
+
+    private void RefreshStatsCardState(bool loggedIn)
+    {
+        if (_statsCardButton == null) return;
+        _statsCardButton.gameObject.SetActive(loggedIn);
+        _statsCardButton.interactable = loggedIn;
+        if (_statsCardImage != null)
+            _statsCardImage.color = loggedIn ? new Color(0.22f, 0.25f, 0.34f, 1f) : new Color(0.15f, 0.15f, 0.17f, 0.85f);
+        if (_statsCardText != null)
+            _statsCardText.color = loggedIn ? Color.white : new Color(0.6f, 0.6f, 0.6f, 0.7f);
+    }
+
+    private void RefreshProfileTopButtonState(bool loggedIn)
+    {
+        if (_profileBackButton != null)
+        {
+            _profileBackButton.interactable = true;
+            if (_profileBackButtonImage != null)
+            {
+                _profileBackButtonImage.color = new Color(0.18f, 0.23f, 0.30f, 1f);
+            }
+        }
+
+        if (_profileLogoutButton != null)
+        {
+            _profileLogoutButton.gameObject.SetActive(loggedIn);
+            _profileLogoutButton.interactable = loggedIn;
+            if (_profileLogoutButtonImage != null)
+            {
+                _profileLogoutButtonImage.color = loggedIn
+                    ? new Color(0.34f, 0.15f, 0.16f, 1f)
+                    : new Color(0.15f, 0.15f, 0.17f, 0.85f);
+            }
+        }
     }
 
     private void EnsureInventoryButton()
@@ -724,7 +1787,7 @@ public class AuthMenuController : MonoBehaviour
         (_inventoryButton, _inventoryButtonImage, _inventoryButtonText) = CreateCardButton(
             "InventoryButton", profilePanel.transform,
             "INVENTORY", "View and equip\nyour items",
-            new Vector2(100f, -134f), new Vector2(480f, 760f),
+            new Vector2(0f, -134f), new Vector2(480f, 760f),
             baseColor, new Color(0.13f, 0.42f, 0.52f, 1f), new Color(0.07f, 0.24f, 0.30f, 1f),
             OpenInventory);
 
@@ -750,7 +1813,7 @@ public class AuthMenuController : MonoBehaviour
         rect.offsetMax = Vector2.zero;
 
         _inventoryPanelController = _inventoryPanel.AddComponent<InventoryPanelController>();
-        _inventoryPanelController.Initialize(_apiClient, BackToProfile);
+        _inventoryPanelController.Initialize(_apiClient, BackToProfile, skinVisualDatabase);
         _inventoryPanel.SetActive(false);
     }
 
@@ -768,7 +1831,7 @@ public class AuthMenuController : MonoBehaviour
         (_shopButton, _shopButtonImage, _shopButtonText) = CreateCardButton(
             "ShopButton", profilePanel.transform,
             "STORE", "Buy new gear\nwith gold coins",
-            new Vector2(650f, -134f), new Vector2(480f, 760f),
+            new Vector2(550f, -134f), new Vector2(480f, 760f),
             baseColor, new Color(0.40f, 0.18f, 0.54f, 1f), new Color(0.22f, 0.10f, 0.30f, 1f),
             OpenStore);
 
@@ -862,7 +1925,7 @@ public class AuthMenuController : MonoBehaviour
         rect.offsetMax = Vector2.zero;
 
         _shopPanelController = _shopPanel.AddComponent<ShopPanelController>();
-        _shopPanelController.Initialize(_apiClient, BackToProfile);
+        _shopPanelController.Initialize(_apiClient, BackToProfile, skinVisualDatabase);
         _shopPanel.SetActive(false);
     }
 
@@ -1625,6 +2688,12 @@ public class AuthMenuController : MonoBehaviour
         tmp.alignment = TextAlignmentOptions.Center;
         tmp.color = Color.white;
         tmp.raycastTarget = false;
+    }
+
+    private static T GetOrAddComponent<T>(GameObject obj) where T : Component
+    {
+        T component = obj.GetComponent<T>();
+        return component != null ? component : obj.AddComponent<T>();
     }
 
     [Serializable]

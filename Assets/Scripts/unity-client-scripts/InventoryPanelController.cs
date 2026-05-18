@@ -21,6 +21,7 @@ public class InventoryPanelController : MonoBehaviour
     private bool _built;
     private int _userId;
     private SkinData[] _userSkins;
+    private SkinVisualDatabase _skinVisualDatabase;
 
     // Inspect overlay
     private GameObject _inspectOverlay;
@@ -32,11 +33,17 @@ public class InventoryPanelController : MonoBehaviour
     private TextMeshProUGUI _equipButtonLabel;
     private InventoryItemData _inspectItem;
 
-    public void Initialize(AuthApiClient apiClient, Action backAction)
+    public void Initialize(AuthApiClient apiClient, Action backAction, SkinVisualDatabase skinVisualDatabase = null)
     {
         _apiClient = apiClient;
         _backAction = backAction;
+        _skinVisualDatabase = skinVisualDatabase;
         EnsureBuilt();
+    }
+
+    public void SetSkinVisualDatabase(SkinVisualDatabase skinVisualDatabase)
+    {
+        _skinVisualDatabase = skinVisualDatabase;
     }
 
     public void SetApiClient(AuthApiClient apiClient)
@@ -265,10 +272,12 @@ public class InventoryPanelController : MonoBehaviour
         string detailSummary = !string.IsNullOrWhiteSpace(item.detailSummary) ? item.detailSummary : "—";
         string equippedTag = equipped ? "  [EQUIPPED]" : "";
 
-        TextMeshProUGUI nameText = CreateText(
-            CreateSection("Name", row.transform, 42f).transform,
+        TextMeshProUGUI nameText = CreateItemTitleRow(
+            row.transform,
+            item,
             $"{name}  x{Mathf.Max(0, item.quantity)}{equippedTag}",
-            30, FontStyles.Bold, true);
+            42f,
+            30f);
         nameText.color = equipped ? new Color(0.6f, 1f, 0.72f, 1f) : new Color(0.97f, 0.98f, 1f, 1f);
 
         TextMeshProUGUI statsText = CreateText(
@@ -502,13 +511,38 @@ public class InventoryPanelController : MonoBehaviour
         string name = !string.IsNullOrWhiteSpace(skin.skinName) ? skin.skinName : "Unknown Skin";
         string rarity = !string.IsNullOrWhiteSpace(skin.rarity) ? skin.rarity : "—";
 
+        GameObject skinHeader = CreateSection("SkinHeader", row.transform, 64f);
+        HorizontalLayoutGroup headerLayout = skinHeader.AddComponent<HorizontalLayoutGroup>();
+        headerLayout.spacing = 12f;
+        headerLayout.childAlignment = TextAnchor.MiddleLeft;
+        headerLayout.childControlWidth = true;
+        headerLayout.childControlHeight = true;
+        headerLayout.childForceExpandWidth = false;
+        headerLayout.childForceExpandHeight = false;
+
+        CreateSkinPreview(skinHeader.transform, skin.skinId, new Vector2(48f, 48f));
+
+        GameObject skinTextStack = CreateUIObject("SkinTextStack", skinHeader.transform);
+        LayoutElement skinTextLayout = skinTextStack.AddComponent<LayoutElement>();
+        skinTextLayout.minWidth = 0f;
+        skinTextLayout.preferredHeight = 64f;
+        skinTextLayout.flexibleWidth = 1f;
+        VerticalLayoutGroup skinTextGroup = skinTextStack.AddComponent<VerticalLayoutGroup>();
+        skinTextGroup.spacing = 2f;
+        skinTextGroup.childAlignment = TextAnchor.MiddleLeft;
+        skinTextGroup.childControlWidth = true;
+        skinTextGroup.childControlHeight = true;
+        skinTextGroup.childForceExpandWidth = true;
+        skinTextGroup.childForceExpandHeight = false;
+
         TextMeshProUGUI nameText = CreateText(
-            CreateSection("SkinName", row.transform, 38f).transform,
-            $"{name}{equippedTag}", 26, FontStyles.Bold, true);
+            CreateSection("SkinName", skinTextStack.transform, 34f).transform,
+            $"{name}{equippedTag}", 26, FontStyles.Bold, false);
+        nameText.alignment = TextAlignmentOptions.MidlineLeft;
         nameText.color = equipped ? new Color(0.5f, 0.85f, 1f, 1f) : new Color(0.9f, 0.93f, 1f, 1f);
 
         TextMeshProUGUI rarityText = CreateText(
-            CreateSection("SkinRarity", row.transform, 24f).transform,
+            CreateSection("SkinRarity", skinTextStack.transform, 24f).transform,
             $"Rarity: {rarity}", 17, FontStyles.Italic, false);
         rarityText.color = new Color(0.76f, 0.86f, 0.77f, 1f);
 
@@ -723,6 +757,105 @@ public class InventoryPanelController : MonoBehaviour
         text.color = Color.white;
         text.font = TMP_Settings.defaultFontAsset;
         return text;
+    }
+
+    private TextMeshProUGUI CreateItemTitleRow(Transform parent, InventoryItemData item, string title, float height, float fontSize)
+    {
+        GameObject section = CreateSection("Name", parent, height);
+        HorizontalLayoutGroup layout = section.AddComponent<HorizontalLayoutGroup>();
+        layout.spacing = 10f;
+        layout.childAlignment = TextAnchor.MiddleLeft;
+        layout.childControlWidth = true;
+        layout.childControlHeight = true;
+        layout.childForceExpandWidth = false;
+        layout.childForceExpandHeight = false;
+
+        if (IsWeaponItem(item))
+            CreateWeaponSwatch(section.transform, ResolveWeaponColor(item), new Vector2(24f, 24f));
+
+        GameObject textSection = CreateUIObject("NameText", section.transform);
+        LayoutElement textLayout = textSection.AddComponent<LayoutElement>();
+        textLayout.minWidth = 0f;
+        textLayout.preferredHeight = height;
+        textLayout.flexibleWidth = 1f;
+        textLayout.minHeight = height;
+
+        TextMeshProUGUI text = CreateText(textSection.transform, title, fontSize, FontStyles.Bold, false);
+        text.alignment = TextAlignmentOptions.MidlineLeft;
+        return text;
+    }
+
+    private void CreateWeaponSwatch(Transform parent, Color color, Vector2 size)
+    {
+        GameObject border = CreateUIObject("WeaponColor", parent);
+        LayoutElement borderLayout = border.AddComponent<LayoutElement>();
+        borderLayout.preferredWidth = size.x;
+        borderLayout.preferredHeight = size.y;
+        Image borderImage = GetOrAddImage(border);
+        borderImage.color = new Color(0.93f, 0.96f, 1f, 0.85f);
+
+        GameObject fill = CreateUIObject("Fill", border.transform);
+        RectTransform fillRect = GetOrAddRectTransform(fill);
+        fillRect.anchorMin = Vector2.zero;
+        fillRect.anchorMax = Vector2.one;
+        fillRect.offsetMin = new Vector2(3f, 3f);
+        fillRect.offsetMax = new Vector2(-3f, -3f);
+        GetOrAddImage(fill).color = color;
+    }
+
+    private void CreateSkinPreview(Transform parent, int skinId, Vector2 size)
+    {
+        GameObject preview = CreateUIObject("SkinPreview", parent);
+        LayoutElement layout = preview.AddComponent<LayoutElement>();
+        layout.preferredWidth = size.x;
+        layout.preferredHeight = size.y;
+        Image frame = GetOrAddImage(preview);
+        frame.color = new Color(0.88f, 0.94f, 1f, 0.25f);
+
+        GameObject body = CreateUIObject("SkinColor", preview.transform);
+        RectTransform bodyRect = GetOrAddRectTransform(body);
+        bodyRect.anchorMin = Vector2.zero;
+        bodyRect.anchorMax = Vector2.one;
+        bodyRect.offsetMin = new Vector2(5f, 5f);
+        bodyRect.offsetMax = new Vector2(-5f, -5f);
+        Image bodyImage = GetOrAddImage(body);
+        if (TryGetSkinSprite(skinId, out Sprite sprite))
+        {
+            bodyImage.sprite = sprite;
+            bodyImage.color = Color.white;
+            bodyImage.preserveAspect = true;
+        }
+        else
+        {
+            bodyImage.color = PlayerLoadout.GetSkinColor(skinId);
+        }
+    }
+
+    private bool TryGetSkinSprite(int skinId, out Sprite sprite)
+    {
+        sprite = null;
+        if (_skinVisualDatabase == null)
+            _skinVisualDatabase = FindObjectOfType<SkinVisualDatabase>();
+
+        if (_skinVisualDatabase != null && _skinVisualDatabase.TryGetSprite(skinId, out sprite))
+            return true;
+
+        return SkinVisualDatabase.TryGetSpriteGlobal(skinId, out sprite);
+    }
+
+    private static bool IsWeaponItem(InventoryItemData item)
+    {
+        return item != null && string.Equals(item.itemType, "Weapon", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static Color ResolveWeaponColor(InventoryItemData item)
+    {
+        if (item == null) return Color.white;
+        Color fallback = Color.white;
+        Color color = PlayerLoadout.ParseWeaponColor(item.weaponColor, fallback);
+        if (color != fallback || !string.IsNullOrWhiteSpace(item.weaponColor))
+            return color;
+        return PlayerLoadout.ParseWeaponColor(item.weapon_color, fallback);
     }
 
     private GameObject CreateSection(string name, Transform parent, float minHeight)

@@ -17,6 +17,7 @@ public class ShopPanelController : MonoBehaviour
     private int _userCoins;
     private ShopItemData[] _shopItems;
     private Coroutine _loadRoutine;
+    private SkinVisualDatabase _skinVisualDatabase;
 
     private TextMeshProUGUI _coinsText;
     private TextMeshProUGUI _stateText;
@@ -31,14 +32,17 @@ public class ShopPanelController : MonoBehaviour
     private static readonly Color TabInactive = new Color(0.18f, 0.22f, 0.28f, 1f);
     private static readonly Color TabActiveChallenge = new Color(0.34f, 0.16f, 0.50f, 1f);
 
-    public void Initialize(AuthApiClient apiClient, Action backAction)
+    public void Initialize(AuthApiClient apiClient, Action backAction, SkinVisualDatabase skinVisualDatabase = null)
     {
         _apiClient = apiClient;
         _backAction = backAction;
+        _skinVisualDatabase = skinVisualDatabase;
         EnsureBuilt();
     }
 
     public void SetApiClient(AuthApiClient apiClient) => _apiClient = apiClient;
+
+    public void SetSkinVisualDatabase(SkinVisualDatabase skinVisualDatabase) => _skinVisualDatabase = skinVisualDatabase;
 
     public void Open(int userId)
     {
@@ -153,10 +157,11 @@ public class ShopPanelController : MonoBehaviour
         GameObject row = CreateUIObj("ShopRow", _contentRoot);
         _rows.Add(row);
         row.AddComponent<Image>().color = new Color(0.16f, 0.20f, 0.27f, 0.98f);
+        row.AddComponent<LayoutElement>().minHeight = 220f;
 
         VerticalLayoutGroup vg = row.AddComponent<VerticalLayoutGroup>();
-        vg.padding = new RectOffset(18, 18, 12, 10);
-        vg.spacing = 5f;
+        vg.padding = new RectOffset(22, 22, 22, 20);
+        vg.spacing = 9f;
         vg.childAlignment = TextAnchor.UpperLeft;
         vg.childControlWidth  = true;
         vg.childControlHeight = true;
@@ -166,21 +171,20 @@ public class ShopPanelController : MonoBehaviour
 
         // Name + quantity badge
         string qty = item.purchaseQuantity > 1 ? $"  ×{item.purchaseQuantity}" : "";
-        MakeLabel(row.transform, $"{item.itemName}{qty}", 22, FontStyles.Bold,
-            new Color(0.97f, 0.98f, 1f, 1f), 30f);
+        MakeStoreTitleRow(row.transform, item, $"{item.itemName}{qty}", 46f);
 
         // Type • Rarity
-        MakeLabel(row.transform, $"{item.itemType}  •  {item.rarity}", 16, FontStyles.Normal,
-            new Color(0.60f, 0.82f, 1f, 1f), 22f);
+        MakeLabel(row.transform, $"{item.itemType}  •  {item.rarity}", 22, FontStyles.Normal,
+            new Color(0.60f, 0.82f, 1f, 1f), 36f);
 
         // Stats
         if (!string.IsNullOrWhiteSpace(item.detailSummary))
-            MakeLabel(row.transform, item.detailSummary, 14, FontStyles.Italic,
-                new Color(0.74f, 0.90f, 0.76f, 1f), 20f);
+            MakeLabel(row.transform, item.detailSummary, 20, FontStyles.Italic,
+                new Color(0.74f, 0.90f, 0.76f, 1f), 36f);
 
         // Price + Buy button row
         GameObject bottom = CreateUIObj("Bottom", row.transform);
-        bottom.AddComponent<LayoutElement>().preferredHeight = 40f;
+        bottom.AddComponent<LayoutElement>().preferredHeight = 58f;
 
         HorizontalLayoutGroup hlg = bottom.AddComponent<HorizontalLayoutGroup>();
         hlg.childAlignment        = TextAnchor.MiddleLeft;
@@ -195,7 +199,7 @@ public class ShopPanelController : MonoBehaviour
         priceObj.AddComponent<LayoutElement>().preferredWidth = 220f;
         var priceTMP = priceObj.AddComponent<TextMeshProUGUI>();
         priceTMP.text = $"{item.goldPrice} coins";
-        priceTMP.fontSize = 17f;
+        priceTMP.fontSize = 22f;
         priceTMP.fontStyle = FontStyles.Bold;
         priceTMP.color = canAfford ? new Color(1f, 0.85f, 0.15f, 1f) : new Color(0.75f, 0.40f, 0.40f, 1f);
         priceTMP.font = TMP_Settings.defaultFontAsset;
@@ -207,7 +211,7 @@ public class ShopPanelController : MonoBehaviour
         int capturedId = item.shopItemId;
         Color btnColor = canAfford ? new Color(0.14f, 0.42f, 0.22f, 1f) : new Color(0.22f, 0.22f, 0.22f, 0.88f);
         GameObject btnObj = CreateUIObj("BuyBtn", bottom.transform);
-        btnObj.AddComponent<LayoutElement>().preferredWidth = 120f;
+        btnObj.AddComponent<LayoutElement>().preferredWidth = 145f;
         Image btnImg = btnObj.AddComponent<Image>();
         btnImg.color = btnColor;
         Button btn = btnObj.AddComponent<Button>();
@@ -230,7 +234,7 @@ public class ShopPanelController : MonoBehaviour
         btnLabelRT.offsetMax = Vector2.zero;
         var btnTMP = btnLabel.AddComponent<TextMeshProUGUI>();
         btnTMP.text = "Buy";
-        btnTMP.fontSize = 16f;
+        btnTMP.fontSize = 21f;
         btnTMP.fontStyle = FontStyles.Bold;
         btnTMP.color = Color.white;
         btnTMP.alignment = TextAlignmentOptions.Center;
@@ -274,10 +278,11 @@ public class ShopPanelController : MonoBehaviour
             : completed
                 ? new Color(0.12f, 0.22f, 0.15f, 0.98f)
                 : new Color(0.16f, 0.18f, 0.24f, 0.98f);
+        row.AddComponent<LayoutElement>().minHeight = 205f;
 
         VerticalLayoutGroup vg = row.AddComponent<VerticalLayoutGroup>();
-        vg.padding = new RectOffset(18, 18, 14, 12);
-        vg.spacing = 8f;
+        vg.padding = new RectOffset(22, 22, 20, 18);
+        vg.spacing = 10f;
         vg.childAlignment = TextAnchor.UpperLeft;
         vg.childControlWidth  = true;
         vg.childControlHeight = true;
@@ -291,7 +296,7 @@ public class ShopPanelController : MonoBehaviour
             : completed
                 ? new Color(0.35f, 1f, 0.50f, 1f)
                 : new Color(0.95f, 0.97f, 1f, 1f);
-        MakeLabel(row.transform, $"{title}  —  🏆 100 coins", 20, FontStyles.Bold, titleColor, 28f);
+        MakeLabel(row.transform, $"{title}  —  🏆 100 coins", 27, FontStyles.Bold, titleColor, 44f);
 
         // Progress bar
         int filled = Mathf.RoundToInt(24 * progress);
@@ -302,11 +307,11 @@ public class ShopPanelController : MonoBehaviour
             : completed
                 ? new Color(0.30f, 0.95f, 0.45f, 1f)
                 : new Color(0.40f, 0.70f, 1f, 1f);
-        MakeLabel(row.transform, progressText, 14, FontStyles.Normal, barColor, 22f);
+        MakeLabel(row.transform, progressText, 20, FontStyles.Normal, barColor, 36f);
 
         // Bottom row
         GameObject bottom = CreateUIObj("Bottom", row.transform);
-        bottom.AddComponent<LayoutElement>().preferredHeight = 38f;
+        bottom.AddComponent<LayoutElement>().preferredHeight = 56f;
 
         HorizontalLayoutGroup hlg = bottom.AddComponent<HorizontalLayoutGroup>();
         hlg.childAlignment         = TextAnchor.MiddleLeft;
@@ -321,7 +326,7 @@ public class ShopPanelController : MonoBehaviour
         statusObj.AddComponent<LayoutElement>().preferredWidth = 260f;
         var statusTMP = statusObj.AddComponent<TextMeshProUGUI>();
         statusTMP.text = claimed ? "Reward claimed." : completed ? "Completed!" : "In progress...";
-        statusTMP.fontSize = 15f;
+        statusTMP.fontSize = 20f;
         statusTMP.fontStyle = (completed && !claimed) ? FontStyles.Bold : FontStyles.Italic;
         statusTMP.color = claimed
             ? new Color(0.50f, 0.55f, 0.60f, 0.85f)
@@ -338,7 +343,7 @@ public class ShopPanelController : MonoBehaviour
             ? new Color(0.55f, 0.38f, 0.10f, 1f)
             : new Color(0.25f, 0.25f, 0.27f, 0.85f);
         GameObject claimObj = CreateUIObj("ClaimBtn", bottom.transform);
-        claimObj.AddComponent<LayoutElement>().preferredWidth = 160f;
+        claimObj.AddComponent<LayoutElement>().preferredWidth = 190f;
         Image claimImg = claimObj.AddComponent<Image>();
         claimImg.color = claimColor;
         Button claimBtn = claimObj.AddComponent<Button>();
@@ -365,7 +370,7 @@ public class ShopPanelController : MonoBehaviour
         claimLabelRT.offsetMax = Vector2.zero;
         var claimTMP = claimLabel.AddComponent<TextMeshProUGUI>();
         claimTMP.text = claimed ? "Claimed" : "Claim 100 coins";
-        claimTMP.fontSize = 14f;
+        claimTMP.fontSize = 20f;
         claimTMP.fontStyle = FontStyles.Bold;
         claimTMP.color = claimable ? Color.white : new Color(0.60f, 0.62f, 0.65f, 0.85f);
         claimTMP.alignment = TextAlignmentOptions.Center;
@@ -415,11 +420,11 @@ public class ShopPanelController : MonoBehaviour
         coinsRT.anchorMin = new Vector2(1f, 1f);
         coinsRT.anchorMax = new Vector2(1f, 1f);
         coinsRT.pivot     = new Vector2(1f, 1f);
-        coinsRT.sizeDelta = new Vector2(240f, 46f);
+        coinsRT.sizeDelta = new Vector2(300f, 54f);
         coinsRT.anchoredPosition = new Vector2(-16f, -16f);
         _coinsText = coinsObj.AddComponent<TextMeshProUGUI>();
         _coinsText.text = "Coins: ...";
-        _coinsText.fontSize = 18f;
+        _coinsText.fontSize = 24f;
         _coinsText.fontStyle = FontStyles.Bold;
         _coinsText.color = new Color(1f, 0.85f, 0.15f, 1f);
         _coinsText.font = TMP_Settings.defaultFontAsset;
@@ -432,11 +437,11 @@ public class ShopPanelController : MonoBehaviour
         titleRT.anchorMin = new Vector2(0.5f, 1f);
         titleRT.anchorMax = new Vector2(0.5f, 1f);
         titleRT.pivot     = new Vector2(0.5f, 1f);
-        titleRT.sizeDelta = new Vector2(500f, 60f);
+        titleRT.sizeDelta = new Vector2(560f, 70f);
         titleRT.anchoredPosition = new Vector2(0f, -18f);
         var titleTMP = titleObj.AddComponent<TextMeshProUGUI>();
         titleTMP.text = "STORE";
-        titleTMP.fontSize = 36f;
+        titleTMP.fontSize = 46f;
         titleTMP.fontStyle = FontStyles.Bold;
         titleTMP.color = new Color(0.95f, 0.97f, 1f, 1f);
         titleTMP.alignment = TextAlignmentOptions.Center;
@@ -458,7 +463,7 @@ public class ShopPanelController : MonoBehaviour
         stateRT.anchoredPosition = Vector2.zero;
         _stateText = stateObj.AddComponent<TextMeshProUGUI>();
         _stateText.text = "";
-        _stateText.fontSize = 22f;
+        _stateText.fontSize = 28f;
         _stateText.color = new Color(0.88f, 0.90f, 0.96f, 1f);
         _stateText.alignment = TextAlignmentOptions.Center;
         _stateText.font = TMP_Settings.defaultFontAsset;
@@ -475,8 +480,8 @@ public class ShopPanelController : MonoBehaviour
         tabRT.anchorMin = new Vector2(0.5f, 1f);
         tabRT.anchorMax = new Vector2(0.5f, 1f);
         tabRT.pivot     = new Vector2(0.5f, 1f);
-        tabRT.sizeDelta = new Vector2(400f, 48f);
-        tabRT.anchoredPosition = new Vector2(0f, -74f);
+        tabRT.sizeDelta = new Vector2(500f, 58f);
+        tabRT.anchoredPosition = new Vector2(0f, -86f);
 
         HorizontalLayoutGroup hlg = tabBar.AddComponent<HorizontalLayoutGroup>();
         hlg.childAlignment         = TextAnchor.MiddleCenter;
@@ -517,7 +522,7 @@ public class ShopPanelController : MonoBehaviour
         lr.offsetMax = Vector2.zero;
         var tmp = labelObj.AddComponent<TextMeshProUGUI>();
         tmp.text = label;
-        tmp.fontSize = 19f;
+        tmp.fontSize = 24f;
         tmp.fontStyle = FontStyles.Bold;
         tmp.color = Color.white;
         tmp.alignment = TextAlignmentOptions.Center;
@@ -599,6 +604,119 @@ public class ShopPanelController : MonoBehaviour
         tmp.raycastTarget = false;
     }
 
+    private void MakeStoreTitleRow(Transform parent, ShopItemData item, string title, float height)
+    {
+        GameObject row = CreateUIObj("TitleRow", parent);
+        row.AddComponent<LayoutElement>().preferredHeight = height;
+
+        HorizontalLayoutGroup layout = row.AddComponent<HorizontalLayoutGroup>();
+        layout.spacing = 10f;
+        layout.childAlignment = TextAnchor.MiddleLeft;
+        layout.childControlWidth = true;
+        layout.childControlHeight = true;
+        layout.childForceExpandWidth = false;
+        layout.childForceExpandHeight = true;
+
+        if (IsSkinItem(item))
+            CreateSkinPreview(row.transform, item.skinId, new Vector2(34f, 34f));
+        else if (IsWeaponItem(item))
+            CreateWeaponSwatch(row.transform, ResolveWeaponColor(item), new Vector2(24f, 24f));
+
+        GameObject label = CreateUIObj("Label", row.transform);
+        LayoutElement labelLayout = label.AddComponent<LayoutElement>();
+        labelLayout.minWidth = 0f;
+        labelLayout.preferredHeight = height;
+        labelLayout.flexibleWidth = 1f;
+
+        var tmp = label.AddComponent<TextMeshProUGUI>();
+        tmp.text = title;
+        tmp.fontSize = 30f;
+        tmp.fontStyle = FontStyles.Bold;
+        tmp.color = new Color(0.97f, 0.98f, 1f, 1f);
+        tmp.font = TMP_Settings.defaultFontAsset;
+        tmp.enableWordWrapping = false;
+        tmp.overflowMode = TextOverflowModes.Ellipsis;
+        tmp.alignment = TextAlignmentOptions.MidlineLeft;
+        tmp.raycastTarget = false;
+    }
+
+    private void CreateWeaponSwatch(Transform parent, Color color, Vector2 size)
+    {
+        GameObject border = CreateUIObj("WeaponColor", parent);
+        LayoutElement borderLayout = border.AddComponent<LayoutElement>();
+        borderLayout.preferredWidth = size.x;
+        borderLayout.preferredHeight = size.y;
+        Image borderImage = GetOrAddImage(border);
+        borderImage.color = new Color(0.93f, 0.96f, 1f, 0.85f);
+
+        GameObject fill = CreateUIObj("Fill", border.transform);
+        RectTransform fillRect = GetOrAddRT(fill);
+        fillRect.anchorMin = Vector2.zero;
+        fillRect.anchorMax = Vector2.one;
+        fillRect.offsetMin = new Vector2(3f, 3f);
+        fillRect.offsetMax = new Vector2(-3f, -3f);
+        GetOrAddImage(fill).color = color;
+    }
+
+    private void CreateSkinPreview(Transform parent, int skinId, Vector2 size)
+    {
+        GameObject preview = CreateUIObj("SkinPreview", parent);
+        LayoutElement layout = preview.AddComponent<LayoutElement>();
+        layout.preferredWidth = size.x;
+        layout.preferredHeight = size.y;
+        GetOrAddImage(preview).color = new Color(0.88f, 0.94f, 1f, 0.25f);
+
+        GameObject body = CreateUIObj("SkinColor", preview.transform);
+        RectTransform bodyRect = GetOrAddRT(body);
+        bodyRect.anchorMin = Vector2.zero;
+        bodyRect.anchorMax = Vector2.one;
+        bodyRect.offsetMin = new Vector2(4f, 4f);
+        bodyRect.offsetMax = new Vector2(-4f, -4f);
+        Image bodyImage = GetOrAddImage(body);
+        if (TryGetSkinSprite(skinId, out Sprite sprite))
+        {
+            bodyImage.sprite = sprite;
+            bodyImage.color = Color.white;
+            bodyImage.preserveAspect = true;
+        }
+        else
+        {
+            bodyImage.color = PlayerLoadout.GetSkinColor(skinId);
+        }
+    }
+
+    private bool TryGetSkinSprite(int skinId, out Sprite sprite)
+    {
+        sprite = null;
+        if (_skinVisualDatabase == null)
+            _skinVisualDatabase = FindObjectOfType<SkinVisualDatabase>();
+
+        if (_skinVisualDatabase != null && _skinVisualDatabase.TryGetSprite(skinId, out sprite))
+            return true;
+
+        return SkinVisualDatabase.TryGetSpriteGlobal(skinId, out sprite);
+    }
+
+    private static bool IsWeaponItem(ShopItemData item)
+    {
+        return item != null && string.Equals(item.itemType, "Weapon", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsSkinItem(ShopItemData item)
+    {
+        return item != null && (item.skinId > 0 || string.Equals(item.itemType, "Skin", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static Color ResolveWeaponColor(ShopItemData item)
+    {
+        if (item == null) return Color.white;
+        Color fallback = Color.white;
+        Color color = PlayerLoadout.ParseWeaponColor(item.weaponColor, fallback);
+        if (color != fallback || !string.IsNullOrWhiteSpace(item.weaponColor))
+            return color;
+        return PlayerLoadout.ParseWeaponColor(item.weapon_color, fallback);
+    }
+
     private void SetState(string text)
     {
         ClearRows();
@@ -649,7 +767,7 @@ public class ShopPanelController : MonoBehaviour
         lr.offsetMax = Vector2.zero;
         var tmp = labelObj.AddComponent<TextMeshProUGUI>();
         tmp.text = label;
-        tmp.fontSize = 20f;
+        tmp.fontSize = 24f;
         tmp.fontStyle = FontStyles.Bold;
         tmp.color = Color.white;
         tmp.alignment = TextAlignmentOptions.Center;

@@ -21,17 +21,6 @@ public class StatsPanelController : MonoBehaviour
         Global
     }
 
-    [Header("Tabs")]
-    public Button playerTabButton;
-    public Button globalTabButton;
-    public GameObject playerTabSelectedVisual;
-    public GameObject globalTabSelectedVisual;
-
-    [Header("List")]
-    public Transform statsContentRoot;
-    public GameObject statSlotPrefab;
-    public TextMeshProUGUI emptyStateText;
-
     [Header("Preview Data")]
     public bool usePlaceholderDataOnEnable = true;
     public List<StatListItem> placeholderGlobalStats = new List<StatListItem>();
@@ -39,18 +28,32 @@ public class StatsPanelController : MonoBehaviour
     [Header("API")]
     public string apiBaseUrl = "http://localhost:8080";
 
+    private static readonly Color TabActive = new Color(0.12f, 0.40f, 0.52f, 1f);
+    private static readonly Color TabInactive = new Color(0.18f, 0.22f, 0.28f, 1f);
+    private static readonly Color TabGlobalActive = new Color(0.34f, 0.16f, 0.50f, 1f);
+
     private readonly List<StatListItem> _playerStats = new List<StatListItem>();
     private readonly List<StatListItem> _globalStats = new List<StatListItem>();
-    private readonly List<GameObject> _spawnedSlots = new List<GameObject>();
+    private readonly List<GameObject> _rows = new List<GameObject>();
+
     private StatsTab _activeTab = StatsTab.Player;
+    private bool _built;
+    private RectTransform _contentRoot;
+    private TextMeshProUGUI _stateText;
+    private Button _playerTabButton;
+    private Button _globalTabButton;
+    private Image _playerTabImage;
+    private Image _globalTabImage;
+    private Coroutine _globalLoadRoutine;
 
     private void Awake()
     {
-        HookTabButtons();
+        EnsureBuilt();
     }
 
     private void OnEnable()
     {
+        EnsureBuilt();
         LoadPlayerStatsFromSavedData();
 
         if (usePlaceholderDataOnEnable && _globalStats.Count == 0)
@@ -78,7 +81,11 @@ public class StatsPanelController : MonoBehaviour
     public void ShowGlobalTab()
     {
         SetActiveTab(StatsTab.Global);
-        StartCoroutine(LoadGlobalStatsFromBackend());
+        if (_globalLoadRoutine != null)
+        {
+            StopCoroutine(_globalLoadRoutine);
+        }
+        _globalLoadRoutine = StartCoroutine(LoadGlobalStatsFromBackend());
     }
 
     public void BeginPlayerStatsLoad()
@@ -111,25 +118,16 @@ public class StatsPanelController : MonoBehaviour
 
     private void AddStat(List<StatListItem> target, StatsTab ownerTab, string label, string value)
     {
-        var item = new StatListItem
+        target.Add(new StatListItem
         {
             label = label,
             value = value
-        };
+        });
 
-        target.Add(item);
-
-        if (_activeTab != ownerTab)
+        if (_activeTab == ownerTab)
         {
-            return;
+            RebuildVisibleList();
         }
-
-        if (emptyStateText != null)
-        {
-            emptyStateText.gameObject.SetActive(false);
-        }
-
-        SpawnStatSlot(item);
     }
 
     private void SetActiveTab(StatsTab tab)
@@ -141,98 +139,82 @@ public class StatsPanelController : MonoBehaviour
 
     private void RefreshTabVisuals()
     {
-        if (playerTabSelectedVisual != null) playerTabSelectedVisual.SetActive(_activeTab == StatsTab.Player);
-        if (globalTabSelectedVisual != null) globalTabSelectedVisual.SetActive(_activeTab == StatsTab.Global);
-
-        if (playerTabButton != null) playerTabButton.interactable = _activeTab != StatsTab.Player;
-        if (globalTabButton != null) globalTabButton.interactable = _activeTab != StatsTab.Global;
+        if (_playerTabButton != null) _playerTabButton.interactable = _activeTab != StatsTab.Player;
+        if (_globalTabButton != null) _globalTabButton.interactable = _activeTab != StatsTab.Global;
+        if (_playerTabImage != null) _playerTabImage.color = _activeTab == StatsTab.Player ? TabActive : TabInactive;
+        if (_globalTabImage != null) _globalTabImage.color = _activeTab == StatsTab.Global ? TabGlobalActive : TabInactive;
     }
 
     private void RebuildVisibleList()
     {
-        ClearSlots();
+        EnsureBuilt();
+        ClearRows();
 
         List<StatListItem> source = _activeTab == StatsTab.Player ? _playerStats : _globalStats;
-        bool hasItems = source.Count > 0;
-
-        if (emptyStateText != null)
+        if (source.Count == 0)
         {
-            emptyStateText.gameObject.SetActive(!hasItems);
-            emptyStateText.text = _activeTab == StatsTab.Player
+            SetState(_activeTab == StatsTab.Player
                 ? "No player stats loaded yet."
-                : "No global stats loaded yet.";
-        }
-
-        if (!hasItems)
-        {
+                : "No global stats loaded yet.");
             return;
         }
 
+        HideState();
         for (int i = 0; i < source.Count; i++)
         {
-            SpawnStatSlot(source[i]);
+            CreateStatRow(source[i], i);
         }
     }
 
-    private void SpawnStatSlot(StatListItem item)
+    private void CreateStatRow(StatListItem item, int index)
     {
-        if (statsContentRoot == null || statSlotPrefab == null)
-        {
-            Debug.LogWarning("[StatsUI] Missing statsContentRoot or statSlotPrefab reference.");
-            return;
-        }
+        GameObject row = CreateUIObj("StatRow", _contentRoot);
+        _rows.Add(row);
 
-        GameObject slot = Instantiate(statSlotPrefab, statsContentRoot);
-        _spawnedSlots.Add(slot);
+        Image rowImage = GetOrAddImage(row);
+        rowImage.color = index % 2 == 0
+            ? new Color(0.16f, 0.20f, 0.27f, 0.98f)
+            : new Color(0.14f, 0.18f, 0.24f, 0.98f);
 
-        string statLabel = string.IsNullOrWhiteSpace(item.label) ? "-" : item.label;
-        string statValue = string.IsNullOrWhiteSpace(item.value) ? "-" : item.value;
+        LayoutElement rowLayout = row.AddComponent<LayoutElement>();
+        rowLayout.minHeight = 150f;
 
-        var slotView = slot.GetComponent<StatSlotView>();
-        if (slotView != null)
-        {
-            slotView.Bind(statLabel, statValue);
-            return;
-        }
+        VerticalLayoutGroup group = row.AddComponent<VerticalLayoutGroup>();
+        group.padding = new RectOffset(22, 22, 22, 20);
+        group.spacing = 10f;
+        group.childAlignment = TextAnchor.UpperLeft;
+        group.childControlWidth = true;
+        group.childControlHeight = true;
+        group.childForceExpandWidth = true;
+        group.childForceExpandHeight = false;
 
-        TextMeshProUGUI[] labels = slot.GetComponentsInChildren<TextMeshProUGUI>(true);
-        if (labels.Length >= 2)
-        {
-            labels[0].text = statLabel;
-            labels[1].text = statValue;
-        }
-        else if (labels.Length == 1)
-        {
-            labels[0].text = $"{statLabel}: {statValue}";
-        }
+        ContentSizeFitter fitter = row.AddComponent<ContentSizeFitter>();
+        fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+        fitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
+
+        string label = string.IsNullOrWhiteSpace(item.label) ? "-" : item.label;
+        string value = string.IsNullOrWhiteSpace(item.value) ? "-" : item.value;
+
+        MakeLabel(row.transform, label, 28f, FontStyles.Bold,
+            new Color(0.97f, 0.98f, 1f, 1f), 46f, false);
+
+        Color valueColor = _activeTab == StatsTab.Player
+            ? new Color(0.76f, 0.90f, 0.76f, 1f)
+            : new Color(0.66f, 0.84f, 1f, 1f);
+
+        MakeLabel(row.transform, value, 24f, FontStyles.Normal, valueColor, 44f, true);
     }
 
-    private void ClearSlots()
+    private void ClearRows()
     {
-        for (int i = _spawnedSlots.Count - 1; i >= 0; i--)
+        for (int i = _rows.Count - 1; i >= 0; i--)
         {
-            if (_spawnedSlots[i] != null)
+            if (_rows[i] != null)
             {
-                Destroy(_spawnedSlots[i]);
+                Destroy(_rows[i]);
             }
         }
-
-        _spawnedSlots.Clear();
-    }
-
-    private void HookTabButtons()
-    {
-        if (playerTabButton != null)
-        {
-            playerTabButton.onClick.RemoveListener(ShowPlayerTab);
-            playerTabButton.onClick.AddListener(ShowPlayerTab);
-        }
-
-        if (globalTabButton != null)
-        {
-            globalTabButton.onClick.RemoveListener(ShowGlobalTab);
-            globalTabButton.onClick.AddListener(ShowGlobalTab);
-        }
+        _rows.Clear();
     }
 
     private void LoadPlayerStatsFromSavedData()
@@ -271,8 +253,10 @@ public class StatsPanelController : MonoBehaviour
             yield break;
         }
 
-        string baseUrl = string.IsNullOrWhiteSpace(apiBaseUrl)
-            ? GameStatsTracker.ApiBaseUrl
+        SetState("Loading global stats...");
+
+        string baseUrl = !string.IsNullOrWhiteSpace(GameStatsTracker.ApiBaseUrl)
+            ? GameStatsTracker.ApiBaseUrl.TrimEnd('/')
             : apiBaseUrl.TrimEnd('/');
 
         string endpoint = $"{baseUrl}/stats/global";
@@ -338,6 +322,301 @@ public class StatsPanelController : MonoBehaviour
         long minutes = (safeSeconds % 3600) / 60;
         long seconds = safeSeconds % 60;
         return $"{hours:00}:{minutes:00}:{seconds:00}";
+    }
+
+    private void EnsureBuilt()
+    {
+        if (_built) return;
+        _built = true;
+
+        ClearExistingChildren();
+
+        RectTransform rootRect = GetOrAddRT(gameObject);
+        rootRect.anchorMin = Vector2.zero;
+        rootRect.anchorMax = Vector2.one;
+        rootRect.offsetMin = Vector2.zero;
+        rootRect.offsetMax = Vector2.zero;
+        GetOrAddImage(gameObject).color = new Color(0.07f, 0.10f, 0.14f, 0.97f);
+
+        GameObject backBtn = CreateButton("BackBtn", transform, "Back",
+            new Vector2(16f, -16f), new Vector2(130f, 46f),
+            new Vector2(0f, 1f), new Vector2(0f, 1f),
+            new Color(0.18f, 0.23f, 0.30f, 1f));
+        backBtn.GetComponent<Button>().onClick.AddListener(HandleBackPressed);
+
+        BuildTitle();
+        BuildTabBar();
+        BuildStateText();
+        BuildScrollView();
+        RefreshTabVisuals();
+    }
+
+    private void ClearExistingChildren()
+    {
+        for (int i = transform.childCount - 1; i >= 0; i--)
+        {
+            Destroy(transform.GetChild(i).gameObject);
+        }
+    }
+
+    private void BuildTitle()
+    {
+        GameObject titleObj = CreateUIObj("Title", transform);
+        RectTransform titleRT = GetOrAddRT(titleObj);
+        titleRT.anchorMin = new Vector2(0.5f, 1f);
+        titleRT.anchorMax = new Vector2(0.5f, 1f);
+        titleRT.pivot = new Vector2(0.5f, 1f);
+        titleRT.sizeDelta = new Vector2(560f, 70f);
+        titleRT.anchoredPosition = new Vector2(0f, -18f);
+
+        TextMeshProUGUI title = titleObj.AddComponent<TextMeshProUGUI>();
+        title.text = "STATS";
+        title.fontSize = 46f;
+        title.fontStyle = FontStyles.Bold;
+        title.color = new Color(0.95f, 0.97f, 1f, 1f);
+        title.alignment = TextAlignmentOptions.Center;
+        title.font = TMP_Settings.defaultFontAsset;
+        title.raycastTarget = false;
+    }
+
+    private void BuildTabBar()
+    {
+        GameObject tabBar = CreateUIObj("TabBar", transform);
+        RectTransform tabRT = GetOrAddRT(tabBar);
+        tabRT.anchorMin = new Vector2(0.5f, 1f);
+        tabRT.anchorMax = new Vector2(0.5f, 1f);
+        tabRT.pivot = new Vector2(0.5f, 1f);
+        tabRT.sizeDelta = new Vector2(460f, 58f);
+        tabRT.anchoredPosition = new Vector2(0f, -86f);
+
+        HorizontalLayoutGroup group = tabBar.AddComponent<HorizontalLayoutGroup>();
+        group.childAlignment = TextAnchor.MiddleCenter;
+        group.childControlWidth = true;
+        group.childControlHeight = true;
+        group.childForceExpandWidth = true;
+        group.childForceExpandHeight = true;
+        group.spacing = 6f;
+
+        (_playerTabButton, _playerTabImage) = BuildTabButton(tabBar.transform, "Player", TabActive);
+        (_globalTabButton, _globalTabImage) = BuildTabButton(tabBar.transform, "Global", TabInactive);
+
+        _playerTabButton.onClick.AddListener(ShowPlayerTab);
+        _globalTabButton.onClick.AddListener(ShowGlobalTab);
+    }
+
+    private (Button, Image) BuildTabButton(Transform parent, string label, Color color)
+    {
+        GameObject obj = CreateUIObj("Tab_" + label, parent);
+        Image image = obj.AddComponent<Image>();
+        image.color = color;
+
+        Button button = obj.AddComponent<Button>();
+        button.targetGraphic = image;
+        ColorBlock colors = button.colors;
+        colors.normalColor = color;
+        colors.highlightedColor = color * 1.12f;
+        colors.pressedColor = color * 0.88f;
+        colors.selectedColor = color;
+        colors.disabledColor = new Color(color.r * 0.7f, color.g * 0.7f, color.b * 0.7f, 1f);
+        button.colors = colors;
+
+        GameObject labelObj = CreateUIObj("Label", obj.transform);
+        RectTransform labelRT = GetOrAddRT(labelObj);
+        labelRT.anchorMin = Vector2.zero;
+        labelRT.anchorMax = Vector2.one;
+        labelRT.offsetMin = Vector2.zero;
+        labelRT.offsetMax = Vector2.zero;
+
+        TextMeshProUGUI text = labelObj.AddComponent<TextMeshProUGUI>();
+        text.text = label;
+        text.fontSize = 24f;
+        text.fontStyle = FontStyles.Bold;
+        text.color = Color.white;
+        text.alignment = TextAlignmentOptions.Center;
+        text.font = TMP_Settings.defaultFontAsset;
+        text.raycastTarget = false;
+
+        return (button, image);
+    }
+
+    private void BuildStateText()
+    {
+        GameObject stateObj = CreateUIObj("StateText", transform);
+        RectTransform stateRT = GetOrAddRT(stateObj);
+        stateRT.anchorMin = new Vector2(0.1f, 0.4f);
+        stateRT.anchorMax = new Vector2(0.9f, 0.6f);
+        stateRT.pivot = new Vector2(0.5f, 0.5f);
+        stateRT.offsetMin = Vector2.zero;
+        stateRT.offsetMax = Vector2.zero;
+        stateRT.anchoredPosition = Vector2.zero;
+
+        _stateText = stateObj.AddComponent<TextMeshProUGUI>();
+        _stateText.text = "";
+        _stateText.fontSize = 28f;
+        _stateText.color = new Color(0.88f, 0.90f, 0.96f, 1f);
+        _stateText.alignment = TextAlignmentOptions.Center;
+        _stateText.font = TMP_Settings.defaultFontAsset;
+        _stateText.raycastTarget = false;
+    }
+
+    private void BuildScrollView()
+    {
+        GameObject scrollRoot = CreateUIObj("ScrollView", transform);
+        RectTransform scrollRT = GetOrAddRT(scrollRoot);
+        scrollRT.anchorMin = new Vector2(0.01f, 0.04f);
+        scrollRT.anchorMax = new Vector2(0.99f, 0.88f);
+        scrollRT.pivot = new Vector2(0.5f, 0.5f);
+        scrollRT.offsetMin = Vector2.zero;
+        scrollRT.offsetMax = Vector2.zero;
+        scrollRT.anchoredPosition = Vector2.zero;
+        GetOrAddImage(scrollRoot).color = new Color(0.11f, 0.14f, 0.19f, 0.92f);
+
+        ScrollRect scroll = scrollRoot.AddComponent<ScrollRect>();
+        scroll.horizontal = false;
+        scroll.movementType = ScrollRect.MovementType.Clamped;
+        scroll.scrollSensitivity = 30f;
+
+        GameObject viewport = CreateUIObj("Viewport", scrollRoot.transform);
+        RectTransform viewportRT = GetOrAddRT(viewport);
+        viewportRT.anchorMin = Vector2.zero;
+        viewportRT.anchorMax = Vector2.one;
+        viewportRT.offsetMin = new Vector2(10f, 10f);
+        viewportRT.offsetMax = new Vector2(-10f, -10f);
+        GetOrAddImage(viewport).color = new Color(1f, 1f, 1f, 0.02f);
+        viewport.AddComponent<Mask>().showMaskGraphic = false;
+
+        GameObject content = CreateUIObj("Content", viewport.transform);
+        _contentRoot = GetOrAddRT(content);
+        _contentRoot.anchorMin = new Vector2(0f, 1f);
+        _contentRoot.anchorMax = new Vector2(1f, 1f);
+        _contentRoot.pivot = new Vector2(0.5f, 1f);
+        _contentRoot.offsetMin = Vector2.zero;
+        _contentRoot.offsetMax = Vector2.zero;
+        _contentRoot.sizeDelta = Vector2.zero;
+
+        VerticalLayoutGroup contentLayout = content.AddComponent<VerticalLayoutGroup>();
+        contentLayout.padding = new RectOffset(0, 0, 0, 0);
+        contentLayout.spacing = 10f;
+        contentLayout.childAlignment = TextAnchor.UpperCenter;
+        contentLayout.childControlWidth = true;
+        contentLayout.childControlHeight = true;
+        contentLayout.childForceExpandWidth = true;
+        contentLayout.childForceExpandHeight = false;
+
+        ContentSizeFitter contentSize = content.AddComponent<ContentSizeFitter>();
+        contentSize.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+        contentSize.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
+
+        scroll.viewport = viewportRT;
+        scroll.content = _contentRoot;
+    }
+
+    private void MakeLabel(Transform parent, string textValue, float size, FontStyles style,
+        Color color, float height, bool wrap)
+    {
+        GameObject obj = CreateUIObj("Label", parent);
+        LayoutElement layout = obj.AddComponent<LayoutElement>();
+        layout.preferredHeight = height;
+
+        TextMeshProUGUI text = obj.AddComponent<TextMeshProUGUI>();
+        text.text = textValue;
+        text.fontSize = size;
+        text.fontStyle = style;
+        text.color = color;
+        text.font = TMP_Settings.defaultFontAsset;
+        text.enableWordWrapping = wrap;
+        text.overflowMode = wrap ? TextOverflowModes.Overflow : TextOverflowModes.Ellipsis;
+        text.alignment = TextAlignmentOptions.MidlineLeft;
+        text.raycastTarget = false;
+    }
+
+    private void SetState(string text)
+    {
+        ClearRows();
+        if (_stateText == null) return;
+        _stateText.gameObject.SetActive(true);
+        _stateText.text = text;
+    }
+
+    private void HideState()
+    {
+        if (_stateText != null)
+        {
+            _stateText.gameObject.SetActive(false);
+        }
+    }
+
+    private void HandleBackPressed()
+    {
+        AuthMenuController menu = FindObjectOfType<AuthMenuController>();
+        if (menu != null)
+        {
+            menu.BackToProfile();
+            return;
+        }
+
+        gameObject.SetActive(false);
+    }
+
+    private GameObject CreateButton(string name, Transform parent, string label,
+        Vector2 anchoredPosition, Vector2 size, Vector2 anchorMin, Vector2 anchorMax, Color color)
+    {
+        GameObject obj = CreateUIObj(name, parent);
+        RectTransform rect = GetOrAddRT(obj);
+        rect.anchorMin = anchorMin;
+        rect.anchorMax = anchorMax;
+        rect.pivot = anchorMin;
+        rect.sizeDelta = size;
+        rect.anchoredPosition = anchoredPosition;
+
+        Image image = GetOrAddImage(obj);
+        image.color = color;
+
+        Button button = obj.AddComponent<Button>();
+        button.targetGraphic = image;
+        ColorBlock colors = button.colors;
+        colors.normalColor = color;
+        colors.highlightedColor = color * 1.10f;
+        colors.pressedColor = color * 0.90f;
+        colors.selectedColor = color;
+        button.colors = colors;
+
+        GameObject labelObj = CreateUIObj("Label", obj.transform);
+        RectTransform labelRT = GetOrAddRT(labelObj);
+        labelRT.anchorMin = Vector2.zero;
+        labelRT.anchorMax = Vector2.one;
+        labelRT.offsetMin = Vector2.zero;
+        labelRT.offsetMax = Vector2.zero;
+
+        TextMeshProUGUI text = labelObj.AddComponent<TextMeshProUGUI>();
+        text.text = label;
+        text.fontSize = 24f;
+        text.fontStyle = FontStyles.Bold;
+        text.color = Color.white;
+        text.alignment = TextAlignmentOptions.Center;
+        text.font = TMP_Settings.defaultFontAsset;
+        text.raycastTarget = false;
+
+        return obj;
+    }
+
+    private static GameObject CreateUIObj(string name, Transform parent)
+    {
+        GameObject obj = new GameObject(name);
+        obj.transform.SetParent(parent, false);
+        return obj;
+    }
+
+    private static RectTransform GetOrAddRT(GameObject obj)
+    {
+        RectTransform rect = obj.GetComponent<RectTransform>();
+        return rect != null ? rect : obj.AddComponent<RectTransform>();
+    }
+
+    private static Image GetOrAddImage(GameObject obj)
+    {
+        Image image = obj.GetComponent<Image>();
+        return image != null ? image : obj.AddComponent<Image>();
     }
 
     [Serializable]

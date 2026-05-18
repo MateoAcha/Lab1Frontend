@@ -103,6 +103,8 @@ public class GameStateGuest : MonoBehaviour
             burstSeq = player != null ? player.NetworkBurstSequence : 0,
             consumableSeq = player != null ? player.NetworkConsumableSequence : 0,
             weaponDamage = Mathf.Max(1, PlayerLoadout.WeaponDamage),
+            weaponType = PlayerLoadout.CurrentWeaponKind.ToString(),
+            weaponColor = PlayerLoadout.WeaponColorHex,
             maxHp = Mathf.Max(1f, PlayerLoadout.MaxHP),
             consumableQuantity = Mathf.Max(0, PlayerLoadout.ConsumableQuantity),
             consumableHealAmount = Mathf.Max(0f, PlayerLoadout.ConsumableHealAmount),
@@ -129,6 +131,8 @@ public class GameStateGuest : MonoBehaviour
         if (input.chargeSeq != _lastSentInput.chargeSeq) return true;
         if (input.burstSeq != _lastSentInput.burstSeq) return true;
         if (input.consumableSeq != _lastSentInput.consumableSeq) return true;
+        if (!string.Equals(input.weaponType, _lastSentInput.weaponType, StringComparison.Ordinal)) return true;
+        if (!string.Equals(input.weaponColor, _lastSentInput.weaponColor, StringComparison.Ordinal)) return true;
 
         return false;
     }
@@ -326,10 +330,12 @@ public class GameStateGuest : MonoBehaviour
             foreach (OnlineProjectileState projectile in projectiles)
             {
                 if (projectile == null || projectile.life <= 0f) continue;
+                if (projectile.fromPlayer && projectile.ownerId == 1) continue;
                 activeIds.Add(projectile.id);
 
                 if (_projectileReplicas.TryGetValue(projectile.id, out OnlineEntityReplica replica) && replica != null)
                 {
+                    replica.transform.localScale = Vector3.one * Mathf.Max(0.05f, projectile.size > 0f ? projectile.size : 0.25f);
                     replica.SetTarget(
                         new Vector3(projectile.x, projectile.y, 0f),
                         new Vector3(projectile.vx, projectile.vy, 0f),
@@ -347,15 +353,18 @@ public class GameStateGuest : MonoBehaviour
 
     private OnlineEntityReplica SpawnProjectileReplica(OnlineProjectileState projectile)
     {
-        GameObject go = new GameObject("ProjectileReplica");
+        GameObject go = new GameObject(projectile.fromPlayer ? "PlayerProjectileReplica" : "ProjectileReplica");
         go.transform.position = new Vector3(projectile.x, projectile.y, 0f);
-        go.transform.localScale = new Vector3(0.25f, 0.25f, 1f);
+        float size = projectile.fromPlayer && projectile.size > 0f ? projectile.size : 0.25f;
+        go.transform.localScale = new Vector3(size, size, 1f);
 
         SpriteRenderer sr = go.AddComponent<SpriteRenderer>();
         sr.sprite = SimpleSprite.Square;
-        sr.color = new Color(1f, 0.55f, 0.15f, 1f);
+        sr.color = projectile.fromPlayer
+            ? PlayerLoadout.ParseWeaponColor(projectile.color, Color.white)
+            : new Color(1f, 0.55f, 0.15f, 1f);
         sr.sortingOrder = 9;
-        if (_projMat != null) { sr.sharedMaterial = _projMat; sr.color = Color.white; }
+        if (!projectile.fromPlayer && _projMat != null) { sr.sharedMaterial = _projMat; sr.color = Color.white; }
 
         OnlineEntityReplica replica = go.AddComponent<OnlineEntityReplica>();
         replica.SnapTo(go.transform.position);

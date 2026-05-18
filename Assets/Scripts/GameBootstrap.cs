@@ -15,6 +15,7 @@ public class GameBootstrap : MonoBehaviour
     public Material meleeEnemyMaterial;
     public Material rangedEnemyMaterial;
     public Material enemyProjectileMaterial;
+    public SkinVisualDatabase skinVisualDatabase;
     [Header("Rocks")]
     public Sprite rockSprite;
     public Material rockMaterial;
@@ -118,20 +119,15 @@ public class GameBootstrap : MonoBehaviour
         player.transform.localScale = new Vector3(playerSize, playerSize, 1f);
 
         SpriteRenderer renderer = player.AddComponent<SpriteRenderer>();
-        renderer.sprite = SimpleSprite.Square;
         renderer.sortingOrder = 6;
 
         if (index == 0)
         {
-            renderer.color = PlayerLoadout.GetSkinColor();
-            if (playerMaterial != null)
-            {
-                renderer.sharedMaterial = playerMaterial;
-                renderer.color = PlayerLoadout.GetSkinColor();
-            }
+            ApplyPlayerSkin(renderer);
         }
         else
         {
+            renderer.sprite = SimpleSprite.Square;
             renderer.color = new Color(1f, 0.65f, 0.1f, 1f); // orange for P2
             if (playerMaterial != null)
             {
@@ -149,6 +145,44 @@ public class GameBootstrap : MonoBehaviour
 
         player.AddComponent<PlayerPointer>();
         return pc;
+    }
+
+    private void ApplyPlayerSkin(SpriteRenderer renderer)
+    {
+        if (renderer == null) return;
+
+        if (TryGetEquippedSkinSprite(out Sprite skinSprite))
+        {
+            renderer.sprite = skinSprite;
+            renderer.color = Color.white;
+        }
+        else
+        {
+            renderer.sprite = SimpleSprite.Square;
+            renderer.color = PlayerLoadout.GetSkinColor();
+        }
+
+        if (playerMaterial != null)
+        {
+            renderer.sharedMaterial = playerMaterial;
+            if (skinSprite == null)
+                renderer.color = PlayerLoadout.GetSkinColor();
+        }
+    }
+
+    private bool TryGetEquippedSkinSprite(out Sprite sprite)
+    {
+        int skinId = PlayerLoadout.EquippedSkinId;
+        if (skinId <= 0)
+        {
+            sprite = null;
+            return false;
+        }
+
+        if (skinVisualDatabase != null && skinVisualDatabase.TryGetSprite(skinId, out sprite))
+            return true;
+
+        return SkinVisualDatabase.TryGetSpriteGlobal(skinId, out sprite);
     }
 
     private void SetupGameOverScreen()

@@ -86,6 +86,8 @@ public class GameStateHost : MonoBehaviour
 
         _remotePlayer.ConfigureNetworkLoadout(
             input.weaponDamage,
+            input.weaponType,
+            input.weaponColor,
             input.maxHp,
             input.consumableQuantity,
             input.consumableHealAmount,
@@ -234,6 +236,31 @@ public class GameStateHost : MonoBehaviour
             projectiles.Add(new OnlineProjectileState
             {
                 id = GetOrAssignId(projectile.gameObject),
+                fromPlayer = false,
+                x = projectile.transform.position.x,
+                y = projectile.transform.position.y,
+                vx = projectile.direction.x * projectile.speed,
+                vy = projectile.direction.y * projectile.speed,
+                life = projectile.RemainingLife
+            });
+        }
+
+        for (int i = OnlineNetworkRegistry.PlayerProjectiles.Count - 1; i >= 0; i--)
+        {
+            PlayerProjectile projectile = OnlineNetworkRegistry.PlayerProjectiles[i];
+            if (projectile == null)
+            {
+                OnlineNetworkRegistry.PlayerProjectiles.RemoveAt(i);
+                continue;
+            }
+
+            projectiles.Add(new OnlineProjectileState
+            {
+                id = GetOrAssignId(projectile.gameObject),
+                fromPlayer = true,
+                ownerId = projectile.ownerPlayerIndex,
+                color = "#" + ColorUtility.ToHtmlStringRGB(projectile.projectileColor),
+                size = Mathf.Max(0.05f, projectile.transform.localScale.x),
                 x = projectile.transform.position.x,
                 y = projectile.transform.position.y,
                 vx = projectile.direction.x * projectile.speed,

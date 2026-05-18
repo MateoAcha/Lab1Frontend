@@ -2,9 +2,19 @@ using System;
 using System.Globalization;
 using UnityEngine;
 
+public enum WeaponKind
+{
+    Spear,
+    Sword,
+    Ranged
+}
+
 public static class PlayerLoadout
 {
     public static int WeaponDamage { get; private set; } = 1;
+    public static WeaponKind CurrentWeaponKind { get; private set; } = WeaponKind.Spear;
+    public static Color WeaponColor { get; private set; } = Color.white;
+    public static string WeaponColorHex { get; private set; } = "#FFFFFF";
     public static float MaxHP { get; private set; } = 10f;
     public static int ConsumableQuantity { get; private set; } = 0;
     public static float ConsumableHealAmount { get; private set; } = 0f;
@@ -36,7 +46,12 @@ public static class PlayerLoadout
 
     public static Color GetSkinColor()
     {
-        return EquippedSkinId switch
+        return GetSkinColor(EquippedSkinId);
+    }
+
+    public static Color GetSkinColor(int skinId)
+    {
+        return skinId switch
         {
             2001 => new Color(1f, 0.25f, 0.25f, 1f),    // Crimson Edge
             2002 => new Color(0.25f, 0.85f, 0.35f, 1f), // Field Green
@@ -133,6 +148,9 @@ public static class PlayerLoadout
     public static void Apply(InventoryItemData weapon, InventoryItemData armor, InventoryItemData consumable)
     {
         WeaponDamage = 1;
+        CurrentWeaponKind = WeaponKind.Spear;
+        WeaponColor = Color.white;
+        WeaponColorHex = "#FFFFFF";
         MaxHP = 10f;
         ConsumableQuantity = 0;
         ConsumableHealAmount = 0f;
@@ -145,6 +163,15 @@ public static class PlayerLoadout
         {
             int dmg = ParseKeyValue(weapon.detailSummary, "DMG");
             if (dmg > 0) WeaponDamage = dmg;
+
+            CurrentWeaponKind = ResolveWeaponKind(weapon);
+            WeaponColorHex = ResolveWeaponColorHex(weapon);
+            if (!ColorUtility.TryParseHtmlString(WeaponColorHex, out Color parsed))
+            {
+                parsed = Color.white;
+                WeaponColorHex = "#FFFFFF";
+            }
+            WeaponColor = parsed;
         }
 
         if (armor != null)
@@ -198,6 +225,146 @@ public static class PlayerLoadout
             }
         }
         return 0;
+    }
+
+    public static WeaponKind ParseWeaponKind(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return WeaponKind.Spear;
+
+        string normalized = NormalizeWeaponKindText(value);
+        if (normalized.Contains("ranged") ||
+            normalized.Contains("range") ||
+            normalized.Contains("bow") ||
+            normalized.Contains("projectile") ||
+            normalized.Contains("shoot") ||
+            normalized.Contains("gun"))
+        {
+            return WeaponKind.Ranged;
+        }
+
+        if (normalized.Contains("sword") ||
+            normalized.Contains("blade") ||
+            normalized.Contains("slash"))
+        {
+            return WeaponKind.Sword;
+        }
+
+        return WeaponKind.Spear;
+    }
+
+    public static Color ParseWeaponColor(string value, Color fallback)
+    {
+        if (ColorUtility.TryParseHtmlString(value, out Color color))
+            return color;
+        if (ColorUtility.TryParseHtmlString(NormalizeColorHex(value), out color))
+            return color;
+        return fallback;
+    }
+
+    private static WeaponKind ResolveWeaponKind(InventoryItemData weapon)
+    {
+        string explicitType = FirstNonEmpty(
+            weapon.weaponType,
+            weapon.weapon_type,
+            weapon.weaponSubtype,
+            weapon.weapon_subtype,
+            weapon.weaponClass,
+            weapon.weapon_class);
+        if (!string.IsNullOrWhiteSpace(explicitType))
+            return ParseWeaponKind(explicitType);
+
+        string summaryType = FirstNonEmpty(
+            ParseTextKeyValue(weapon.detailSummary, "WEAPON_TYPE"),
+            ParseTextKeyValue(weapon.detailSummary, "WEAPON TYPE"),
+            ParseTextKeyValue(weapon.detailSummary, "TYPE"),
+            ParseTextKeyValue(weapon.detailSummary, "KIND"),
+            ParseTextKeyValue(weapon.detailSummary, "CLASS"));
+        if (!string.IsNullOrWhiteSpace(summaryType))
+            return ParseWeaponKind(summaryType);
+
+        string searchable = string.Join(" ",
+            weapon.itemName ?? "",
+            weapon.description ?? "",
+            weapon.detailSummary ?? "");
+        WeaponKind inferred = ParseWeaponKind(searchable);
+        if (inferred != WeaponKind.Spear)
+            return inferred;
+
+        return WeaponKind.Spear;
+    }
+
+    private static string ResolveWeaponColorHex(InventoryItemData weapon)
+    {
+        string color = NormalizeColorHex(FirstNonEmpty(weapon.weaponColor, weapon.weapon_color));
+        if (!string.IsNullOrWhiteSpace(color))
+            return color;
+
+        color = NormalizeColorHex(FirstNonEmpty(
+            ParseTextKeyValue(weapon.detailSummary, "WEAPON_COLOR"),
+            ParseTextKeyValue(weapon.detailSummary, "WEAPON COLOR"),
+            ParseTextKeyValue(weapon.detailSummary, "COLOR")));
+        return string.IsNullOrWhiteSpace(color) ? "#FFFFFF" : color;
+    }
+
+    private static string ParseTextKeyValue(string summary, string key)
+    {
+        if (string.IsNullOrWhiteSpace(summary)) return "";
+        string[] parts = summary.Split('|');
+        foreach (string part in parts)
+        {
+            string t = part.Trim();
+            string prefix = key + ":";
+            if (t.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                return t.Substring(prefix.Length).Trim();
+        }
+        return "";
+    }
+
+    private static string NormalizeColorHex(string color)
+    {
+        if (string.IsNullOrWhiteSpace(color))
+            return "";
+
+        string trimmed = color.Trim();
+        if (trimmed.StartsWith("#", StringComparison.Ordinal))
+            return trimmed;
+        if ((trimmed.Length == 6 || trimmed.Length == 8) && IsHex(trimmed))
+            return "#" + trimmed;
+        return trimmed;
+    }
+
+    private static string NormalizeWeaponKindText(string value)
+    {
+        string lower = value.Trim().ToLowerInvariant();
+        return lower
+            .Replace("_", "")
+            .Replace("-", "")
+            .Replace(" ", "");
+    }
+
+    private static bool IsHex(string value)
+    {
+        for (int i = 0; i < value.Length; i++)
+        {
+            char c = value[i];
+            bool hex = (c >= '0' && c <= '9') ||
+                (c >= 'a' && c <= 'f') ||
+                (c >= 'A' && c <= 'F');
+            if (!hex) return false;
+        }
+        return true;
+    }
+
+    private static string FirstNonEmpty(params string[] values)
+    {
+        if (values == null) return "";
+        foreach (string value in values)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+                return value;
+        }
+        return "";
     }
 
     private static float ParseHealAmount(string summary)

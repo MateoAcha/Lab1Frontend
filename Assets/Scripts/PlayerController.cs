@@ -15,6 +15,13 @@ public class PlayerController : MonoBehaviour
     public float length = 4.5f;
     public float width = 0.5f;
     public float time = 0.12f;
+    [Header("Weapon Types")]
+    public float swordRangeMultiplier = 0.7f;
+    public float swordWidthMultiplier = 1.8f;
+    public float swordArcDegrees = 110f;
+    public float rangedProjectileSpeed = 12f;
+    public float rangedProjectileLife = 2.2f;
+    public float rangedProjectileSize = 0.35f;
     [Header("Charge Ability (E)")]
     public float chargeDuration = 0.3f;
     public float chargeCooldown = 5f;
@@ -46,6 +53,8 @@ public class PlayerController : MonoBehaviour
     private bool _externalConsumableDown;
     private bool _hasNetworkLoadout;
     private int _networkWeaponDamage = 1;
+    private WeaponKind _networkWeaponKind = WeaponKind.Spear;
+    private Color _networkWeaponColor = Color.white;
     private int _networkConsumableQuantity;
     private float _networkConsumableHealAmount;
     private float _networkConsumableCooldown;
@@ -181,10 +190,10 @@ public class PlayerController : MonoBehaviour
             body.linearVelocity = move * activeSpeed;
         }
 
-        bool attackDown = ReadAttackDown();
-        if (!_useExternalInput && attackDown) NetworkAttackSequence++;
-        if (attackDown && Time.time >= nextAttack)
+        bool attackRequested = ReadAttackRequested();
+        if (attackRequested && Time.time >= nextAttack)
         {
+            if (!_useExternalInput) NetworkAttackSequence++;
             look = ReadMouseAimDirection();
             LastAimDirection = look;
             Attack(look, 1f, 1f);
@@ -236,6 +245,8 @@ public class PlayerController : MonoBehaviour
 
     public void ConfigureNetworkLoadout(
         int weaponDamage,
+        string weaponType,
+        string weaponColor,
         float maxHp,
         int consumableQuantity,
         float consumableHealAmount,
@@ -246,6 +257,8 @@ public class PlayerController : MonoBehaviour
     {
         _hasNetworkLoadout = true;
         _networkWeaponDamage = Mathf.Max(1, weaponDamage);
+        _networkWeaponKind = PlayerLoadout.ParseWeaponKind(weaponType);
+        _networkWeaponColor = PlayerLoadout.ParseWeaponColor(weaponColor, Color.white);
         _networkConsumableQuantity = Mathf.Max(0, consumableQuantity);
         _networkConsumableHealAmount = Mathf.Max(0f, consumableHealAmount);
         _networkConsumableCooldown = Mathf.Max(0f, consumableCooldown);
@@ -294,7 +307,7 @@ public class PlayerController : MonoBehaviour
 #endif
     }
 
-    private bool ReadAttackDown()
+    private bool ReadAttackRequested()
     {
         if (_useExternalInput)
         {
@@ -307,15 +320,15 @@ public class PlayerController : MonoBehaviour
         {
 #if ENABLE_INPUT_SYSTEM
             Gamepad pad = GetGamepad();
-            return pad != null && pad.rightTrigger.wasPressedThisFrame;
+            return pad != null && pad.rightTrigger.isPressed;
 #else
             return false;
 #endif
         }
 #if ENABLE_INPUT_SYSTEM
-        return Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame;
+        return Mouse.current != null && Mouse.current.leftButton.isPressed;
 #else
-        return Input.GetMouseButtonDown(0);
+        return Input.GetMouseButton(0);
 #endif
     }
 
@@ -530,6 +543,28 @@ public class PlayerController : MonoBehaviour
 
     private void Attack(Vector2 direction, float damageMultiplier, float rangeMultiplier, float lifeOverride = -1f)
     {
+        if (direction.sqrMagnitude < 0.001f)
+            direction = Vector2.down;
+        direction.Normalize();
+
+        WeaponKind weaponKind = GetWeaponKind();
+        if (weaponKind == WeaponKind.Sword)
+        {
+            SwingSword(direction, damageMultiplier, rangeMultiplier, lifeOverride);
+            return;
+        }
+
+        if (weaponKind == WeaponKind.Ranged)
+        {
+            ShootProjectile(direction, damageMultiplier, rangeMultiplier, lifeOverride);
+            return;
+        }
+
+        StabSpear(direction, damageMultiplier, rangeMultiplier, lifeOverride);
+    }
+
+    private void StabSpear(Vector2 direction, float damageMultiplier, float rangeMultiplier, float lifeOverride)
+    {
         float usedScale = Mathf.Max(1f, rangeMultiplier);
         float usedRange = range * usedScale;
         float usedLength = length * usedScale;
@@ -543,7 +578,7 @@ public class PlayerController : MonoBehaviour
 
         SpriteRenderer renderer = slash.AddComponent<SpriteRenderer>();
         renderer.sprite = SimpleSprite.Square;
-        renderer.color = new Color(1f, 1f, 1f, 0.35f);
+        renderer.color = GetAttackColor(0.35f);
         renderer.sortingOrder = 10;
 
         BoxCollider2D box = slash.AddComponent<BoxCollider2D>();
@@ -559,9 +594,87 @@ public class PlayerController : MonoBehaviour
         hit.damage = Mathf.Max(1, Mathf.RoundToInt(GetWeaponDamage() * Mathf.Max(1f, damageMultiplier)));
     }
 
+    private void SwingSword(Vector2 direction, float damageMultiplier, float rangeMultiplier, float lifeOverride)
+    {
+        float usedScale = Mathf.Max(1f, rangeMultiplier);
+        float usedRange = range * swordRangeMultiplier * usedScale;
+        float usedLength = length * 0.75f * usedScale;
+        float usedWidth = width * swordWidthMultiplier * usedScale;
+        float usedLife = lifeOverride > 0f ? lifeOverride : Mathf.Max(time, 0.16f);
+
+        GameObject slash = new GameObject("PlayerSwordSwing");
+        slash.transform.position = transform.position + (Vector3)direction * usedRange;
+        slash.transform.localScale = new Vector3(usedLength, usedWidth, 1f);
+
+        SpriteRenderer renderer = slash.AddComponent<SpriteRenderer>();
+        renderer.sprite = SimpleSprite.Square;
+        renderer.color = GetAttackColor(0.42f);
+        renderer.sortingOrder = 10;
+
+        BoxCollider2D box = slash.AddComponent<BoxCollider2D>();
+        box.isTrigger = true;
+
+        Rigidbody2D slashBody = slash.AddComponent<Rigidbody2D>();
+        slashBody.bodyType = RigidbodyType2D.Kinematic;
+        slashBody.gravityScale = 0f;
+
+        HitBox hit = slash.AddComponent<HitBox>();
+        hit.hitsPlayer = false;
+        hit.life = usedLife;
+        hit.damage = Mathf.Max(1, Mathf.RoundToInt(GetWeaponDamage() * Mathf.Max(1f, damageMultiplier)));
+
+        SwordSwingHitbox swing = slash.AddComponent<SwordSwingHitbox>();
+        swing.owner = transform;
+        swing.direction = direction;
+        swing.distance = usedRange;
+        swing.duration = usedLife;
+        swing.arcDegrees = Mathf.Max(10f, swordArcDegrees);
+    }
+
+    private void ShootProjectile(Vector2 direction, float damageMultiplier, float rangeMultiplier, float lifeOverride)
+    {
+        GameObject projectile = new GameObject("PlayerProjectile");
+        projectile.transform.position = transform.position + (Vector3)direction * 0.7f;
+        projectile.transform.localScale = Vector3.one * Mathf.Max(0.05f, rangedProjectileSize);
+        float angle = Mathf.Atan2(direction.y, direction.x) * Mathf.Rad2Deg;
+        projectile.transform.rotation = Quaternion.Euler(0f, 0f, angle);
+
+        SpriteRenderer renderer = projectile.AddComponent<SpriteRenderer>();
+        renderer.sprite = SimpleSprite.Square;
+        renderer.color = GetAttackColor(1f);
+        renderer.sortingOrder = 10;
+
+        BoxCollider2D box = projectile.AddComponent<BoxCollider2D>();
+        box.isTrigger = true;
+
+        Rigidbody2D projectileBody = projectile.AddComponent<Rigidbody2D>();
+        projectileBody.bodyType = RigidbodyType2D.Kinematic;
+        projectileBody.gravityScale = 0f;
+
+        PlayerProjectile playerProjectile = projectile.AddComponent<PlayerProjectile>();
+        playerProjectile.direction = direction;
+        playerProjectile.speed = Mathf.Max(0.1f, rangedProjectileSpeed) * Mathf.Max(1f, rangeMultiplier);
+        playerProjectile.life = lifeOverride > 0f ? lifeOverride : Mathf.Max(0.05f, rangedProjectileLife);
+        playerProjectile.damage = Mathf.Max(1, Mathf.RoundToInt(GetWeaponDamage() * Mathf.Max(1f, damageMultiplier)));
+        playerProjectile.ownerPlayerIndex = playerIndex;
+        playerProjectile.projectileColor = GetAttackColor(1f);
+    }
+
     private int GetWeaponDamage()
     {
         return _hasNetworkLoadout ? _networkWeaponDamage : PlayerLoadout.WeaponDamage;
+    }
+
+    private WeaponKind GetWeaponKind()
+    {
+        return _hasNetworkLoadout ? _networkWeaponKind : PlayerLoadout.CurrentWeaponKind;
+    }
+
+    private Color GetAttackColor(float alpha)
+    {
+        Color color = _hasNetworkLoadout ? _networkWeaponColor : PlayerLoadout.WeaponColor;
+        color.a = alpha;
+        return color;
     }
 
     private float GetSpeedBoostMultiplier()

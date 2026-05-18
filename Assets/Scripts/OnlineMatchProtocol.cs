@@ -13,6 +13,8 @@ public class OnlineMatchInputMessage
     public int burstSeq;
     public int consumableSeq;
     public int weaponDamage = 1;
+    public string weaponType = "Spear";
+    public string weaponColor = "#FFFFFF";
     public float maxHp = 10f;
     public int consumableQuantity;
     public float consumableHealAmount;
@@ -67,6 +69,10 @@ public class OnlineEnemyState
 public class OnlineProjectileState
 {
     public int id;
+    public bool fromPlayer;
+    public int ownerId;
+    public string color;
+    public float size;
     public float x;
     public float y;
     public float vx;

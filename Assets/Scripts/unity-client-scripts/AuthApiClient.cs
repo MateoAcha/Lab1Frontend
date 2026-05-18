@@ -51,6 +51,35 @@ public class AuthApiClient
         yield return GetJson($"/users/{userId}", onSuccess, onError, requiresAuth: false);
     }
 
+    public IEnumerator GetDailyCoinsStatus(Action<DailyCoinsStatusData> onSuccess, Action<string> onError)
+    {
+        var request = UnityWebRequest.Get(_baseUrl + "/users/me/daily-coins");
+        if (!TryAttachAuthorization(request, onError))
+        {
+            yield break;
+        }
+
+        Debug.Log($"[AuthApi] GET {_baseUrl}/users/me/daily-coins");
+        yield return request.SendWebRequest();
+        HandleDailyCoinsResponse(request, onSuccess, onError, "daily coins status");
+    }
+
+    public IEnumerator ClaimDailyCoins(Action<DailyCoinsStatusData> onSuccess, Action<string> onError)
+    {
+        var request = new UnityWebRequest(_baseUrl + "/users/me/daily-coins/claim", "POST");
+        request.uploadHandler = new UploadHandlerRaw(new byte[0]);
+        request.downloadHandler = new DownloadHandlerBuffer();
+        request.SetRequestHeader("Content-Type", "application/json");
+        if (!TryAttachAuthorization(request, onError))
+        {
+            yield break;
+        }
+
+        Debug.Log($"[AuthApi] POST {_baseUrl}/users/me/daily-coins/claim");
+        yield return request.SendWebRequest();
+        HandleDailyCoinsResponse(request, onSuccess, onError, "daily coins claim");
+    }
+
     public IEnumerator AddCoins(int userId, int quantity, Action onSuccess, Action<string> onError)
     {
         string json = JsonUtility.ToJson(new AddCoinsRequest { quantity = quantity });
@@ -361,6 +390,42 @@ public class AuthApiClient
         return true;
     }
 
+    private void HandleDailyCoinsResponse(
+        UnityWebRequest request,
+        Action<DailyCoinsStatusData> onSuccess,
+        Action<string> onError,
+        string context)
+    {
+        Debug.Log($"[AuthApi] Response {(long)request.responseCode} for {context}");
+
+        if (request.result != UnityWebRequest.Result.Success
+            || request.responseCode < 200
+            || request.responseCode >= 300)
+        {
+            onError?.Invoke(FormatError(request));
+            return;
+        }
+
+        DailyCoinsStatusData status;
+        try
+        {
+            status = JsonUtility.FromJson<DailyCoinsStatusData>(request.downloadHandler.text);
+        }
+        catch
+        {
+            onError?.Invoke("Unexpected daily coins response.");
+            return;
+        }
+
+        if (status == null)
+        {
+            onError?.Invoke("Empty daily coins response.");
+            return;
+        }
+
+        onSuccess?.Invoke(status);
+    }
+
     private string FormatError(UnityWebRequest request)
     {
         string raw = request.downloadHandler != null ? request.downloadHandler.text : "";
@@ -529,4 +594,14 @@ public class LobbyPlayerData
     public string item;
     public float x;
     public float y;
+}
+
+[Serializable]
+public class DailyCoinsStatusData
+{
+    public bool claimable;
+    public long remainingSeconds;
+    public int rewardCoins;
+    public string lastClaimedAt;
+    public int coinTotal;
 }
