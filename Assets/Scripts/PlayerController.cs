@@ -55,6 +55,8 @@ public class PlayerController : MonoBehaviour
     private int _networkWeaponDamage = 1;
     private WeaponKind _networkWeaponKind = WeaponKind.Spear;
     private Color _networkWeaponColor = Color.white;
+    private int _networkSkinId;
+    private string _networkSkinColor = "#4DBFFF";
     private int _networkConsumableQuantity;
     private float _networkConsumableHealAmount;
     private float _networkConsumableCooldown;
@@ -69,6 +71,8 @@ public class PlayerController : MonoBehaviour
     public int NetworkChargeSequence { get; private set; }
     public int NetworkBurstSequence { get; private set; }
     public int NetworkConsumableSequence { get; private set; }
+    public int NetworkSkinId => _hasNetworkLoadout ? _networkSkinId : PlayerLoadout.EquippedSkinId;
+    public string NetworkSkinColor => _hasNetworkLoadout ? _networkSkinColor : PlayerSkinVisuals.GetEquippedSkinColorHex();
 
     public float ChargeCooldownProgress01
     {
@@ -247,6 +251,8 @@ public class PlayerController : MonoBehaviour
         int weaponDamage,
         string weaponType,
         string weaponColor,
+        int skinId,
+        string skinColor,
         float maxHp,
         int consumableQuantity,
         float consumableHealAmount,
@@ -259,6 +265,9 @@ public class PlayerController : MonoBehaviour
         _networkWeaponDamage = Mathf.Max(1, weaponDamage);
         _networkWeaponKind = PlayerLoadout.ParseWeaponKind(weaponType);
         _networkWeaponColor = PlayerLoadout.ParseWeaponColor(weaponColor, Color.white);
+        _networkSkinId = Mathf.Max(0, skinId);
+        _networkSkinColor = string.IsNullOrWhiteSpace(skinColor) ? "#4DBFFF" : skinColor;
+        ApplyNetworkSkin();
         _networkConsumableQuantity = Mathf.Max(0, consumableQuantity);
         _networkConsumableHealAmount = Mathf.Max(0f, consumableHealAmount);
         _networkConsumableCooldown = Mathf.Max(0f, consumableCooldown);
@@ -592,6 +601,8 @@ public class PlayerController : MonoBehaviour
         hit.hitsPlayer = false;
         hit.life = lifeOverride > 0f ? lifeOverride : time;
         hit.damage = Mathf.Max(1, Mathf.RoundToInt(GetWeaponDamage() * Mathf.Max(1f, damageMultiplier)));
+        hit.ownerPlayerIndex = playerIndex;
+        hit.visualColor = GetAttackColor(0.35f);
     }
 
     private void SwingSword(Vector2 direction, float damageMultiplier, float rangeMultiplier, float lifeOverride)
@@ -622,6 +633,8 @@ public class PlayerController : MonoBehaviour
         hit.hitsPlayer = false;
         hit.life = usedLife;
         hit.damage = Mathf.Max(1, Mathf.RoundToInt(GetWeaponDamage() * Mathf.Max(1f, damageMultiplier)));
+        hit.ownerPlayerIndex = playerIndex;
+        hit.visualColor = GetAttackColor(0.42f);
 
         SwordSwingHitbox swing = slash.AddComponent<SwordSwingHitbox>();
         swing.owner = transform;
@@ -675,6 +688,14 @@ public class PlayerController : MonoBehaviour
         Color color = _hasNetworkLoadout ? _networkWeaponColor : PlayerLoadout.WeaponColor;
         color.a = alpha;
         return color;
+    }
+
+    private void ApplyNetworkSkin()
+    {
+        SpriteRenderer renderer = GetComponent<SpriteRenderer>();
+        if (renderer == null) return;
+
+        PlayerSkinVisuals.Apply(renderer, _networkSkinId, _networkSkinColor, renderer.sharedMaterial);
     }
 
     private float GetSpeedBoostMultiplier()

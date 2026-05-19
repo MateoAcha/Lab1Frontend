@@ -15,6 +15,8 @@ public class OnlineMatchInputMessage
     public int weaponDamage = 1;
     public string weaponType = "Spear";
     public string weaponColor = "#FFFFFF";
+    public int skinId;
+    public string skinColor = "#4DBFFF";
     public float maxHp = 10f;
     public int consumableQuantity;
     public float consumableHealAmount;
@@ -49,6 +51,8 @@ public class OnlinePlayerState
     public float hp;
     public float maxHp;
     public bool alive;
+    public int skinId;
+    public string skinColor = "#4DBFFF";
 }
 
 [Serializable]
@@ -71,8 +75,12 @@ public class OnlineProjectileState
     public int id;
     public bool fromPlayer;
     public int ownerId;
+    public bool isHitbox;
     public string color;
     public float size;
+    public float scaleX;
+    public float scaleY;
+    public float rotationZ;
     public float x;
     public float y;
     public float vx;

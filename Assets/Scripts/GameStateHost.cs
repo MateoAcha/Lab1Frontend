@@ -7,9 +7,11 @@ using UnityEngine;
 public class GameStateHost : MonoBehaviour
 {
     private const float SyncInterval = 1f / 15f;
+    private const float AttackVisualMinLife = 0.22f;
 
     private GameWebSocketClient _ws;
     private PlayerController _remotePlayer;
+    private readonly Dictionary<int, AttackVisualSnapshot> _attackVisuals = new Dictionary<int, AttackVisualSnapshot>();
     private int _lastAttackSeq;
     private int _lastChargeSeq;
     private int _lastBurstSeq;
@@ -20,6 +22,7 @@ public class GameStateHost : MonoBehaviour
 
     private void Start()
     {
+        HitBox.Spawned += HandleHitBoxSpawned;
         _remotePlayer = FindRemotePlayer();
         StartCoroutine(ConnectThenSync());
     }
@@ -88,6 +91,8 @@ public class GameStateHost : MonoBehaviour
             input.weaponDamage,
             input.weaponType,
             input.weaponColor,
+            input.skinId,
+            input.skinColor,
             input.maxHp,
             input.consumableQuantity,
             input.consumableHealAmount,
@@ -164,8 +169,24 @@ public class GameStateHost : MonoBehaviour
             vy = velocity.y,
             hp = health != null ? health.hp : 0f,
             maxHp = health != null ? Mathf.Max(health.maxHp, health.hp) : 0f,
-            alive = alive
+            alive = alive,
+            skinId = GetPlayerSkinId(id, player),
+            skinColor = GetPlayerSkinColor(id, player)
         };
+    }
+
+    private int GetPlayerSkinId(int id, PlayerController player)
+    {
+        if (id == 0)
+            return PlayerLoadout.EquippedSkinId;
+        return player != null ? player.NetworkSkinId : 0;
+    }
+
+    private string GetPlayerSkinColor(int id, PlayerController player)
+    {
+        if (id == 0)
+            return PlayerSkinVisuals.GetEquippedSkinColorHex();
+        return player != null ? player.NetworkSkinColor : "#4DBFFF";
     }
 
     private OnlineEnemyState[] BuildEnemies()
@@ -280,7 +301,82 @@ public class GameStateHost : MonoBehaviour
             });
         }
 
+        AddPlayerHitBoxStates(projectiles);
+
         return projectiles.ToArray();
+    }
+
+    private void AddPlayerHitBoxStates(List<OnlineProjectileState> projectiles)
+    {
+        var activeIds = new HashSet<int>();
+
+        for (int i = OnlineNetworkRegistry.PlayerHitBoxes.Count - 1; i >= 0; i--)
+        {
+            HitBox hitBox = OnlineNetworkRegistry.PlayerHitBoxes[i];
+            if (hitBox == null)
+            {
+                OnlineNetworkRegistry.PlayerHitBoxes.RemoveAt(i);
+                continue;
+            }
+
+            int id = GetOrAssignId(hitBox.gameObject);
+            activeIds.Add(id);
+            float expireAt = Time.time + hitBox.RemainingLife;
+            if (_attackVisuals.TryGetValue(id, out AttackVisualSnapshot existing))
+                expireAt = Mathf.Max(expireAt, existing.expireAt);
+            else
+                expireAt = Time.time + Mathf.Max(AttackVisualMinLife, hitBox.RemainingLife);
+
+            AttackVisualSnapshot snapshot = BuildAttackVisualSnapshot(id, hitBox, expireAt);
+            _attackVisuals[id] = snapshot;
+            projectiles.Add(snapshot.ToState(Time.time));
+        }
+
+        var expired = new List<int>();
+        foreach (var kv in _attackVisuals)
+        {
+            if (activeIds.Contains(kv.Key))
+                continue;
+            if (Time.time > kv.Value.expireAt)
+            {
+                expired.Add(kv.Key);
+                continue;
+            }
+
+            projectiles.Add(kv.Value.ToState(Time.time));
+        }
+
+        foreach (int id in expired)
+            _attackVisuals.Remove(id);
+    }
+
+    private void HandleHitBoxSpawned(HitBox hitBox)
+    {
+        if (hitBox == null || hitBox.ownerPlayerIndex < 0)
+            return;
+
+        int id = GetOrAssignId(hitBox.gameObject);
+        _attackVisuals[id] = BuildAttackVisualSnapshot(
+            id,
+            hitBox,
+            Time.time + Mathf.Max(AttackVisualMinLife, hitBox.life));
+    }
+
+    private AttackVisualSnapshot BuildAttackVisualSnapshot(int id, HitBox hitBox, float expireAt)
+    {
+        Transform t = hitBox.transform;
+        return new AttackVisualSnapshot
+        {
+            id = id,
+            ownerId = hitBox.ownerPlayerIndex,
+            color = "#" + ColorUtility.ToHtmlStringRGBA(hitBox.visualColor),
+            x = t.position.x,
+            y = t.position.y,
+            rotationZ = t.eulerAngles.z,
+            scaleX = Mathf.Max(0.05f, t.localScale.x),
+            scaleY = Mathf.Max(0.05f, t.localScale.y),
+            expireAt = expireAt
+        };
     }
 
     private int GetOrAssignId(GameObject obj)
@@ -311,14 +407,49 @@ public class GameStateHost : MonoBehaviour
     {
         string baseUrl = GameStatsTracker.ApiBaseUrl.TrimEnd('/');
         string wsUrl = baseUrl.Replace("https://", "wss://").Replace("http://", "ws://");
-        wsUrl += "/game-ws";
+        wsUrl += "/game-ws?room=" + Mathf.Max(1, MultiplayerState.OnlineRoomNumber);
         if (!string.IsNullOrWhiteSpace(AuthSession.AccessToken))
-            wsUrl += "?token=" + Uri.EscapeDataString(AuthSession.AccessToken);
+            wsUrl += "&token=" + Uri.EscapeDataString(AuthSession.AccessToken);
         return wsUrl;
     }
 
     private void OnDestroy()
     {
+        HitBox.Spawned -= HandleHitBoxSpawned;
         _ws?.Dispose();
+    }
+
+    private class AttackVisualSnapshot
+    {
+        public int id;
+        public int ownerId;
+        public string color;
+        public float x;
+        public float y;
+        public float rotationZ;
+        public float scaleX;
+        public float scaleY;
+        public float expireAt;
+
+        public OnlineProjectileState ToState(float now)
+        {
+            return new OnlineProjectileState
+            {
+                id = id,
+                fromPlayer = true,
+                ownerId = ownerId,
+                isHitbox = true,
+                color = color,
+                size = Mathf.Max(scaleX, scaleY),
+                scaleX = scaleX,
+                scaleY = scaleY,
+                rotationZ = rotationZ,
+                x = x,
+                y = y,
+                vx = 0f,
+                vy = 0f,
+                life = Mathf.Max(0.01f, expireAt - now)
+            };
+        }
     }
 }

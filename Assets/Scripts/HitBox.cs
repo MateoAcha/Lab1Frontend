@@ -2,15 +2,30 @@ using UnityEngine;
 
 public class HitBox : MonoBehaviour
 {
+    public static event System.Action<HitBox> Spawned;
+
     public bool hitsPlayer;
     public int damage = 1;
     public float life = 0.15f;
+    public int ownerPlayerIndex = -1;
+    public Color visualColor = Color.white;
 
     private float dieAt;
+    public float RemainingLife => dieAt > 0f ? Mathf.Max(0f, dieAt - Time.time) : Mathf.Max(0f, life);
 
     private void Start()
     {
         dieAt = Time.time + life;
+        if (ownerPlayerIndex >= 0)
+        {
+            OnlineNetworkRegistry.Register(this);
+            Spawned?.Invoke(this);
+        }
+    }
+
+    private void OnDestroy()
+    {
+        OnlineNetworkRegistry.Unregister(this);
     }
 
     private void Update()

@@ -7,6 +7,7 @@ public static class OnlineNetworkRegistry
     public static readonly List<GiantEnemyController> GiantEnemies = new List<GiantEnemyController>();
     public static readonly List<EnemyProjectile> Projectiles = new List<EnemyProjectile>();
     public static readonly List<PlayerProjectile> PlayerProjectiles = new List<PlayerProjectile>();
+    public static readonly List<HitBox> PlayerHitBoxes = new List<HitBox>();
 
     public static void Register(EnemyController enemy)
     {
@@ -61,5 +62,16 @@ public static class OnlineNetworkRegistry
     public static void Unregister(PlayerProjectile projectile)
     {
         PlayerProjectiles.Remove(projectile);
+    }
+
+    public static void Register(HitBox hitBox)
+    {
+        if (hitBox != null && !PlayerHitBoxes.Contains(hitBox))
+            PlayerHitBoxes.Add(hitBox);
+    }
+
+    public static void Unregister(HitBox hitBox)
+    {
+        PlayerHitBoxes.Remove(hitBox);
     }
 }

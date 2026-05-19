@@ -105,6 +105,8 @@ public class GameStateGuest : MonoBehaviour
             weaponDamage = Mathf.Max(1, PlayerLoadout.WeaponDamage),
             weaponType = PlayerLoadout.CurrentWeaponKind.ToString(),
             weaponColor = PlayerLoadout.WeaponColorHex,
+            skinId = PlayerLoadout.EquippedSkinId,
+            skinColor = PlayerSkinVisuals.GetEquippedSkinColorHex(),
             maxHp = Mathf.Max(1f, PlayerLoadout.MaxHP),
             consumableQuantity = Mathf.Max(0, PlayerLoadout.ConsumableQuantity),
             consumableHealAmount = Mathf.Max(0f, PlayerLoadout.ConsumableHealAmount),
@@ -133,6 +135,8 @@ public class GameStateGuest : MonoBehaviour
         if (input.consumableSeq != _lastSentInput.consumableSeq) return true;
         if (!string.Equals(input.weaponType, _lastSentInput.weaponType, StringComparison.Ordinal)) return true;
         if (!string.Equals(input.weaponColor, _lastSentInput.weaponColor, StringComparison.Ordinal)) return true;
+        if (input.skinId != _lastSentInput.skinId) return true;
+        if (!string.Equals(input.skinColor, _lastSentInput.skinColor, StringComparison.Ordinal)) return true;
 
         return false;
     }
@@ -204,7 +208,9 @@ public class GameStateGuest : MonoBehaviour
 
         OnlinePlayerSync.Instance.SetRemoteState(
             new Vector3(state.x, state.y, 0f),
-            new Vector3(state.vx, state.vy, 0f));
+            new Vector3(state.vx, state.vy, 0f),
+            state.skinId,
+            state.skinColor);
     }
 
     private void ApplyLocalGuestPlayer(OnlinePlayerState state, bool matchEnded)
@@ -341,7 +347,7 @@ public class GameStateGuest : MonoBehaviour
 
                 if (_projectileReplicas.TryGetValue(projectile.id, out OnlineEntityReplica replica) && replica != null)
                 {
-                    replica.transform.localScale = Vector3.one * Mathf.Max(0.05f, projectile.size > 0f ? projectile.size : 0.25f);
+                    ApplyProjectileReplicaShape(replica.transform, projectile);
                     replica.SetTarget(
                         new Vector3(projectile.x, projectile.y, 0f),
                         new Vector3(projectile.vx, projectile.vy, 0f),
@@ -361,12 +367,11 @@ public class GameStateGuest : MonoBehaviour
     {
         GameObject go = new GameObject(projectile.fromPlayer ? "PlayerProjectileReplica" : "ProjectileReplica");
         go.transform.position = new Vector3(projectile.x, projectile.y, 0f);
-        float size = projectile.fromPlayer && projectile.size > 0f ? projectile.size : 0.25f;
-        go.transform.localScale = new Vector3(size, size, 1f);
+        ApplyProjectileReplicaShape(go.transform, projectile);
 
         SpriteRenderer sr = go.AddComponent<SpriteRenderer>();
         sr.sprite = SimpleSprite.Square;
-        sr.color = projectile.fromPlayer
+        sr.color = projectile.fromPlayer || projectile.isHitbox
             ? PlayerLoadout.ParseWeaponColor(projectile.color, Color.white)
             : new Color(1f, 0.55f, 0.15f, 1f);
         sr.sortingOrder = 9;
@@ -375,6 +380,23 @@ public class GameStateGuest : MonoBehaviour
         OnlineEntityReplica replica = go.AddComponent<OnlineEntityReplica>();
         replica.SnapTo(go.transform.position);
         return replica;
+    }
+
+    private void ApplyProjectileReplicaShape(Transform target, OnlineProjectileState projectile)
+    {
+        if (target == null) return;
+
+        if (projectile.isHitbox)
+        {
+            float scaleX = Mathf.Max(0.05f, projectile.scaleX);
+            float scaleY = Mathf.Max(0.05f, projectile.scaleY);
+            target.localScale = new Vector3(scaleX, scaleY, 1f);
+            target.rotation = Quaternion.Euler(0f, 0f, projectile.rotationZ);
+            return;
+        }
+
+        float size = projectile.fromPlayer && projectile.size > 0f ? projectile.size : 0.25f;
+        target.localScale = new Vector3(size, size, 1f);
     }
 
     private void RemoveInactive(Dictionary<int, OnlineEntityReplica> replicas, HashSet<int> activeIds)
@@ -405,9 +427,9 @@ public class GameStateGuest : MonoBehaviour
     {
         string baseUrl = GameStatsTracker.ApiBaseUrl.TrimEnd('/');
         string wsUrl = baseUrl.Replace("https://", "wss://").Replace("http://", "ws://");
-        wsUrl += "/game-ws";
+        wsUrl += "/game-ws?room=" + Mathf.Max(1, MultiplayerState.OnlineRoomNumber);
         if (!string.IsNullOrWhiteSpace(AuthSession.AccessToken))
-            wsUrl += "?token=" + Uri.EscapeDataString(AuthSession.AccessToken);
+            wsUrl += "&token=" + Uri.EscapeDataString(AuthSession.AccessToken);
         return wsUrl;
     }
 

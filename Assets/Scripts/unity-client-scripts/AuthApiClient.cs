@@ -481,14 +481,67 @@ public class AuthApiClient
         return sb.ToString();
     }
 
-    public IEnumerator LobbyStart(Action onSuccess, Action<string> onError)
+    public IEnumerator GetLobbyRooms(Action<LobbyRoomListData> onSuccess, Action<string> onError)
     {
-        var request = new UnityWebRequest(_baseUrl + "/lobby/start", "POST");
+        var request = UnityWebRequest.Get(_baseUrl + "/lobby/rooms");
+        if (!TryAttachAuthorization(request, onError))
+        {
+            yield break;
+        }
+
+        yield return request.SendWebRequest();
+        if (request.result != UnityWebRequest.Result.Success
+            || request.responseCode < 200 || request.responseCode >= 300)
+        {
+            onError?.Invoke(FormatError(request));
+            yield break;
+        }
+
+        LobbyRoomListData data;
+        try { data = JsonUtility.FromJson<LobbyRoomListData>(request.downloadHandler.text); }
+        catch { onError?.Invoke("Unexpected lobby list response."); yield break; }
+
+        onSuccess?.Invoke(data ?? new LobbyRoomListData());
+    }
+
+    public IEnumerator LobbyCreate(Action<LobbyRoomData> onSuccess, Action<string> onError)
+    {
+        var request = new UnityWebRequest(_baseUrl + "/lobby/create", "POST");
         request.uploadHandler   = new UploadHandlerRaw(new byte[0]);
         request.downloadHandler = new DownloadHandlerBuffer();
         request.SetRequestHeader("Content-Type", "application/json");
-        if (!string.IsNullOrWhiteSpace(AuthSession.AccessToken))
-            request.SetRequestHeader("Authorization", $"Bearer {AuthSession.AccessToken}");
+        if (!TryAttachAuthorization(request, onError))
+        {
+            yield break;
+        }
+
+        yield return request.SendWebRequest();
+        if (request.result != UnityWebRequest.Result.Success
+            || request.responseCode < 200 || request.responseCode >= 300)
+        {
+            onError?.Invoke(FormatError(request));
+            yield break;
+        }
+
+        LobbyRoomData room;
+        try { room = JsonUtility.FromJson<LobbyRoomData>(request.downloadHandler.text); }
+        catch { onError?.Invoke("Unexpected lobby create response."); yield break; }
+
+        if (room == null || room.roomNumber <= 0) { onError?.Invoke("Lobby was not created."); yield break; }
+        onSuccess?.Invoke(room);
+    }
+
+    public IEnumerator LobbyStart(int roomNumber, Action onSuccess, Action<string> onError)
+    {
+        var request = new UnityWebRequest(_baseUrl + $"/lobby/start?roomNumber={Mathf.Max(1, roomNumber)}", "POST");
+        request.uploadHandler   = new UploadHandlerRaw(new byte[0]);
+        request.downloadHandler = new DownloadHandlerBuffer();
+        request.SetRequestHeader("Content-Type", "application/json");
+        if (!TryAttachAuthorization(request, onError))
+        {
+            yield break;
+        }
+
         yield return request.SendWebRequest();
         if (request.result == UnityWebRequest.Result.Success
             && request.responseCode >= 200 && request.responseCode < 300)
@@ -497,11 +550,12 @@ public class AuthApiClient
             onError?.Invoke(FormatError(request));
     }
 
-    public IEnumerator LobbyPing(string weapon, string armor, string item, float x, float y,
+    public IEnumerator LobbyPing(int roomNumber, string weapon, string armor, string item, float x, float y,
         Action<LobbyPlayerData[], bool> onSuccess, Action<string> onError)
     {
         string json = JsonUtility.ToJson(new LobbyPingRequest
         {
+            roomNumber = Mathf.Max(1, roomNumber),
             weapon = weapon ?? "",
             armor  = armor  ?? "",
             item   = item   ?? "",
@@ -511,8 +565,10 @@ public class AuthApiClient
         request.uploadHandler   = new UploadHandlerRaw(Encoding.UTF8.GetBytes(json));
         request.downloadHandler = new DownloadHandlerBuffer();
         request.SetRequestHeader("Content-Type", "application/json");
-        if (!string.IsNullOrWhiteSpace(AuthSession.AccessToken))
-            request.SetRequestHeader("Authorization", $"Bearer {AuthSession.AccessToken}");
+        if (!TryAttachAuthorization(request, onError))
+        {
+            yield break;
+        }
 
         yield return request.SendWebRequest();
 
@@ -530,9 +586,9 @@ public class AuthApiClient
         onSuccess?.Invoke(wrapper?.players ?? new LobbyPlayerData[0], wrapper?.started ?? false);
     }
 
-    public IEnumerator LobbyLeave()
+    public IEnumerator LobbyLeave(int roomNumber)
     {
-        var request = new UnityWebRequest(_baseUrl + "/lobby/leave", "DELETE");
+        var request = new UnityWebRequest(_baseUrl + $"/lobby/leave?roomNumber={Mathf.Max(1, roomNumber)}", "DELETE");
         request.uploadHandler   = new UploadHandlerRaw(new byte[0]);
         request.downloadHandler = new DownloadHandlerBuffer();
         if (!string.IsNullOrWhiteSpace(AuthSession.AccessToken))
@@ -570,6 +626,7 @@ public class AuthApiClient
     [Serializable]
     private class LobbyPingRequest
     {
+        public int roomNumber;
         public string weapon;
         public string armor;
         public string item;
@@ -582,7 +639,24 @@ public class AuthApiClient
     {
         public LobbyPlayerData[] players;
         public bool started;
+        public int roomNumber;
     }
+}
+
+[Serializable]
+public class LobbyRoomListData
+{
+    public LobbyRoomData[] rooms;
+}
+
+[Serializable]
+public class LobbyRoomData
+{
+    public int roomNumber;
+    public LobbyPlayerData[] players;
+    public int playerCount;
+    public int maxPlayers;
+    public bool full;
 }
 
 [Serializable]

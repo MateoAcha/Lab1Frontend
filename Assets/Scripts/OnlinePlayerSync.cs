@@ -5,6 +5,8 @@ public class OnlinePlayerSync : MonoBehaviour
     public static OnlinePlayerSync Instance { get; private set; }
     public Vector3 RemotePlayerPosition { get; private set; }
     public Vector3 RemotePlayerVelocity { get; private set; }
+    public int RemoteSkinId { get; private set; }
+    public string RemoteSkinColor { get; private set; } = "#4DBFFF";
     public bool HasRemotePlayer { get; private set; }
 
     public void SetRemotePosition(Vector3 pos)
@@ -14,8 +16,15 @@ public class OnlinePlayerSync : MonoBehaviour
 
     public void SetRemoteState(Vector3 pos, Vector3 velocity)
     {
+        SetRemoteState(pos, velocity, RemoteSkinId, RemoteSkinColor);
+    }
+
+    public void SetRemoteState(Vector3 pos, Vector3 velocity, int skinId, string skinColor)
+    {
         RemotePlayerPosition = pos;
         RemotePlayerVelocity = velocity;
+        RemoteSkinId = Mathf.Max(0, skinId);
+        RemoteSkinColor = string.IsNullOrWhiteSpace(skinColor) ? "#4DBFFF" : skinColor;
         HasRemotePlayer = true;
     }
 

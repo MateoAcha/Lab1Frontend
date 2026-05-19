@@ -119,12 +119,23 @@ public class AuthMenuController : MonoBehaviour
     private bool _isHostSession;
     private Button _lobbyPlayButton;
     private TextMeshProUGUI _lobbyWaitingText;
+    private int _currentLobbyRoomNumber;
+    private GameObject _roomListPanel;
+    private Transform _roomListContent;
+    private TextMeshProUGUI _roomListStatusText;
     private GameObject _joinSessionPanel;
     private TMP_InputField _joinServerUrlInput;
+    private TextMeshProUGUI _joinSessionTitleText;
+    private TextMeshProUGUI _joinSessionAddressLabelText;
+    private TextMeshProUGUI _joinSessionHintText;
+    private TextMeshProUGUI _joinSessionSubmitText;
     private bool _launchMultiplayer;
 
-    private enum LoginReturn { MainMenu, OnlineLobby }
+    private enum LoginReturn { MainMenu, OnlineLobby, OnlineRoomList }
+    private enum ServerAddressMode { JoinSession, AuthServer }
     private LoginReturn _loginReturn = LoginReturn.MainMenu;
+    private ServerAddressMode _serverAddressMode = ServerAddressMode.JoinSession;
+    private GameObject _serverAddressReturnPanel;
 
     private void OnApplicationQuit()
     {
@@ -255,6 +266,7 @@ public class AuthMenuController : MonoBehaviour
     public void BackToMain()
     {
         Debug.Log("[AuthUI] Back to Main panel");
+        _loginReturn = LoginReturn.MainMenu;
         ShowOnly(mainMenuPanel);
     }
 
@@ -263,6 +275,7 @@ public class AuthMenuController : MonoBehaviour
         if (!AuthSession.IsLoggedIn)
         {
             Debug.Log("[AuthUI] Open Profile clicked while logged out. Redirecting to Login panel.");
+            _loginReturn = LoginReturn.MainMenu;
             EnsureAuthScreensUI();
             ShowOnly(loginPanel);
             return;
@@ -362,8 +375,14 @@ public class AuthMenuController : MonoBehaviour
 
     public void OpenCreateSession()
     {
-        ApplyServerUrl(apiBaseUrl);
+        if (!IsUsingLocalServer() || !AuthSession.IsLoggedIn)
+        {
+            ShowError("Create Session requires a logged-in Local DB session. Use Local DB to log in, or Join Session to connect to a host.");
+            return;
+        }
+
         _isHostSession = true;
+        _currentLobbyRoomNumber = 0;
         _loginReturn = LoginReturn.OnlineLobby;
         RefreshSessionUI();
         ContinueToLobbyOrLogin();
@@ -371,24 +390,63 @@ public class AuthMenuController : MonoBehaviour
 
     public void OpenJoinSession()
     {
-        EnsureJoinSessionPanel();
-        if (_joinServerUrlInput != null) _joinServerUrlInput.text = "";
-        ShowOnly(_joinSessionPanel);
-        AutoFocusNextFrame(_joinServerUrlInput);
+        if (AuthSession.IsLoggedIn && !IsUsingLocalServer())
+        {
+            _isHostSession = false;
+            _loginReturn = LoginReturn.OnlineRoomList;
+            ShowRoomList();
+            return;
+        }
+
+        OpenServerAddressPanel(ServerAddressMode.JoinSession);
     }
 
     public void SubmitJoinSession()
     {
         string url = _joinServerUrlInput != null ? _joinServerUrlInput.text.Trim() : "";
-        if (string.IsNullOrWhiteSpace(url)) { ShowError("Please enter the host's address."); return; }
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            ShowError(_serverAddressMode == ServerAddressMode.AuthServer
+                ? "Please enter the database server address."
+                : "Please enter the host's address.");
+            return;
+        }
         if (!url.StartsWith("http://") && !url.StartsWith("https://")) url = "http://" + url;
 
         ApplyServerUrl(url);
         _lastOnlineServerUrl = AuthSession.NormalizeServerUrl(url);
         PlayerPrefs.SetString(LastOnlineServerPrefsKey, _lastOnlineServerUrl);
         PlayerPrefs.Save();
+
+        if (_serverAddressMode == ServerAddressMode.AuthServer)
+        {
+            RefreshSessionUI();
+
+            if (AuthSession.IsLoggedIn)
+            {
+                if (_loginReturn == LoginReturn.OnlineLobby)
+                    StartCoroutine(FetchLoadoutAndShowOnlineLobby());
+                else if (_loginReturn == LoginReturn.OnlineRoomList)
+                    ShowRoomList();
+                else
+                    ShowOnly(mainMenuPanel);
+                return;
+            }
+
+            GameObject returnPanel = _serverAddressReturnPanel != null
+                ? _serverAddressReturnPanel
+                : loginPanel;
+            ShowOnly(returnPanel);
+            if (returnPanel == loginPanel)
+                AutoFocusNextFrame(loginUsernameInput);
+            else if (returnPanel == registerPanel)
+                AutoFocusNextFrame(registerUsernameInput);
+            return;
+        }
+
         _isHostSession = false;
-        _loginReturn = LoginReturn.OnlineLobby;
+        _currentLobbyRoomNumber = 0;
+        _loginReturn = LoginReturn.OnlineRoomList;
         RefreshSessionUI();
         ContinueToLobbyOrLogin();
     }
@@ -397,7 +455,10 @@ public class AuthMenuController : MonoBehaviour
     {
         if (AuthSession.IsLoggedIn)
         {
-            ShowOnlineLobby();
+            if (_loginReturn == LoginReturn.OnlineRoomList)
+                ShowRoomList();
+            else
+                StartCoroutine(FetchLoadoutAndShowOnlineLobby());
             return;
         }
 
@@ -773,6 +834,7 @@ public class AuthMenuController : MonoBehaviour
         if (_shopPanel != null) _shopPanel.SetActive(activePanel == _shopPanel);
         if (_multiplayerPanel != null) _multiplayerPanel.SetActive(activePanel == _multiplayerPanel);
         if (_onlineLobbyPanel != null) _onlineLobbyPanel.SetActive(activePanel == _onlineLobbyPanel);
+        if (_roomListPanel != null) _roomListPanel.SetActive(activePanel == _roomListPanel);
         if (_joinSessionPanel != null) _joinSessionPanel.SetActive(activePanel == _joinSessionPanel);
     }
 
@@ -1274,18 +1336,10 @@ public class AuthMenuController : MonoBehaviour
 
     private void UseOnlineAuthServer()
     {
-        string targetUrl = !string.IsNullOrWhiteSpace(_lastOnlineServerUrl)
-            ? _lastOnlineServerUrl
-            : "";
-
-        if (string.IsNullOrWhiteSpace(targetUrl))
-        {
-            OpenJoinSession();
-            return;
-        }
-
-        ApplyServerUrl(targetUrl);
-        RefreshSessionUI();
+        _serverAddressReturnPanel = registerPanel != null && registerPanel.activeSelf
+            ? registerPanel
+            : loginPanel;
+        OpenServerAddressPanel(ServerAddressMode.AuthServer);
     }
 
     private void RefreshAuthServerIndicators()
@@ -1965,6 +2019,7 @@ public class AuthMenuController : MonoBehaviour
         Debug.Log($"[AuthUI] {source}. Logged as '{AuthSession.Username}' (id={AuthSession.UserId})");
 
         bool goToLobby = _loginReturn == LoginReturn.OnlineLobby;
+        bool goToRoomList = _loginReturn == LoginReturn.OnlineRoomList;
         _loginReturn = LoginReturn.MainMenu;
 
         StartCoroutine(_apiClient.GetUserById(AuthSession.UserId,
@@ -1974,40 +2029,84 @@ public class AuthMenuController : MonoBehaviour
                 RefreshSessionUI();
                 Debug.Log($"[AuthUI] Profile refreshed for '{AuthSession.Username}'.");
                 StartCoroutine(RunAuthProofChecks());
-                StartCoroutine(FetchLoadoutSilently(AuthSession.UserId));
-                if (goToLobby) ShowOnlineLobby();
-                else ShowOnly(mainMenuPanel);
+                if (goToLobby)
+                    StartCoroutine(FetchLoadoutAndShowOnlineLobby());
+                else if (goToRoomList)
+                    ShowRoomList();
+                else
+                {
+                    StartCoroutine(FetchLoadoutSilently(AuthSession.UserId));
+                    ShowOnly(mainMenuPanel);
+                }
             },
             onError: profileError =>
             {
                 Debug.LogWarning($"[AuthUI] Logged in, but profile refresh failed: {profileError}");
                 StartCoroutine(RunAuthProofChecks());
-                StartCoroutine(FetchLoadoutSilently(AuthSession.UserId));
-                if (goToLobby) ShowOnlineLobby();
-                else ShowOnly(mainMenuPanel);
+                if (goToLobby)
+                    StartCoroutine(FetchLoadoutAndShowOnlineLobby());
+                else if (goToRoomList)
+                    ShowRoomList();
+                else
+                {
+                    StartCoroutine(FetchLoadoutSilently(AuthSession.UserId));
+                    ShowOnly(mainMenuPanel);
+                }
             }));
+    }
+
+    private IEnumerator FetchLoadoutAndShowOnlineLobby()
+    {
+        if (_isHostSession && _currentLobbyRoomNumber <= 0)
+        {
+            bool created = false;
+            string createError = null;
+            yield return _apiClient.LobbyCreate(
+                onSuccess: room =>
+                {
+                    _currentLobbyRoomNumber = room != null ? room.roomNumber : 0;
+                    created = _currentLobbyRoomNumber > 0;
+                },
+                onError: error => createError = error);
+
+            if (!created)
+            {
+                ShowError(string.IsNullOrWhiteSpace(createError) ? "Could not create lobby room." : createError);
+                OpenMultiplayer();
+                yield break;
+            }
+        }
+
+        if (!_isHostSession && _currentLobbyRoomNumber <= 0)
+        {
+            ShowRoomList();
+            yield break;
+        }
+
+        if (AuthSession.IsLoggedIn)
+            yield return FetchLoadoutSilently(AuthSession.UserId);
+
+        ShowOnlineLobby();
     }
 
     private void ShowOnlineLobby()
     {
         EnsureOnlineLobbyPanel();
 
-        if (_myNameText   != null) _myNameText.text   = AuthSession.Username;
-        if (_myWeaponText != null) _myWeaponText.text = "Weapon: " + (PlayerLoadout.EquippedWeapon     != null ? PlayerLoadout.EquippedWeapon.itemName     : "None");
-        if (_myArmorText  != null) _myArmorText.text  = "Armor: "  + (PlayerLoadout.EquippedArmor      != null ? PlayerLoadout.EquippedArmor.itemName      : "None");
-        if (_myItemText   != null) _myItemText.text   = "Item: "   + (PlayerLoadout.EquippedConsumable != null ? PlayerLoadout.EquippedConsumable.itemName : "None");
+        RefreshMyLobbyLoadoutDisplay();
 
         if (_hostAddressText != null)
         {
             if (_isHostSession)
             {
                 string ip = GetLocalIP();
-                _hostAddressText.text = $"Your address:\nhttp://{ip}:8080";
+                _hostAddressText.text = $"Room #{_currentLobbyRoomNumber}\nYour address:\nhttp://{ip}:8080";
                 _hostAddressText.gameObject.SetActive(true);
             }
             else
             {
-                _hostAddressText.gameObject.SetActive(false);
+                _hostAddressText.text = $"Room #{_currentLobbyRoomNumber}";
+                _hostAddressText.gameObject.SetActive(true);
             }
         }
 
@@ -2030,16 +2129,39 @@ public class AuthMenuController : MonoBehaviour
         if (_otherItemText   != null) _otherItemText.text   = "-";
     }
 
+    private void RefreshMyLobbyLoadoutDisplay()
+    {
+        if (_myNameText   != null) _myNameText.text   = AuthSession.Username;
+        if (_myWeaponText != null) _myWeaponText.text = "Weapon: " + GetLobbyItemLabel(PlayerLoadout.EquippedWeapon);
+        if (_myArmorText  != null) _myArmorText.text  = "Armor: "  + GetLobbyItemLabel(PlayerLoadout.EquippedArmor);
+        if (_myItemText   != null) _myItemText.text   = "Item: "   + GetLobbyItemLabel(PlayerLoadout.EquippedConsumable);
+    }
+
+    private string GetLobbyItemLabel(InventoryItemData item)
+    {
+        string itemName = GetLobbyItemName(item);
+        return string.IsNullOrWhiteSpace(itemName) ? "None" : itemName;
+    }
+
+    private string GetLobbyItemName(InventoryItemData item)
+    {
+        return item != null && !string.IsNullOrWhiteSpace(item.itemName)
+            ? item.itemName
+            : "";
+    }
+
     private IEnumerator LobbyPollLoop()
     {
-        string weapon = PlayerLoadout.EquippedWeapon     != null ? PlayerLoadout.EquippedWeapon.itemName     : "";
-        string armor  = PlayerLoadout.EquippedArmor      != null ? PlayerLoadout.EquippedArmor.itemName      : "";
-        string item   = PlayerLoadout.EquippedConsumable != null ? PlayerLoadout.EquippedConsumable.itemName : "";
-
         while (true)
         {
+            RefreshMyLobbyLoadoutDisplay();
+            string weapon = GetLobbyItemName(PlayerLoadout.EquippedWeapon);
+            string armor  = GetLobbyItemName(PlayerLoadout.EquippedArmor);
+            string item   = GetLobbyItemName(PlayerLoadout.EquippedConsumable);
+
             bool shouldLaunch = false;
-            yield return _apiClient.LobbyPing(weapon, armor, item, 0f, 0f,
+            string pingError = null;
+            yield return _apiClient.LobbyPing(_currentLobbyRoomNumber, weapon, armor, item, 0f, 0f,
                 onSuccess: (players, started) =>
                 {
                     LobbyPlayerData other = null;
@@ -2061,8 +2183,19 @@ public class AuthMenuController : MonoBehaviour
                     // Guest auto-launches when host starts the game
                     if (started && !_isHostSession) shouldLaunch = true;
                 },
-                onError: _ => { });
+                onError: error => pingError = error);
 
+            if (!string.IsNullOrWhiteSpace(pingError))
+            {
+                Debug.LogWarning($"[AuthUI] Lobby ping failed: {pingError}");
+                if (!_isHostSession)
+                {
+                    ShowError(pingError);
+                    _currentLobbyRoomNumber = 0;
+                    ShowRoomList();
+                    yield break;
+                }
+            }
             if (shouldLaunch) { PlayOnlineGame(); yield break; }
             yield return new WaitForSeconds(3f);
         }
@@ -2071,23 +2204,37 @@ public class AuthMenuController : MonoBehaviour
     private void PlayOnlineGame()
     {
         if (_lobbyPollRoutine != null) { StopCoroutine(_lobbyPollRoutine); _lobbyPollRoutine = null; }
-        StartCoroutine(_apiClient.LobbyLeave());
+        if (_currentLobbyRoomNumber > 0) StartCoroutine(_apiClient.LobbyLeave(_currentLobbyRoomNumber));
         MultiplayerState.SetOnline(true);
         MultiplayerState.SetHost(_isHostSession);
+        MultiplayerState.SetOnlineRoomNumber(_currentLobbyRoomNumber);
         _launchMultiplayer = false;
         StartCoroutine(FetchLoadoutThenPlay());
     }
 
     private IEnumerator HostStartGame()
     {
-        yield return _apiClient.LobbyStart(onSuccess: () => { }, onError: _ => { });
+        bool started = false;
+        string startError = null;
+        yield return _apiClient.LobbyStart(
+            _currentLobbyRoomNumber,
+            onSuccess: () => started = true,
+            onError: error => startError = error);
+
+        if (!started)
+        {
+            ShowError(string.IsNullOrWhiteSpace(startError) ? "Could not start lobby." : startError);
+            yield break;
+        }
+
         PlayOnlineGame();
     }
 
     public void BackFromLobby()
     {
         if (_lobbyPollRoutine != null) { StopCoroutine(_lobbyPollRoutine); _lobbyPollRoutine = null; }
-        StartCoroutine(_apiClient.LobbyLeave());
+        if (_currentLobbyRoomNumber > 0) StartCoroutine(_apiClient.LobbyLeave(_currentLobbyRoomNumber));
+        _currentLobbyRoomNumber = 0;
         OpenMultiplayer();
     }
 
@@ -2210,6 +2357,240 @@ public class AuthMenuController : MonoBehaviour
         Debug.Log($"[AuthUI] {message.Replace('\n', ' ')}");
     }
 
+    private void ShowRoomList()
+    {
+        EnsureRoomListPanel();
+        ShowOnly(_roomListPanel);
+        StartCoroutine(LoadRoomList());
+    }
+
+    private IEnumerator LoadRoomList()
+    {
+        ClearRoomRows();
+        SetRoomListStatus($"Loading rooms on {GetCompactServerUrl(_currentServerUrl)}...");
+
+        LobbyRoomData[] rooms = null;
+        string error = null;
+        yield return _apiClient.GetLobbyRooms(
+            onSuccess: data => rooms = data != null ? data.rooms : null,
+            onError: err => error = err);
+
+        ClearRoomRows();
+
+        if (!string.IsNullOrWhiteSpace(error))
+        {
+            SetRoomListStatus(error);
+            yield break;
+        }
+
+        if (rooms == null || rooms.Length == 0)
+        {
+            SetRoomListStatus("No active lobbies on this server.");
+            yield break;
+        }
+
+        SetRoomListStatus($"Active lobbies on {GetCompactServerUrl(_currentServerUrl)}");
+        for (int i = 0; i < rooms.Length; i++)
+        {
+            if (rooms[i] != null)
+                CreateRoomRow(rooms[i]);
+        }
+    }
+
+    private void SelectRoom(LobbyRoomData room)
+    {
+        if (room == null) return;
+        if (room.full || room.playerCount >= Mathf.Max(1, room.maxPlayers))
+        {
+            ShowError($"Room #{room.roomNumber} is full.");
+            return;
+        }
+
+        _currentLobbyRoomNumber = room.roomNumber;
+        _isHostSession = false;
+        _loginReturn = LoginReturn.OnlineLobby;
+        ContinueToLobbyOrLogin();
+    }
+
+    private void SetRoomListStatus(string text)
+    {
+        if (_roomListStatusText != null)
+            _roomListStatusText.text = text;
+    }
+
+    private void ClearRoomRows()
+    {
+        if (_roomListContent == null) return;
+        for (int i = _roomListContent.childCount - 1; i >= 0; i--)
+            Destroy(_roomListContent.GetChild(i).gameObject);
+    }
+
+    private void EnsureRoomListPanel()
+    {
+        if (_roomListPanel != null) return;
+
+        Transform panelParent = mainMenuPanel != null ? mainMenuPanel.transform.parent : transform;
+        _roomListPanel = new GameObject("RoomListPanel");
+        _roomListPanel.transform.SetParent(panelParent, false);
+
+        RectTransform bg = _roomListPanel.AddComponent<RectTransform>();
+        bg.anchorMin = Vector2.zero;
+        bg.anchorMax = Vector2.one;
+        bg.offsetMin = Vector2.zero;
+        bg.offsetMax = Vector2.zero;
+        _roomListPanel.AddComponent<Image>().color = new Color(0.06f, 0.08f, 0.12f, 0.97f);
+
+        CreateMenuButton("BackBtn", _roomListPanel.transform,
+            "Back", new Vector2(110f, -40f), new Vector2(160f, 50f),
+            new Color(0.18f, 0.22f, 0.3f, 1f), OpenMultiplayer);
+
+        CreateMenuButton("RefreshBtn", _roomListPanel.transform,
+            "Refresh", new Vector2(290f, -40f), new Vector2(170f, 50f),
+            new Color(0.14f, 0.22f, 0.42f, 1f), () => StartCoroutine(LoadRoomList()));
+
+        GameObject titleObj = new GameObject("Title");
+        titleObj.transform.SetParent(_roomListPanel.transform, false);
+        RectTransform titleRect = titleObj.AddComponent<RectTransform>();
+        titleRect.anchorMin = new Vector2(0.5f, 1f);
+        titleRect.anchorMax = new Vector2(0.5f, 1f);
+        titleRect.pivot = new Vector2(0.5f, 1f);
+        titleRect.sizeDelta = new Vector2(760f, 70f);
+        titleRect.anchoredPosition = new Vector2(0f, -50f);
+        TextMeshProUGUI titleTmp = titleObj.AddComponent<TextMeshProUGUI>();
+        titleTmp.text = "Active Lobbies";
+        titleTmp.font = TMP_Settings.defaultFontAsset;
+        titleTmp.fontSize = 44f;
+        titleTmp.fontStyle = FontStyles.Bold;
+        titleTmp.alignment = TextAlignmentOptions.Center;
+        titleTmp.color = Color.white;
+
+        GameObject statusObj = new GameObject("Status");
+        statusObj.transform.SetParent(_roomListPanel.transform, false);
+        RectTransform statusRect = statusObj.AddComponent<RectTransform>();
+        statusRect.anchorMin = new Vector2(0.5f, 1f);
+        statusRect.anchorMax = new Vector2(0.5f, 1f);
+        statusRect.pivot = new Vector2(0.5f, 1f);
+        statusRect.sizeDelta = new Vector2(900f, 36f);
+        statusRect.anchoredPosition = new Vector2(0f, -120f);
+        _roomListStatusText = statusObj.AddComponent<TextMeshProUGUI>();
+        _roomListStatusText.font = TMP_Settings.defaultFontAsset;
+        _roomListStatusText.fontSize = 20f;
+        _roomListStatusText.alignment = TextAlignmentOptions.Center;
+        _roomListStatusText.color = new Color(0.75f, 0.85f, 1f, 0.9f);
+
+        GameObject listObj = new GameObject("RoomRows");
+        listObj.transform.SetParent(_roomListPanel.transform, false);
+        RectTransform listRect = listObj.AddComponent<RectTransform>();
+        listRect.anchorMin = new Vector2(0.5f, 1f);
+        listRect.anchorMax = new Vector2(0.5f, 1f);
+        listRect.pivot = new Vector2(0.5f, 1f);
+        listRect.sizeDelta = new Vector2(900f, 520f);
+        listRect.anchoredPosition = new Vector2(0f, -170f);
+        VerticalLayoutGroup layout = listObj.AddComponent<VerticalLayoutGroup>();
+        layout.spacing = 14f;
+        layout.childControlWidth = true;
+        layout.childControlHeight = false;
+        layout.childForceExpandWidth = true;
+        layout.childForceExpandHeight = false;
+        _roomListContent = listObj.transform;
+
+        _roomListPanel.SetActive(false);
+    }
+
+    private void CreateRoomRow(LobbyRoomData room)
+    {
+        GameObject row = new GameObject("RoomRow");
+        row.transform.SetParent(_roomListContent, false);
+        RectTransform rect = row.AddComponent<RectTransform>();
+        rect.sizeDelta = new Vector2(900f, 86f);
+        row.AddComponent<LayoutElement>().preferredHeight = 86f;
+
+        Image image = row.AddComponent<Image>();
+        bool full = room.full || room.playerCount >= Mathf.Max(1, room.maxPlayers);
+        image.color = full
+            ? new Color(0.20f, 0.13f, 0.14f, 0.96f)
+            : new Color(0.10f, 0.18f, 0.27f, 0.96f);
+
+        Button button = row.AddComponent<Button>();
+        button.targetGraphic = image;
+        button.interactable = !full;
+        LobbyRoomData captured = room;
+        button.onClick.AddListener(() => SelectRoom(captured));
+
+        GameObject labelObj = new GameObject("Label");
+        labelObj.transform.SetParent(row.transform, false);
+        RectTransform labelRect = labelObj.AddComponent<RectTransform>();
+        labelRect.anchorMin = Vector2.zero;
+        labelRect.anchorMax = Vector2.one;
+        labelRect.offsetMin = new Vector2(24f, 8f);
+        labelRect.offsetMax = new Vector2(-24f, -8f);
+
+        TextMeshProUGUI label = labelObj.AddComponent<TextMeshProUGUI>();
+        label.font = TMP_Settings.defaultFontAsset;
+        label.fontSize = 22f;
+        label.fontStyle = FontStyles.Bold;
+        label.color = full ? new Color(1f, 0.72f, 0.72f, 1f) : Color.white;
+        label.alignment = TextAlignmentOptions.Left;
+        label.raycastTarget = false;
+        label.text = $"Room #{room.roomNumber}   {room.playerCount}/{Mathf.Max(1, room.maxPlayers)}{(full ? "   FULL" : "")}\n{BuildRoomPlayerNames(room)}";
+    }
+
+    private string BuildRoomPlayerNames(LobbyRoomData room)
+    {
+        if (room == null || room.players == null || room.players.Length == 0)
+            return "No players";
+
+        var sb = new StringBuilder();
+        for (int i = 0; i < room.players.Length; i++)
+        {
+            LobbyPlayerData player = room.players[i];
+            if (player == null || string.IsNullOrWhiteSpace(player.username)) continue;
+            if (sb.Length > 0) sb.Append(", ");
+            sb.Append(player.username);
+        }
+        return sb.Length > 0 ? sb.ToString() : "No players";
+    }
+
+    private void OpenServerAddressPanel(ServerAddressMode mode)
+    {
+        _serverAddressMode = mode;
+        EnsureJoinSessionPanel();
+        RefreshServerAddressPanelText();
+        if (_joinServerUrlInput != null) _joinServerUrlInput.text = "";
+        ShowOnly(_joinSessionPanel);
+        AutoFocusNextFrame(_joinServerUrlInput);
+    }
+
+    private void RefreshServerAddressPanelText()
+    {
+        bool authMode = _serverAddressMode == ServerAddressMode.AuthServer;
+
+        if (_joinSessionTitleText != null)
+            _joinSessionTitleText.text = authMode ? "Online Database" : "Join Session";
+        if (_joinSessionAddressLabelText != null)
+            _joinSessionAddressLabelText.text = authMode ? "Database Server Address" : "Host's Server Address";
+        if (_joinSessionHintText != null)
+            _joinSessionHintText.text = authMode
+                ? "Enter the database server address, e.g. http://192.168.1.10:8080"
+                : "Copy it from the host's lobby screen, e.g. http://192.168.1.10:8080";
+        if (_joinSessionSubmitText != null)
+            _joinSessionSubmitText.text = authMode ? "Use DB & Log In" : "Connect & Log In";
+    }
+
+    private void BackFromServerAddressPanel()
+    {
+        if (_serverAddressMode == ServerAddressMode.AuthServer)
+        {
+            GameObject returnPanel = _serverAddressReturnPanel != null
+                ? _serverAddressReturnPanel
+                : loginPanel;
+            ShowOnly(returnPanel);
+            return;
+        }
+
+        OpenMultiplayer();
+    }
+
     private void EnsureJoinSessionPanel()
     {
         if (_joinSessionPanel != null) return;
@@ -2225,7 +2606,7 @@ public class AuthMenuController : MonoBehaviour
 
         CreateMenuButton("BackBtn", _joinSessionPanel.transform,
             "Back", new Vector2(110f, -40f), new Vector2(160f, 50f),
-            new Color(0.18f, 0.22f, 0.3f, 1f), OpenMultiplayer);
+            new Color(0.18f, 0.22f, 0.3f, 1f), BackFromServerAddressPanel);
 
         // Title
         GameObject titleObj = new GameObject("Title");
@@ -2236,6 +2617,7 @@ public class AuthMenuController : MonoBehaviour
         titleRect.sizeDelta = new Vector2(700f, 70f);
         titleRect.anchoredPosition = new Vector2(0f, -50f);
         TextMeshProUGUI titleTmp = titleObj.AddComponent<TextMeshProUGUI>();
+        _joinSessionTitleText = titleTmp;
         titleTmp.text = "Join Session"; titleTmp.font = TMP_Settings.defaultFontAsset;
         titleTmp.fontSize = 44f; titleTmp.fontStyle = FontStyles.Bold;
         titleTmp.alignment = TextAlignmentOptions.Center; titleTmp.color = Color.white;
@@ -2260,6 +2642,7 @@ public class AuthMenuController : MonoBehaviour
         labelObj.transform.SetParent(card.transform, false);
         labelObj.AddComponent<LayoutElement>().preferredHeight = 30f;
         TextMeshProUGUI labelTmp = labelObj.AddComponent<TextMeshProUGUI>();
+        _joinSessionAddressLabelText = labelTmp;
         labelTmp.text = "Host's Server Address";
         labelTmp.font = TMP_Settings.defaultFontAsset; labelTmp.fontSize = 22f;
         labelTmp.color = new Color(0.75f, 0.85f, 1f, 1f);
@@ -2270,6 +2653,7 @@ public class AuthMenuController : MonoBehaviour
         hintObj.transform.SetParent(card.transform, false);
         hintObj.AddComponent<LayoutElement>().preferredHeight = 26f;
         TextMeshProUGUI hintTmp = hintObj.AddComponent<TextMeshProUGUI>();
+        _joinSessionHintText = hintTmp;
         hintTmp.text = "Copy it from the host's lobby screen, e.g. http://192.168.1.10:8080";
         hintTmp.font = TMP_Settings.defaultFontAsset; hintTmp.fontSize = 16f;
         hintTmp.color = new Color(0.6f, 0.7f, 0.8f, 0.8f);
@@ -2324,6 +2708,7 @@ public class AuthMenuController : MonoBehaviour
         blr.anchorMin = Vector2.zero; blr.anchorMax = Vector2.one;
         blr.offsetMin = Vector2.zero; blr.offsetMax = Vector2.zero;
         TextMeshProUGUI btnTmp = btnLabel.AddComponent<TextMeshProUGUI>();
+        _joinSessionSubmitText = btnTmp;
         btnTmp.text = "Connect & Log In"; btnTmp.font = TMP_Settings.defaultFontAsset;
         btnTmp.fontSize = 22f; btnTmp.fontStyle = FontStyles.Bold;
         btnTmp.alignment = TextAlignmentOptions.Center; btnTmp.color = Color.white;

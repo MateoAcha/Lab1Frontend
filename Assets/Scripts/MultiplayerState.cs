@@ -6,12 +6,14 @@ public static class MultiplayerState
     public static bool IsMultiplayer { get; private set; }
     public static bool IsOnline      { get; private set; }
     public static bool IsHost        { get; private set; }
+    public static int OnlineRoomNumber { get; private set; } = 1;
 
     private static readonly List<PlayerController> _players = new List<PlayerController>();
 
     public static void SetMultiplayer(bool value) { IsMultiplayer = value; }
     public static void SetOnline(bool value)      { IsOnline = value; }
     public static void SetHost(bool value)        { IsHost = value; }
+    public static void SetOnlineRoomNumber(int value) { OnlineRoomNumber = Mathf.Max(1, value); }
 
     public static void RegisterPlayer(PlayerController player)
     {
@@ -99,5 +101,6 @@ public static class MultiplayerState
         IsMultiplayer = false;
         IsOnline = false;
         IsHost = false;
+        OnlineRoomNumber = 1;
     }
 }

@@ -42,9 +42,10 @@ public class GameBootstrap : MonoBehaviour
         bool isMultiplayer = MultiplayerState.IsMultiplayer;
         bool isOnline      = MultiplayerState.IsOnline;
         bool isHost        = MultiplayerState.IsHost;
+        int onlineRoom     = MultiplayerState.OnlineRoomNumber;
         MultiplayerState.Reset();
         MultiplayerState.SetMultiplayer(isMultiplayer);
-        if (isOnline) { MultiplayerState.SetOnline(true); MultiplayerState.SetHost(isHost); }
+        if (isOnline) { MultiplayerState.SetOnline(true); MultiplayerState.SetHost(isHost); MultiplayerState.SetOnlineRoomNumber(onlineRoom); }
         SetupCamera();
         SetupPlayer(0, new Vector3(-1f, 0f, 0f));
         if (MultiplayerState.IsMultiplayer)
@@ -106,10 +107,8 @@ public class GameBootstrap : MonoBehaviour
         ghost.transform.localScale = new Vector3(playerSize, playerSize, 1f);
 
         SpriteRenderer sr = ghost.AddComponent<SpriteRenderer>();
-        sr.sprite = SimpleSprite.Square;
-        sr.color = new Color(1f, 0.65f, 0.1f, 0.75f); // semi-transparent orange
+        PlayerSkinVisuals.Apply(sr, 0, "", playerMaterial, 0.75f);
         sr.sortingOrder = 5;
-        if (playerMaterial != null) sr.sharedMaterial = playerMaterial;
 
         ghost.AddComponent<RemotePlayerGhost>();
     }
@@ -128,7 +127,7 @@ public class GameBootstrap : MonoBehaviour
 
         if (index == 0)
         {
-            ApplyPlayerSkin(renderer);
+            PlayerSkinVisuals.ApplyEquipped(renderer, playerMaterial);
         }
         else
         {
@@ -150,44 +149,6 @@ public class GameBootstrap : MonoBehaviour
 
         player.AddComponent<PlayerPointer>();
         return pc;
-    }
-
-    private void ApplyPlayerSkin(SpriteRenderer renderer)
-    {
-        if (renderer == null) return;
-
-        if (TryGetEquippedSkinSprite(out Sprite skinSprite))
-        {
-            renderer.sprite = skinSprite;
-            renderer.color = Color.white;
-        }
-        else
-        {
-            renderer.sprite = SimpleSprite.Square;
-            renderer.color = PlayerLoadout.GetSkinColor();
-        }
-
-        if (playerMaterial != null)
-        {
-            renderer.sharedMaterial = playerMaterial;
-            if (skinSprite == null)
-                renderer.color = PlayerLoadout.GetSkinColor();
-        }
-    }
-
-    private bool TryGetEquippedSkinSprite(out Sprite sprite)
-    {
-        int skinId = PlayerLoadout.EquippedSkinId;
-        if (skinId <= 0)
-        {
-            sprite = null;
-            return false;
-        }
-
-        if (skinVisualDatabase != null && skinVisualDatabase.TryGetSprite(skinId, out sprite))
-            return true;
-
-        return SkinVisualDatabase.TryGetSpriteGlobal(skinId, out sprite);
     }
 
     private void SetupGameOverScreen()
