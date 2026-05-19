@@ -7,6 +7,11 @@ public class GameBootstrap : MonoBehaviour
     public float playerSize = 1f;
     public float meleeEnemySize = 0.8f;
     public float rangedEnemySize = 0.75f;
+    [Header("Giant Enemy")]
+    public float giantEnemySize = 2.8f;
+    public Material giantEnemyMaterial;
+    public float giantEnemyHealth = 40f;
+    public float giantEnemyAttackRange = 14f;
     [Header("Map")]
     public Vector2 mapSize = new Vector2(40f, 40f);
     [Header("Materials")]
@@ -208,10 +213,14 @@ public class GameBootstrap : MonoBehaviour
 
         enemySpawner.meleeEnemySize = meleeEnemySize;
         enemySpawner.rangedEnemySize = rangedEnemySize;
+        enemySpawner.giantEnemySize = giantEnemySize;
+        enemySpawner.giantEnemyHealth = giantEnemyHealth;
+        enemySpawner.giantEnemyAttackRange = giantEnemyAttackRange;
         enemySpawner.mapSize = mapSize;
         enemySpawner.spawnPadding = Mathf.Max(0.5f, borderInset);
         enemySpawner.meleeEnemyMaterial = meleeEnemyMaterial;
         enemySpawner.rangedEnemyMaterial = rangedEnemyMaterial;
+        enemySpawner.giantEnemyMaterial = giantEnemyMaterial;
         enemySpawner.enemyProjectileMaterial = enemyProjectileMaterial;
     }
 

@@ -60,6 +60,10 @@ public class Health : MonoBehaviour
             {
                 GameStatsTracker.RegisterRangedEnemyKilled();
             }
+            else if (GetComponent<GiantEnemyController>() != null)
+            {
+                GameStatsTracker.RegisterMeleeEnemyKilled();
+            }
             else if (GetComponent<EnemyController>() != null)
             {
                 GameStatsTracker.RegisterMeleeEnemyKilled();

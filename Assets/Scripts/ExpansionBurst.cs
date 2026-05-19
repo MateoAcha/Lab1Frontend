@@ -63,7 +63,8 @@ public class ExpansionBurst : MonoBehaviour
 
         EnemyController melee = other.GetComponent<EnemyController>();
         RangedEnemyController ranged = other.GetComponent<RangedEnemyController>();
-        if (melee == null && ranged == null)
+        GiantEnemyController giant = other.GetComponent<GiantEnemyController>();
+        if (melee == null && ranged == null && giant == null)
         {
             return;
         }
@@ -79,6 +80,11 @@ public class ExpansionBurst : MonoBehaviour
         if (ranged != null)
         {
             ranged.OnHit(transform.position, push);
+        }
+
+        if (giant != null)
+        {
+            giant.OnHit(transform.position, push);
         }
 
         Health health = other.GetComponent<Health>();

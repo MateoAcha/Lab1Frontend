@@ -8,6 +8,10 @@ public class GameBootstrapEditor : Editor
     private SerializedProperty playerSize;
     private SerializedProperty meleeEnemySize;
     private SerializedProperty rangedEnemySize;
+    private SerializedProperty giantEnemySize;
+    private SerializedProperty giantEnemyMaterial;
+    private SerializedProperty giantEnemyHealth;
+    private SerializedProperty giantEnemyAttackRange;
 
     private SerializedProperty mapSize;
 
@@ -31,6 +35,7 @@ public class GameBootstrapEditor : Editor
     private SerializedProperty borderSpacing;
 
     private bool showSizes = true;
+    private bool showGiantEnemy = true;
     private bool showMap = true;
     private bool showMaterials = true;
     private bool showRocks = true;
@@ -40,6 +45,10 @@ public class GameBootstrapEditor : Editor
         playerSize = serializedObject.FindProperty("playerSize");
         meleeEnemySize = serializedObject.FindProperty("meleeEnemySize");
         rangedEnemySize = serializedObject.FindProperty("rangedEnemySize");
+        giantEnemySize = serializedObject.FindProperty("giantEnemySize");
+        giantEnemyMaterial = serializedObject.FindProperty("giantEnemyMaterial");
+        giantEnemyHealth = serializedObject.FindProperty("giantEnemyHealth");
+        giantEnemyAttackRange = serializedObject.FindProperty("giantEnemyAttackRange");
 
         mapSize = serializedObject.FindProperty("mapSize");
 
@@ -77,6 +86,17 @@ public class GameBootstrapEditor : Editor
             EditorGUILayout.PropertyField(playerSize);
             EditorGUILayout.PropertyField(meleeEnemySize);
             EditorGUILayout.PropertyField(rangedEnemySize);
+            EditorGUI.indentLevel--;
+        }
+
+        showGiantEnemy = EditorGUILayout.Foldout(showGiantEnemy, "Giant Enemy", true);
+        if (showGiantEnemy)
+        {
+            EditorGUI.indentLevel++;
+            EditorGUILayout.PropertyField(giantEnemySize);
+            EditorGUILayout.PropertyField(giantEnemyMaterial);
+            EditorGUILayout.PropertyField(giantEnemyHealth);
+            EditorGUILayout.PropertyField(giantEnemyAttackRange);
             EditorGUI.indentLevel--;
         }
 

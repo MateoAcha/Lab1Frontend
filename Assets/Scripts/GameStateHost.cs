@@ -194,6 +194,17 @@ public class GameStateHost : MonoBehaviour
             AddEnemyState(enemies, enemy.gameObject, 1);
         }
 
+        for (int i = OnlineNetworkRegistry.GiantEnemies.Count - 1; i >= 0; i--)
+        {
+            GiantEnemyController enemy = OnlineNetworkRegistry.GiantEnemies[i];
+            if (enemy == null)
+            {
+                OnlineNetworkRegistry.GiantEnemies.RemoveAt(i);
+                continue;
+            }
+            AddEnemyState(enemies, enemy.gameObject, 2);
+        }
+
         return enemies.ToArray();
     }
 

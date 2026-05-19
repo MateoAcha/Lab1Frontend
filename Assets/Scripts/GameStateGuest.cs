@@ -278,14 +278,20 @@ public class GameStateGuest : MonoBehaviour
     private OnlineEntityReplica SpawnEnemyReplica(OnlineEnemyState enemy)
     {
         bool isRanged = enemy.type == 1;
-        GameObject go = new GameObject(isRanged ? "EnemyReplicaRanged" : "EnemyReplicaMelee");
+        bool isGiant = enemy.type == 2;
+        GameObject go = new GameObject(isGiant ? "EnemyReplicaGiant" : isRanged ? "EnemyReplicaRanged" : "EnemyReplicaMelee");
         go.transform.position = new Vector3(enemy.x, enemy.y, 0f);
         go.transform.localScale = new Vector3(Mathf.Max(0.2f, enemy.size), Mathf.Max(0.2f, enemy.size), 1f);
 
         SpriteRenderer sr = go.AddComponent<SpriteRenderer>();
         sr.sprite = SimpleSprite.Square;
         sr.sortingOrder = 5;
-        if (isRanged)
+        if (isGiant)
+        {
+            sr.color = new Color(0.45f, 0.2f, 0.75f, 1f);
+            if (_meleeMat != null) { sr.sharedMaterial = _meleeMat; sr.color = Color.white; }
+        }
+        else if (isRanged)
         {
             sr.color = new Color(1f, 0.65f, 0.2f, 1f);
             if (_rangedMat != null) { sr.sharedMaterial = _rangedMat; sr.color = Color.white; }

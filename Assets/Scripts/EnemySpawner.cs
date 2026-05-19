@@ -10,11 +10,16 @@ public class EnemySpawner : MonoBehaviour
     public int spawnAttempts = 16;
     public float meleeEnemySize = 5f;
     public float rangedEnemySize = 2f;
+    public float giantEnemySize = 2.8f;
+    public float giantEnemyHealth = 40f;
+    public float giantEnemyAttackRange = 14f;
     public Material meleeEnemyMaterial;
     public Material rangedEnemyMaterial;
+    public Material giantEnemyMaterial;
     public Material enemyProjectileMaterial;
     [SerializeField] private Color meleeEnemyColor = new Color(0.25f, 1f, 0.25f, 1f);
     [SerializeField] private Color rangedEnemyColor = new Color(1f, 0.65f, 0.2f, 1f);
+    [SerializeField] private Color giantEnemyColor = new Color(0.45f, 0.2f, 0.75f, 1f);
 
     public static float ElapsedTime { get; private set; }
 
@@ -25,12 +30,14 @@ public class EnemySpawner : MonoBehaviour
 
     private float nextSpawn;
     private float startAt;
+    private int nextGiantMinute = 1;
 
     private void Start()
     {
         startAt = Time.time;
         ElapsedTime = 0f;
         nextSpawn = Time.time + every;
+        nextGiantMinute = 1;
         GameStatsTracker.StartMatch();
     }
 
@@ -43,12 +50,16 @@ public class EnemySpawner : MonoBehaviour
             return;
         }
 
+        SpawnGiantsAtMinuteMarks();
+
         if (Time.time < nextSpawn)
         {
             return;
         }
 
-        int totalEnemies = FindObjectsOfType<EnemyController>().Length + FindObjectsOfType<RangedEnemyController>().Length;
+        int totalEnemies = FindObjectsOfType<EnemyController>().Length +
+            FindObjectsOfType<RangedEnemyController>().Length +
+            FindObjectsOfType<GiantEnemyController>().Length;
         if (totalEnemies >= maxEnemies)
         {
             nextSpawn = Time.time + every;
@@ -79,7 +90,7 @@ public class EnemySpawner : MonoBehaviour
         SpawnMelee(point);
     }
 
-    private bool TryGetSpawnPoint(float enemySize, out Vector2 point)
+    private bool TryGetSpawnPoint(float enemySize, out Vector2 point, bool ignoreRocks = false)
     {
         point = Vector2.zero;
         Transform nearestPlayer = MultiplayerState.GetNearestPlayer(Vector3.zero);
@@ -118,7 +129,7 @@ public class EnemySpawner : MonoBehaviour
             Vector2 candidate = playerPos + dir * radius;
             candidate.x = Mathf.Clamp(candidate.x, minX, maxX);
             candidate.y = Mathf.Clamp(candidate.y, minY, maxY);
-            if (IsSpawnPointFree(candidate, enemySize))
+            if (IsSpawnPointFree(candidate, enemySize, ignoreRocks))
             {
                 point = candidate;
                 return true;
@@ -128,7 +139,7 @@ public class EnemySpawner : MonoBehaviour
         for (int i = 0; i < attempts; i++)
         {
             Vector2 candidate = new Vector2(Random.Range(minX, maxX), Random.Range(minY, maxY));
-            if (IsSpawnPointFree(candidate, enemySize))
+            if (IsSpawnPointFree(candidate, enemySize, ignoreRocks))
             {
                 point = candidate;
                 return true;
@@ -138,10 +149,27 @@ public class EnemySpawner : MonoBehaviour
         return false;
     }
 
-    private bool IsSpawnPointFree(Vector2 point, float enemySize)
+    private bool IsSpawnPointFree(Vector2 point, float enemySize, bool ignoreRocks = false)
     {
         float checkRadius = Mathf.Max(0.2f, enemySize * 0.45f);
-        return Physics2D.OverlapCircle(point, checkRadius) == null;
+        Collider2D[] overlaps = Physics2D.OverlapCircleAll(point, checkRadius);
+        for (int i = 0; i < overlaps.Length; i++)
+        {
+            Collider2D col = overlaps[i];
+            if (col == null || col.isTrigger)
+            {
+                continue;
+            }
+
+            if (ignoreRocks && IsRockCollider(col))
+            {
+                continue;
+            }
+
+            return false;
+        }
+
+        return true;
     }
 
     private float GetRangedChance(float timeSinceStart)
@@ -198,5 +226,58 @@ public class EnemySpawner : MonoBehaviour
 
         RangedEnemyController rangedEnemy = enemy.AddComponent<RangedEnemyController>();
         rangedEnemy.projectileMaterial = enemyProjectileMaterial;
+    }
+
+    private void SpawnGiantsAtMinuteMarks()
+    {
+        while (ElapsedTime >= nextGiantMinute * 60f)
+        {
+            if (TryGetSpawnPoint(giantEnemySize, out Vector2 point, true))
+            {
+                SpawnGiant(point);
+            }
+
+            nextGiantMinute++;
+        }
+    }
+
+    private void SpawnGiant(Vector2 point)
+    {
+        GameObject enemy = new GameObject("EnemyGiant");
+        enemy.transform.position = point;
+        enemy.transform.localScale = new Vector3(giantEnemySize, giantEnemySize, 1f);
+
+        SpriteRenderer renderer = enemy.AddComponent<SpriteRenderer>();
+        renderer.sprite = SimpleSprite.Square;
+        renderer.color = giantEnemyColor;
+        renderer.sortingOrder = 5;
+        if (giantEnemyMaterial != null)
+        {
+            renderer.sharedMaterial = giantEnemyMaterial;
+            renderer.color = Color.white;
+        }
+
+        Health health = enemy.AddComponent<Health>();
+        health.hp = Mathf.Max(1f, giantEnemyHealth);
+
+        GiantEnemyController giant = enemy.AddComponent<GiantEnemyController>();
+        giant.maxHealth = Mathf.Max(1f, giantEnemyHealth);
+        giant.attackRange = Mathf.Max(0.1f, giantEnemyAttackRange);
+    }
+
+    private bool IsRockCollider(Collider2D col)
+    {
+        Transform current = col.transform;
+        while (current != null)
+        {
+            if (current.name == "RuntimeRocks")
+            {
+                return true;
+            }
+
+            current = current.parent;
+        }
+
+        return false;
     }
 }
