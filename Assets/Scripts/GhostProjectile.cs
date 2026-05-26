@@ -28,7 +28,12 @@ public class GhostProjectile : MonoBehaviour
 
     private void OnTriggerEnter2D(Collider2D other)
     {
-        if (other.GetComponent<PlayerController>() == null) return;
+        if (other.GetComponent<PlayerController>() == null &&
+            other.GetComponent<TemporaryWall>() == null)
+        {
+            return;
+        }
+
         other.GetComponent<Health>()?.Hit(1);
         Destroy(gameObject);
     }

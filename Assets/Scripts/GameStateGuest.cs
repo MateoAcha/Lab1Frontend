@@ -2,7 +2,10 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using TMPro;
 using UnityEngine;
+using UnityEngine.SceneManagement;
+using UnityEngine.UI;
 
 public class GameStateGuest : MonoBehaviour
 {
@@ -18,6 +21,8 @@ public class GameStateGuest : MonoBehaviour
     private Material _projMat;
     private GameWebSocketClient _ws;
     private bool _matchCompleted;
+    private bool _hostPaused;
+    private GameObject _hostPauseNotice;
     private OnlineMatchInputMessage _lastSentInput;
     private float _nextInputHeartbeatAt;
 
@@ -36,6 +41,7 @@ public class GameStateGuest : MonoBehaviour
             _projMat = bootstrap.enemyProjectileMaterial;
         }
 
+        BuildHostPauseNotice();
         StartCoroutine(ConnectThenRun());
     }
 
@@ -68,6 +74,9 @@ public class GameStateGuest : MonoBehaviour
 
             yield return null;
         }
+
+        if (!_matchCompleted)
+            HandleHostLeft();
     }
 
     private IEnumerator SendLoop()
@@ -148,6 +157,12 @@ public class GameStateGuest : MonoBehaviour
             return;
         }
 
+        if (json.Contains("\"host_left\""))
+        {
+            HandleHostLeft();
+            return;
+        }
+
         if (!json.Contains("\"type\":\"state\""))
             return;
 
@@ -166,18 +181,85 @@ public class GameStateGuest : MonoBehaviour
     private void ApplyState(OnlineMatchStateMessage state)
     {
         EnemySpawner.SetNetworkElapsedTime(state.elapsedSeconds);
+        ApplyMapState(state.mapIndex);
+        ApplyExitState(state);
         ApplyPlayerStates(state.players, state.matchEnded);
+        ApplyHostPauseState(state.pausedByHost, state.matchEnded);
+        ApplyMatchEndingState(state.matchEnding, state.matchEnded);
         ApplyEnemyState(state.enemies);
         ApplyProjectileState(state.projectiles);
 
         if (state.matchEnded && !_matchCompleted)
         {
             _matchCompleted = true;
+            if (state.matchFinished)
+            {
+                Time.timeScale = 0f;
+            }
             DisableLocalPlayer();
             GameStatsTracker.CompleteNetworkMatch(
                 state.meleeKills,
                 state.rangedKills,
-                Mathf.Max(0, state.elapsedSeconds));
+                state.giantKills,
+                Mathf.Max(0, state.elapsedSeconds),
+                state.matchFinished);
+        }
+    }
+
+    private void ApplyExitState(OnlineMatchStateMessage state)
+    {
+        if (state == null)
+        {
+            return;
+        }
+
+        if (state.exits != null && state.exits.Length > 0)
+        {
+            MatchExit.SetSyncedStates(state.exits);
+            return;
+        }
+
+        MatchExit.SetSyncedPosition(new Vector2(state.exitX, state.exitY), state.exitActive);
+    }
+
+    private void ApplyMapState(int mapIndex)
+    {
+        if (mapIndex < 0)
+        {
+            return;
+        }
+
+        GameBootstrap bootstrap = FindObjectOfType<GameBootstrap>();
+        if (bootstrap != null)
+        {
+            bootstrap.ApplyMapSelection(mapIndex, true);
+        }
+        else
+        {
+            GameMapSelection.Select(mapIndex);
+        }
+    }
+
+    private void ApplyMatchEndingState(bool matchEnding, bool matchEnded)
+    {
+        if (!matchEnding || matchEnded)
+        {
+            return;
+        }
+
+        Time.timeScale = 0f;
+
+        PlayerController player = PlayerController.main;
+        if (player == null)
+        {
+            return;
+        }
+
+        player.enabled = false;
+        Rigidbody2D body = player.GetComponent<Rigidbody2D>();
+        if (body != null)
+        {
+            body.linearVelocity = Vector2.zero;
         }
     }
 
@@ -210,7 +292,9 @@ public class GameStateGuest : MonoBehaviour
             new Vector3(state.x, state.y, 0f),
             new Vector3(state.vx, state.vy, 0f),
             state.skinId,
-            state.skinColor);
+            state.skinColor,
+            state.hp,
+            state.maxHp);
     }
 
     private void ApplyLocalGuestPlayer(OnlinePlayerState state, bool matchEnded)
@@ -251,9 +335,66 @@ public class GameStateGuest : MonoBehaviour
         if (body != null && !alive) body.linearVelocity = Vector2.zero;
     }
 
+    private void ApplyHostPauseState(bool paused, bool matchEnded)
+    {
+        _hostPaused = paused && !matchEnded;
+        if (_hostPauseNotice != null)
+            _hostPauseNotice.SetActive(_hostPaused);
+
+        PlayerController player = PlayerController.main;
+        if (player == null || matchEnded) return;
+
+        Health health = player.GetComponent<Health>();
+        bool alive = health == null || health.hp > 0f;
+        if (!alive) return;
+
+        player.enabled = !_hostPaused;
+        Rigidbody2D body = player.GetComponent<Rigidbody2D>();
+        if (body != null && _hostPaused)
+            body.linearVelocity = Vector2.zero;
+    }
+
     private void DisableLocalPlayer()
     {
         SetLocalPlayerVisibleAndControllable(false);
+    }
+
+    private void HandleHostLeft()
+    {
+        if (_matchCompleted) return;
+        _matchCompleted = true;
+        Time.timeScale = 1f;
+        MultiplayerState.RequestReturnToOnlineMenu();
+        SceneManager.LoadScene("Menu");
+    }
+
+    private void BuildHostPauseNotice()
+    {
+        GameObject canvasObj = new GameObject("HostPauseNoticeCanvas");
+        Canvas canvas = canvasObj.AddComponent<Canvas>();
+        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        canvas.sortingOrder = 45;
+        canvasObj.AddComponent<CanvasScaler>().uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+
+        _hostPauseNotice = new GameObject("HostPauseNotice");
+        _hostPauseNotice.transform.SetParent(canvasObj.transform, false);
+        RectTransform rect = _hostPauseNotice.AddComponent<RectTransform>();
+        rect.anchorMin = new Vector2(0.5f, 1f);
+        rect.anchorMax = new Vector2(0.5f, 1f);
+        rect.pivot = new Vector2(0.5f, 1f);
+        rect.sizeDelta = new Vector2(520f, 56f);
+        rect.anchoredPosition = new Vector2(0f, -28f);
+
+        TextMeshProUGUI text = _hostPauseNotice.AddComponent<TextMeshProUGUI>();
+        text.text = "Host paused the game";
+        text.font = TMP_Settings.defaultFontAsset;
+        text.fontSize = 24f;
+        text.fontStyle = FontStyles.Bold;
+        text.alignment = TextAlignmentOptions.Center;
+        text.color = new Color(1f, 0.92f, 0.45f, 1f);
+        text.raycastTarget = false;
+
+        _hostPauseNotice.SetActive(false);
     }
 
     private void ApplyEnemyState(OnlineEnemyState[] enemies)

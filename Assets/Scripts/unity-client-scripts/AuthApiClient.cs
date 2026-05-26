@@ -41,6 +41,119 @@ public class AuthApiClient
         yield return PostJson("/users/login", JsonUtility.ToJson(payload), onSuccess, onError);
     }
 
+    public IEnumerator GoogleLogin(
+        string idToken,
+        string username,
+        Action<AuthUserData> onSuccess,
+        Action<string, string> onNeedsUsername,
+        Action<string> onError)
+    {
+        Debug.Log("[AuthApi] Google login requested");
+
+        var payload = new GoogleLoginRequest
+        {
+            idToken = idToken ?? "",
+            username = username ?? ""
+        };
+
+        yield return PostGoogleLoginPayload(payload, onSuccess, onNeedsUsername, onError);
+    }
+
+    public IEnumerator GoogleLoginWithCode(
+        string authCode,
+        string codeVerifier,
+        string redirectUri,
+        string username,
+        Action<AuthUserData> onSuccess,
+        Action<string, string> onNeedsUsername,
+        Action<string> onError)
+    {
+        Debug.Log("[AuthApi] Google browser login requested");
+
+        var payload = new GoogleLoginRequest
+        {
+            authCode = authCode ?? "",
+            codeVerifier = codeVerifier ?? "",
+            redirectUri = redirectUri ?? "",
+            username = username ?? ""
+        };
+
+        yield return PostGoogleLoginPayload(payload, onSuccess, onNeedsUsername, onError);
+    }
+
+    public IEnumerator GoogleLoginWithSignupToken(
+        string signupToken,
+        string username,
+        Action<AuthUserData> onSuccess,
+        Action<string, string> onNeedsUsername,
+        Action<string> onError)
+    {
+        Debug.Log("[AuthApi] Google signup username requested");
+
+        var payload = new GoogleLoginRequest
+        {
+            signupToken = signupToken ?? "",
+            username = username ?? ""
+        };
+
+        yield return PostGoogleLoginPayload(payload, onSuccess, onNeedsUsername, onError);
+    }
+
+    private IEnumerator PostGoogleLoginPayload(
+        GoogleLoginRequest payload,
+        Action<AuthUserData> onSuccess,
+        Action<string, string> onNeedsUsername,
+        Action<string> onError)
+    {
+        var request = new UnityWebRequest(_baseUrl + "/users/login/google", "POST");
+        byte[] bodyRaw = Encoding.UTF8.GetBytes(JsonUtility.ToJson(payload));
+        request.uploadHandler = new UploadHandlerRaw(bodyRaw);
+        request.downloadHandler = new DownloadHandlerBuffer();
+        request.SetRequestHeader("Content-Type", "application/json");
+
+        yield return request.SendWebRequest();
+        Debug.Log($"[AuthApi] Response {(long)request.responseCode} from /users/login/google");
+
+        if (request.result != UnityWebRequest.Result.Success
+            || request.responseCode < 200 || request.responseCode >= 300)
+        {
+            onError?.Invoke(FormatError(request));
+            yield break;
+        }
+
+        GoogleLoginData loginData;
+        try { loginData = JsonUtility.FromJson<GoogleLoginData>(request.downloadHandler.text); }
+        catch { onError?.Invoke("Unexpected Google login response."); yield break; }
+
+        if (loginData == null)
+        {
+            onError?.Invoke("Empty Google login response.");
+            yield break;
+        }
+
+        if (loginData.requiresUsername)
+        {
+            Debug.Log($"[AuthApi] Google login needs username. SignupTokenPresent={!string.IsNullOrWhiteSpace(loginData.signupToken)}");
+            onNeedsUsername?.Invoke(loginData.email ?? "", loginData.signupToken ?? "");
+            yield break;
+        }
+
+        if (string.IsNullOrWhiteSpace(loginData.accessToken))
+        {
+            onError?.Invoke("Google login did not return a session.");
+            yield break;
+        }
+
+        onSuccess?.Invoke(new AuthUserData
+        {
+            userId = loginData.userId,
+            username = loginData.username,
+            email = loginData.email,
+            accessToken = loginData.accessToken,
+            tokenType = loginData.tokenType
+        });
+    }
+
     public IEnumerator GetUserById(int userId, Action<AuthUserData> onSuccess, Action<string> onError)
     {
         yield return GetJson($"/users/{userId}", onSuccess, onError, requiresAuth: true);
@@ -105,6 +218,272 @@ public class AuthApiClient
         }
     }
 
+    public IEnumerator SpendMaterial(int userId, string materialKey, int quantity, Action onSuccess, Action<string> onError)
+    {
+        string json = JsonUtility.ToJson(new SpendMaterialRequest
+        {
+            materialKey = materialKey ?? "",
+            quantity = Mathf.Max(0, quantity)
+        });
+        var request = new UnityWebRequest(_baseUrl + $"/users/{userId}/inventory/spend-material", "POST");
+        byte[] bodyRaw = Encoding.UTF8.GetBytes(json);
+        request.uploadHandler = new UploadHandlerRaw(bodyRaw);
+        request.downloadHandler = new DownloadHandlerBuffer();
+        request.SetRequestHeader("Content-Type", "application/json");
+        if (!TryAttachAuthorization(request, onError))
+        {
+            yield break;
+        }
+
+        Debug.Log($"[AuthApi] POST {_baseUrl}/users/{userId}/inventory/spend-material  materialKey={materialKey} qty={quantity}");
+        yield return request.SendWebRequest();
+
+        if (request.result == UnityWebRequest.Result.Success
+            && request.responseCode >= 200 && request.responseCode < 300)
+        {
+            onSuccess?.Invoke();
+        }
+        else
+        {
+            onError?.Invoke(FormatError(request));
+        }
+    }
+
+    public IEnumerator GetPlayerStats(int userId, Action<PlayerStatsData> onSuccess, Action<string> onError)
+    {
+        var request = UnityWebRequest.Get(_baseUrl + $"/users/{userId}/stats");
+        request.timeout = 5;
+        if (!TryAttachAuthorization(request, onError))
+        {
+            yield break;
+        }
+
+        Debug.Log($"[AuthApi] GET {_baseUrl}/users/{userId}/stats");
+        yield return request.SendWebRequest();
+
+        if (request.result != UnityWebRequest.Result.Success
+            || request.responseCode < 200
+            || request.responseCode >= 300)
+        {
+            onError?.Invoke(FormatError(request));
+            yield break;
+        }
+
+        PlayerStatsData stats;
+        try
+        {
+            stats = JsonUtility.FromJson<PlayerStatsData>(request.downloadHandler.text);
+        }
+        catch
+        {
+            onError?.Invoke("Unexpected stats response.");
+            yield break;
+        }
+
+        onSuccess?.Invoke(stats ?? new PlayerStatsData { level = 1 });
+    }
+
+    public IEnumerator GetSkillTree(int userId, Action<SkillTreeStateData> onSuccess, Action<string> onError)
+    {
+        var request = UnityWebRequest.Get(_baseUrl + $"/users/{userId}/skills");
+        request.timeout = 5;
+        if (!TryAttachAuthorization(request, onError))
+        {
+            yield break;
+        }
+
+        Debug.Log($"[AuthApi] GET {_baseUrl}/users/{userId}/skills");
+        yield return request.SendWebRequest();
+
+        if (request.result != UnityWebRequest.Result.Success
+            || request.responseCode < 200
+            || request.responseCode >= 300)
+        {
+            onError?.Invoke(FormatError(request));
+            yield break;
+        }
+
+        SkillTreeStateData state;
+        try
+        {
+            state = JsonUtility.FromJson<SkillTreeStateData>(request.downloadHandler.text);
+        }
+        catch
+        {
+            onError?.Invoke("Unexpected skill tree response.");
+            yield break;
+        }
+
+        onSuccess?.Invoke(state ?? new SkillTreeStateData());
+    }
+
+    public IEnumerator UnlockSkill(int userId, string skillId, Action<SkillTreeActionData> onSuccess, Action<string> onError)
+    {
+        yield return PostSkillAction(userId, skillId, "unlock", onSuccess, onError);
+    }
+
+    public IEnumerator EquipSkill(int userId, string skillId, Action<SkillTreeActionData> onSuccess, Action<string> onError)
+    {
+        yield return PostSkillAction(userId, skillId, "equip", onSuccess, onError);
+    }
+
+    public IEnumerator LevelUpSkill(int userId, string skillId, Action<SkillTreeActionData> onSuccess, Action<string> onError)
+    {
+        yield return PostSkillAction(userId, skillId, "level-up", onSuccess, onError);
+    }
+
+    public IEnumerator EquipInventoryItem(int userId, int userInventoryId, Action<UserInventoryData> onSuccess, Action<string> onError)
+    {
+        var request = new UnityWebRequest(_baseUrl + $"/users/{userId}/inventory/{userInventoryId}/equip", "POST");
+        request.uploadHandler = new UploadHandlerRaw(new byte[0]);
+        request.downloadHandler = new DownloadHandlerBuffer();
+        request.SetRequestHeader("Content-Type", "application/json");
+        if (!TryAttachAuthorization(request, onError))
+        {
+            yield break;
+        }
+
+        Debug.Log($"[AuthApi] POST {_baseUrl}/users/{userId}/inventory/{userInventoryId}/equip");
+        yield return request.SendWebRequest();
+
+        if (request.result != UnityWebRequest.Result.Success
+            || request.responseCode < 200
+            || request.responseCode >= 300)
+        {
+            onError?.Invoke(FormatError(request));
+            yield break;
+        }
+
+        UserInventoryData inventory;
+        try
+        {
+            inventory = JsonUtility.FromJson<UserInventoryData>(request.downloadHandler.text);
+        }
+        catch
+        {
+            onError?.Invoke("Unexpected inventory equip response.");
+            yield break;
+        }
+
+        onSuccess?.Invoke(inventory ?? new UserInventoryData());
+    }
+
+    private IEnumerator PostSkillAction(
+        int userId,
+        string skillId,
+        string action,
+        Action<SkillTreeActionData> onSuccess,
+        Action<string> onError)
+    {
+        string safeSkillId = UnityWebRequest.EscapeURL(skillId ?? "");
+        var request = new UnityWebRequest(_baseUrl + $"/users/{userId}/skills/{safeSkillId}/{action}", "POST");
+        request.uploadHandler = new UploadHandlerRaw(new byte[0]);
+        request.downloadHandler = new DownloadHandlerBuffer();
+        request.SetRequestHeader("Content-Type", "application/json");
+        if (!TryAttachAuthorization(request, onError))
+        {
+            yield break;
+        }
+
+        Debug.Log($"[AuthApi] POST {_baseUrl}/users/{userId}/skills/{safeSkillId}/{action}");
+        yield return request.SendWebRequest();
+
+        if (request.result != UnityWebRequest.Result.Success
+            || request.responseCode < 200
+            || request.responseCode >= 300)
+        {
+            onError?.Invoke(FormatError(request));
+            yield break;
+        }
+
+        SkillTreeActionData data;
+        try
+        {
+            data = JsonUtility.FromJson<SkillTreeActionData>(request.downloadHandler.text);
+        }
+        catch
+        {
+            onError?.Invoke("Unexpected skill action response.");
+            yield break;
+        }
+
+        onSuccess?.Invoke(data ?? new SkillTreeActionData());
+    }
+
+    public IEnumerator GetClaimedChallengeRewards(int userId, Action<ChallengeClaimsData> onSuccess, Action<string> onError)
+    {
+        var request = UnityWebRequest.Get(_baseUrl + $"/users/{userId}/challenges/claimed");
+        request.timeout = 5;
+        if (!TryAttachAuthorization(request, onError))
+        {
+            yield break;
+        }
+
+        Debug.Log($"[AuthApi] GET {_baseUrl}/users/{userId}/challenges/claimed");
+        yield return request.SendWebRequest();
+
+        if (request.result != UnityWebRequest.Result.Success
+            || request.responseCode < 200
+            || request.responseCode >= 300)
+        {
+            onError?.Invoke(FormatError(request));
+            yield break;
+        }
+
+        if (string.IsNullOrWhiteSpace(request.downloadHandler.text))
+        {
+            onSuccess?.Invoke(new ChallengeClaimsData());
+            yield break;
+        }
+
+        ChallengeClaimsData data;
+        try
+        {
+            data = JsonUtility.FromJson<ChallengeClaimsData>(request.downloadHandler.text);
+        }
+        catch
+        {
+            onError?.Invoke("Unexpected challenge claims response.");
+            yield break;
+        }
+
+        onSuccess?.Invoke(data ?? new ChallengeClaimsData());
+    }
+
+    public IEnumerator SaveChallengeClaim(int userId, int challengeId, string challengeKey, int rewardCoins, Action onSuccess, Action<string> onError)
+    {
+        string json = JsonUtility.ToJson(new ChallengeClaimRequest
+        {
+            challengeId = challengeId,
+            challengeKey = challengeKey ?? "",
+            rewardCoins = rewardCoins
+        });
+
+        var request = new UnityWebRequest(_baseUrl + $"/users/{userId}/challenges/claimed", "POST");
+        byte[] bodyRaw = Encoding.UTF8.GetBytes(json);
+        request.uploadHandler = new UploadHandlerRaw(bodyRaw);
+        request.downloadHandler = new DownloadHandlerBuffer();
+        request.SetRequestHeader("Content-Type", "application/json");
+        if (!TryAttachAuthorization(request, onError))
+        {
+            yield break;
+        }
+
+        Debug.Log($"[AuthApi] POST {_baseUrl}/users/{userId}/challenges/claimed  challengeId={challengeId}");
+        yield return request.SendWebRequest();
+
+        if (request.result == UnityWebRequest.Result.Success
+            && request.responseCode >= 200
+            && request.responseCode < 300)
+        {
+            onSuccess?.Invoke();
+        }
+        else
+        {
+            onError?.Invoke(FormatError(request));
+        }
+    }
+
     public IEnumerator GetShopItems(Action<ShopCatalogData> onSuccess, Action<string> onError)
     {
         var request = UnityWebRequest.Get(_baseUrl + "/shop/items");
@@ -151,6 +530,7 @@ public class AuthApiClient
     public IEnumerator GetSkins(int userId, Action<UserSkinsData> onSuccess, Action<string> onError)
     {
         var request = UnityWebRequest.Get(_baseUrl + $"/users/{userId}/skins");
+        request.timeout = 5;
         if (!string.IsNullOrWhiteSpace(AuthSession.AccessToken))
             request.SetRequestHeader("Authorization", $"Bearer {AuthSession.AccessToken}");
 
@@ -193,6 +573,7 @@ public class AuthApiClient
     public IEnumerator GetInventory(int userId, Action<UserInventoryData> onSuccess, Action<string> onError)
     {
         var request = UnityWebRequest.Get(_baseUrl + $"/users/{userId}/inventory");
+        request.timeout = 5;
 
         if (!string.IsNullOrWhiteSpace(AuthSession.AccessToken))
         {
@@ -603,6 +984,21 @@ public class AuthApiClient
     }
 
     [Serializable]
+    private class SpendMaterialRequest
+    {
+        public string materialKey;
+        public int quantity;
+    }
+
+    [Serializable]
+    private class ChallengeClaimRequest
+    {
+        public int challengeId;
+        public string challengeKey;
+        public int rewardCoins;
+    }
+
+    [Serializable]
     private class BuyShopItemRequest
     {
         public int shopItemId;
@@ -621,6 +1017,17 @@ public class AuthApiClient
     {
         public string username;
         public string password;
+    }
+
+    [Serializable]
+    private class GoogleLoginRequest
+    {
+        public string idToken;
+        public string authCode;
+        public string codeVerifier;
+        public string redirectUri;
+        public string signupToken;
+        public string username;
     }
 
     [Serializable]
@@ -647,6 +1054,18 @@ public class AuthApiClient
 public class LobbyRoomListData
 {
     public LobbyRoomData[] rooms;
+}
+
+[Serializable]
+public class GoogleLoginData
+{
+    public bool requiresUsername;
+    public string email;
+    public string signupToken;
+    public string accessToken;
+    public string tokenType;
+    public int userId;
+    public string username;
 }
 
 [Serializable]
@@ -678,4 +1097,20 @@ public class DailyCoinsStatusData
     public int rewardCoins;
     public string lastClaimedAt;
     public int coinTotal;
+}
+
+[Serializable]
+public class ChallengeClaimsData
+{
+    public int[] claimedChallengeIds;
+    public ChallengeClaimData[] claims;
+}
+
+[Serializable]
+public class ChallengeClaimData
+{
+    public int challengeId;
+    public string challengeKey;
+    public int rewardCoins;
+    public string claimedAt;
 }

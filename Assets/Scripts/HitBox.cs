@@ -40,7 +40,10 @@ public class HitBox : MonoBehaviour
     {
         if (hitsPlayer)
         {
-            if (other.GetComponent<PlayerController>() == null)
+            if (other.GetComponent<PlayerController>() == null &&
+                other.GetComponent<TemporaryWall>() == null &&
+                other.GetComponent<PlayerDecoy>() == null &&
+                other.GetComponent<PlayerMinion>() == null)
             {
                 return;
             }

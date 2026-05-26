@@ -62,7 +62,8 @@ public class Health : MonoBehaviour
             }
             else if (GetComponent<GiantEnemyController>() != null)
             {
-                GameStatsTracker.RegisterMeleeEnemyKilled();
+                GameStatsTracker.RegisterGiantEnemyKilled();
+                DroppedMaterialPickup.SpawnForCurrentMap(transform.position);
             }
             else if (GetComponent<EnemyController>() != null)
             {

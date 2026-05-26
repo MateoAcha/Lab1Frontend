@@ -52,12 +52,25 @@ public class PlayerPointer : MonoBehaviour
             }
             else
             {
-                if (OnlinePlayerSync.Instance == null || !OnlinePlayerSync.Instance.HasRemotePlayer)
+                bool isRemoteGhost = GetComponent<RemotePlayerGhost>() != null;
+                if (isRemoteGhost)
+                {
+                    if (PlayerController.main == null)
+                    {
+                        _pivot.gameObject.SetActive(false);
+                        return;
+                    }
+                    otherPos = PlayerController.main.transform.position;
+                }
+                else if (OnlinePlayerSync.Instance == null || !OnlinePlayerSync.Instance.HasRemotePlayer)
                 {
                     _pivot.gameObject.SetActive(false);
                     return;
                 }
-                otherPos = OnlinePlayerSync.Instance.RemotePlayerPosition;
+                else
+                {
+                    otherPos = OnlinePlayerSync.Instance.RemotePlayerPosition;
+                }
             }
         }
         else

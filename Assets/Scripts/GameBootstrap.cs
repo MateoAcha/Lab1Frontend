@@ -7,6 +7,8 @@ public class GameBootstrap : MonoBehaviour
     public float playerSize = 1f;
     public float meleeEnemySize = 0.8f;
     public float rangedEnemySize = 0.75f;
+    [Header("Camera")]
+    public float cameraOrthographicSize = 8f;
     [Header("Giant Enemy")]
     public float giantEnemySize = 2.8f;
     public Material giantEnemyMaterial;
@@ -14,6 +16,17 @@ public class GameBootstrap : MonoBehaviour
     public float giantEnemyAttackRange = 14f;
     [Header("Map")]
     public Vector2 mapSize = new Vector2(40f, 40f);
+    [HideInInspector]
+    public Texture2D floorTexture;
+    [HideInInspector]
+    public Color floorColor = new Color(1f, 0.7853262f, 0.1273585f, 1f);
+    public GameMapDefinition[] maps = GameMapSelection.CreateDefaultMapDefinitions();
+    [Header("Exit")]
+    public Texture2D exitTexture;
+    public Color exitColor = new Color(0.35f, 0.95f, 1f, 1f);
+    public float exitSize = 1.4f;
+    public float exitTextureSize = 1.4f;
+    public int exitCount = 4;
     [Header("Materials")]
     public Material backgroundMaterial;
     public Material playerMaterial;
@@ -36,6 +49,11 @@ public class GameBootstrap : MonoBehaviour
     public float borderSpacing = 1.4f;
 
     private Sprite generatedRockSprite;
+    private Sprite generatedExitSprite;
+    private Sprite generatedFloorSprite;
+    private Material activeFloorMaterial;
+    private Material activeObstacleMaterial;
+    private int appliedMapIndex = -1;
 
     private void Start()
     {
@@ -46,6 +64,7 @@ public class GameBootstrap : MonoBehaviour
         MultiplayerState.Reset();
         MultiplayerState.SetMultiplayer(isMultiplayer);
         if (isOnline) { MultiplayerState.SetOnline(true); MultiplayerState.SetHost(isHost); MultiplayerState.SetOnlineRoomNumber(onlineRoom); }
+        ApplySelectedMapDefinition(false);
         SetupCamera();
         SetupPlayer(0, new Vector3(-1f, 0f, 0f));
         if (MultiplayerState.IsMultiplayer)
@@ -72,6 +91,7 @@ public class GameBootstrap : MonoBehaviour
             }
         }
         SetupRocks();
+        SetupExits();
         SetupSpawner();
         SetupGameOverScreen();
         SetupPauseMenu();
@@ -90,9 +110,9 @@ public class GameBootstrap : MonoBehaviour
         }
 
         cam.orthographic = true;
-        cam.orthographicSize = 6f;
+        cam.orthographicSize = Mathf.Max(1f, cameraOrthographicSize);
         cam.transform.position = new Vector3(0f, 0f, -10f);
-        cam.backgroundColor = new Color(0.08f, 0.08f, 0.1f);
+        cam.backgroundColor = floorColor;
         SetupBackground(cam);
 
         if (cam.GetComponent<CameraFollow>() == null)
@@ -107,9 +127,13 @@ public class GameBootstrap : MonoBehaviour
         ghost.transform.localScale = new Vector3(playerSize, playerSize, 1f);
 
         SpriteRenderer sr = ghost.AddComponent<SpriteRenderer>();
-        PlayerSkinVisuals.Apply(sr, 0, "", playerMaterial, 0.75f);
+        PlayerSkinVisuals.Apply(sr, 0, "", playerMaterial);
         sr.sortingOrder = 5;
 
+        Health health = ghost.AddComponent<Health>();
+        health.hp = 10f;
+        health.maxHp = 10f;
+        ghost.AddComponent<PlayerPointer>();
         ghost.AddComponent<RemotePlayerGhost>();
     }
 
@@ -178,11 +202,141 @@ public class GameBootstrap : MonoBehaviour
         enemySpawner.giantEnemyHealth = giantEnemyHealth;
         enemySpawner.giantEnemyAttackRange = giantEnemyAttackRange;
         enemySpawner.mapSize = mapSize;
+        GameMapDefinition selectedMap = GetSelectedMapDefinition();
+        if (selectedMap != null)
+        {
+            enemySpawner.every = Mathf.Max(0.1f, selectedMap.enemySpawnInterval);
+            enemySpawner.maxEnemies = Mathf.Max(1, selectedMap.maxEnemies);
+            enemySpawner.spawnRules = selectedMap.enemySpawnRules;
+            enemySpawner.giantMinuteSpawns = selectedMap.giantMinuteSpawns;
+            enemySpawner.giantMinuteInterval = Mathf.Max(1f, selectedMap.giantMinuteIntervalSeconds);
+        }
         enemySpawner.spawnPadding = Mathf.Max(0.5f, borderInset);
         enemySpawner.meleeEnemyMaterial = meleeEnemyMaterial;
         enemySpawner.rangedEnemyMaterial = rangedEnemyMaterial;
         enemySpawner.giantEnemyMaterial = giantEnemyMaterial;
         enemySpawner.enemyProjectileMaterial = enemyProjectileMaterial;
+    }
+
+    private void SetupExits()
+    {
+        const string exitsRootName = "RuntimeExits";
+
+        GameObject exitsRoot = GameObject.Find(exitsRootName);
+        if (exitsRoot == null)
+        {
+            exitsRoot = new GameObject(exitsRootName);
+        }
+        else if (exitsRoot.transform.childCount > 0)
+        {
+            return;
+        }
+
+        int count = Mathf.Max(1, exitCount);
+        var placed = new System.Collections.Generic.List<Vector2>(count);
+        for (int i = 0; i < count; i++)
+        {
+            Vector2 point = GetExitSpawnPoint(placed);
+            CreateExit(exitsRoot.transform, point, i);
+            placed.Add(point);
+        }
+    }
+
+    private void CreateExit(Transform parent, Vector2 point, int index)
+    {
+        GameObject exit = new GameObject("MatchExit_" + index);
+        exit.transform.SetParent(parent, false);
+        exit.transform.position = point;
+        exit.transform.localScale = Vector3.one;
+
+        CircleCollider2D collider = exit.AddComponent<CircleCollider2D>();
+        collider.isTrigger = true;
+        collider.radius = Mathf.Max(0.1f, exitSize * 0.5f);
+
+        GameObject visual = new GameObject("Visual");
+        visual.transform.SetParent(exit.transform, false);
+        visual.transform.localPosition = Vector3.zero;
+        float visualSize = Mathf.Max(0.05f, exitTextureSize);
+        visual.transform.localScale = new Vector3(visualSize, visualSize, 1f);
+
+        SpriteRenderer renderer = visual.AddComponent<SpriteRenderer>();
+        renderer.sprite = ResolveExitSprite();
+        renderer.color = exitColor;
+        renderer.sortingOrder = 3;
+
+        exit.AddComponent<MatchExit>();
+    }
+
+    private Vector2 GetExitSpawnPoint()
+    {
+        return GetExitSpawnPoint(null);
+    }
+
+    private Vector2 GetExitSpawnPoint(System.Collections.Generic.List<Vector2> placed)
+    {
+        float width = Mathf.Max(1f, mapSize.x);
+        float height = Mathf.Max(1f, mapSize.y);
+        float margin = Mathf.Max(0.5f, borderInset + exitSize * 0.5f);
+        float minX = -width * 0.5f + margin;
+        float maxX = width * 0.5f - margin;
+        float minY = -height * 0.5f + margin;
+        float maxY = height * 0.5f - margin;
+
+        for (int i = 0; i < 80; i++)
+        {
+            Vector2 candidate = new Vector2(Random.Range(minX, maxX), Random.Range(minY, maxY));
+            if (IsExitSpawnPointFree(candidate, placed))
+            {
+                return candidate;
+            }
+        }
+
+        const int gridSteps = 12;
+        for (int y = 0; y < gridSteps; y++)
+        {
+            for (int x = 0; x < gridSteps; x++)
+            {
+                Vector2 candidate = new Vector2(
+                    Mathf.Lerp(minX, maxX, (x + 0.5f) / gridSteps),
+                    Mathf.Lerp(minY, maxY, (y + 0.5f) / gridSteps));
+                if (IsExitSpawnPointFree(candidate, placed))
+                {
+                    return candidate;
+                }
+            }
+        }
+
+        return Vector2.zero;
+    }
+
+    private bool IsExitSpawnPointFree(Vector2 point, System.Collections.Generic.List<Vector2> placed = null)
+    {
+        float radius = Mathf.Max(0.25f, exitSize * 0.55f);
+        if (placed != null)
+        {
+            float minExitDistance = Mathf.Max(exitSize * 1.6f, exitTextureSize * 0.8f);
+            for (int i = 0; i < placed.Count; i++)
+            {
+                if ((point - placed[i]).sqrMagnitude < minExitDistance * minExitDistance)
+                {
+                    return false;
+                }
+            }
+        }
+
+        Collider2D[] overlaps = Physics2D.OverlapCircleAll(point, radius);
+        for (int i = 0; i < overlaps.Length; i++)
+        {
+            Collider2D col = overlaps[i];
+            if (col == null || col.isTrigger)
+            {
+                continue;
+            }
+
+            return false;
+        }
+
+        return true;
     }
 
     private void SetupBackground(Camera cam)
@@ -212,10 +366,137 @@ public class GameBootstrap : MonoBehaviour
             renderer = background.AddComponent<SpriteRenderer>();
         }
 
-        renderer.sprite = SimpleSprite.Square;
+        Material floorMaterial = ResolveFloorMaterial();
+        renderer.sprite = floorMaterial != null ? SimpleSprite.Square : ResolveFloorSprite();
         renderer.sortingOrder = -100;
-        renderer.sharedMaterial = backgroundMaterial;
-        renderer.color = backgroundMaterial != null ? Color.white : cam.backgroundColor;
+        renderer.sharedMaterial = floorMaterial;
+        renderer.color = floorMaterial != null ? Color.white : floorColor;
+    }
+
+    public void ApplyMapSelection(int mapIndex, bool refreshRuntime)
+    {
+        GameMapSelection.Select(mapIndex);
+        ApplySelectedMapDefinition(refreshRuntime);
+    }
+
+    private void ApplySelectedMapDefinition(bool refreshRuntime)
+    {
+        GameMapDefinition selectedMap = GetSelectedMapDefinition();
+        if (selectedMap == null)
+        {
+            return;
+        }
+
+        int selectedIndex = Mathf.Clamp(GameMapSelection.SelectedMapIndex, 0, maps.Length - 1);
+        if (refreshRuntime && selectedIndex == appliedMapIndex)
+        {
+            return;
+        }
+
+        appliedMapIndex = selectedIndex;
+        floorTexture = selectedMap.floorTexture;
+        generatedFloorSprite = null;
+        floorColor = selectedMap.floorColor;
+        rockColor = selectedMap.obstacleColor;
+        activeFloorMaterial = selectedMap.floorMaterial != null ? selectedMap.floorMaterial : ResolveDefaultFloorMaterial();
+        activeObstacleMaterial = selectedMap.obstacleMaterial != null ? selectedMap.obstacleMaterial : ResolveDefaultObstacleMaterial();
+
+        if (!refreshRuntime)
+        {
+            return;
+        }
+
+        Camera cam = Camera.main;
+        if (cam != null)
+        {
+            cam.backgroundColor = floorColor;
+            SetupBackground(cam);
+        }
+
+        GameObject rocksRoot = GameObject.Find("RuntimeRocks");
+        if (rocksRoot != null)
+        {
+            Material obstacleMaterial = ResolveObstacleMaterial();
+            SpriteRenderer[] renderers = rocksRoot.GetComponentsInChildren<SpriteRenderer>();
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                renderers[i].sprite = ResolveRockSprite();
+                renderers[i].sharedMaterial = obstacleMaterial;
+                renderers[i].color = obstacleMaterial != null ? Color.white : rockColor;
+            }
+        }
+    }
+
+    private GameMapDefinition GetSelectedMapDefinition()
+    {
+        if (maps == null || maps.Length == 0)
+        {
+            maps = GameMapSelection.CreateDefaultMapDefinitions();
+        }
+
+        int index = Mathf.Clamp(GameMapSelection.SelectedMapIndex, 0, maps.Length - 1);
+        return maps[index];
+    }
+
+    public MapMaterialDefinition GetSelectedMapMaterialDrop()
+    {
+        GameMapDefinition selectedMap = GetSelectedMapDefinition();
+        if (selectedMap == null)
+        {
+            return null;
+        }
+
+        if (selectedMap.materialDrop == null)
+        {
+            string mapName = string.IsNullOrWhiteSpace(selectedMap.mapName) ? "Map Material" : selectedMap.mapName;
+            selectedMap.materialDrop = new MapMaterialDefinition
+            {
+                inventoryKey = mapName.ToLowerInvariant().Replace(" ", "_") + "_material",
+                itemName = mapName + " Material"
+            };
+        }
+
+        return selectedMap.materialDrop;
+    }
+
+    private Material ResolveFloorMaterial()
+    {
+        if (activeFloorMaterial != null)
+        {
+            return activeFloorMaterial;
+        }
+
+        return ResolveDefaultFloorMaterial();
+    }
+
+    private Material ResolveObstacleMaterial()
+    {
+        if (activeObstacleMaterial != null)
+        {
+            return activeObstacleMaterial;
+        }
+
+        return ResolveDefaultObstacleMaterial();
+    }
+
+    private Material ResolveDefaultFloorMaterial()
+    {
+        if (maps != null && maps.Length > 0 && maps[0] != null && maps[0].floorMaterial != null)
+        {
+            return maps[0].floorMaterial;
+        }
+
+        return backgroundMaterial;
+    }
+
+    private Material ResolveDefaultObstacleMaterial()
+    {
+        if (maps != null && maps.Length > 0 && maps[0] != null && maps[0].obstacleMaterial != null)
+        {
+            return maps[0].obstacleMaterial;
+        }
+
+        return rockMaterial;
     }
 
     private void SetupRocks()
@@ -359,14 +640,11 @@ public class GameBootstrap : MonoBehaviour
 
         SpriteRenderer renderer = rock.AddComponent<SpriteRenderer>();
         Sprite sprite = ResolveRockSprite();
+        Material obstacleMaterial = ResolveObstacleMaterial();
         renderer.sprite = sprite;
         renderer.sortingOrder = 2;
-        renderer.color = rockColor;
-        if (rockMaterial != null)
-        {
-            renderer.sharedMaterial = rockMaterial;
-            renderer.color = Color.white;
-        }
+        renderer.sharedMaterial = obstacleMaterial;
+        renderer.color = obstacleMaterial != null ? Color.white : rockColor;
 
         if (sprite != null && sprite != SimpleSprite.Square)
         {
@@ -390,9 +668,10 @@ public class GameBootstrap : MonoBehaviour
             return rockSprite;
         }
 
-        if (rockMaterial != null && rockMaterial.HasProperty("_OverlayTex"))
+        Material obstacleMaterial = ResolveObstacleMaterial();
+        if (obstacleMaterial != null && obstacleMaterial.HasProperty("_OverlayTex"))
         {
-            Texture overlayTexture = rockMaterial.GetTexture("_OverlayTex");
+            Texture overlayTexture = obstacleMaterial.GetTexture("_OverlayTex");
             if (overlayTexture is Texture2D overlayTexture2D &&
                 overlayTexture2D.width > 0 &&
                 overlayTexture2D.height > 0)
@@ -410,6 +689,48 @@ public class GameBootstrap : MonoBehaviour
 
                 return generatedRockSprite;
             }
+        }
+
+        return SimpleSprite.Square;
+    }
+
+    private Sprite ResolveExitSprite()
+    {
+        if (exitTexture != null)
+        {
+            if (generatedExitSprite == null || generatedExitSprite.texture != exitTexture)
+            {
+                generatedExitSprite = Sprite.Create(
+                    exitTexture,
+                    new Rect(0f, 0f, exitTexture.width, exitTexture.height),
+                    new Vector2(0.5f, 0.5f),
+                    Mathf.Max(exitTexture.width, exitTexture.height),
+                    0,
+                    SpriteMeshType.Tight);
+            }
+
+            return generatedExitSprite;
+        }
+
+        return SimpleSprite.Circle;
+    }
+
+    private Sprite ResolveFloorSprite()
+    {
+        if (floorTexture != null)
+        {
+            if (generatedFloorSprite == null || generatedFloorSprite.texture != floorTexture)
+            {
+                generatedFloorSprite = Sprite.Create(
+                    floorTexture,
+                    new Rect(0f, 0f, floorTexture.width, floorTexture.height),
+                    new Vector2(0.5f, 0.5f),
+                    Mathf.Max(floorTexture.width, floorTexture.height),
+                    0,
+                    SpriteMeshType.FullRect);
+            }
+
+            return generatedFloorSprite;
         }
 
         return SimpleSprite.Square;

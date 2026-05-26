@@ -1,3 +1,4 @@
+using System.Collections;
 using UnityEngine;
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
@@ -22,18 +23,83 @@ public class PlayerController : MonoBehaviour
     public float rangedProjectileSpeed = 12f;
     public float rangedProjectileLife = 2.2f;
     public float rangedProjectileSize = 0.35f;
+    [Header("Ranged Powers (E)")]
+    public float bombShotProjectileSize = 1.25f;
+    public float bombShotSpeedMultiplier = 0.75f;
+    public float bombShotDamageMultiplier = 1.25f;
+    public float bombShotExplosionRadius = 3.6f;
+    public float bombShotExplosionDamageMultiplier = 1.5f;
+    public float bombShotExplosionDuration = 0.24f;
+    public float bombShotExplosionPushMultiplier = 2.4f;
+    public float bombShotLevelRangeBonus = 0.15f;
+    public float bombShotLevelDamageBonus = 0.15f;
+    public int quickBurstShotCount = 5;
+    public float quickBurstInterval = 0.1f;
+    public float quickBurstDamageMultiplier = 0.8f;
+    public int quickBurstLevelExtraShots = 2;
+    public float snipeShotSpeedMultiplier = 2.6f;
+    public float snipeShotDamageMultiplier = 3f;
+    public float snipeShotLevelDamageBonus = 0.25f;
     [Header("Charge Ability (E)")]
     public float chargeDuration = 0.3f;
     public float chargeCooldown = 5f;
     public float chargeSpeedMultiplier = 4f;
     public float chargeDamageMultiplier = 2f;
     public float chargeRangeMultiplier = 2f;
+    public float chargeLevelDamageBonus = 0.15f;
+    public float chargeLevelHitboxBonus = 0.12f;
+    public float chargeLevelJumpBonus = 0.10f;
+    [Header("Sword / Spear Throw (E)")]
+    public float weaponThrowSpeed = 13f;
+    public float weaponThrowRange = 8f;
+    public float weaponThrowLife = 1.6f;
+    public float weaponThrowDamageMultiplier = 1.6f;
+    public float boomerangReturnSpeed = 15f;
+    public float weaponThrowLevelRangeBonus = 0.18f;
+    [Header("Fire Trail (E)")]
+    public float fireTrailDuration = 3.2f;
+    public float fireTrailSpeedMultiplier = 1.85f;
+    public float fireTrailSpawnInterval = 0.09f;
+    public float fireTrailSegmentLife = 3.75f;
+    public float fireTrailSegmentSize = 1.15f;
+    public float fireTrailDamageMultiplier = 0.1875f;
+    public float fireTrailLevelDurationBonus = 0.20f;
+    public float fireTrailLevelSegmentLifeBonus = 0.25f;
     [Header("Burst Ability (Q)")]
     public float burstRange = 6f;
     public float burstDuration = 0.2f;
     public float burstDamageMultiplier = 0.35f;
     public float burstPushMultiplier = 4f;
     public float burstCooldown = 6f;
+    public float burstLevelRadiusBonus = 0.12f;
+    [Header("Sword / Spear Utility (Q)")]
+    public float wallDistance = 2.8f;
+    public float wallLength = 4.2f;
+    public float wallThickness = 0.45f;
+    public float wallHealth = 18f;
+    public float wallLife = 8f;
+    public float wallDecayDamagePerSecond = 2f;
+    public float wallLevelSizeBonus = 0.12f;
+    public float gravityBombDistance = 6.5f;
+    public float gravityBombTravelTime = 0.85f;
+    public float gravityBombArcHeight = 2.6f;
+    public float gravityBombPullRadius = 5f;
+    public float gravityBombPullDuration = 3f;
+    public float gravityBombPullStrength = 11f;
+    public float gravityBombLevelRadiusBonus = 0.12f;
+    [Header("Ranged Utility (Q)")]
+    public float decoyLife = 5f;
+    public float decoyHealth = 25f;
+    public float decoyStealthDuration = 2.8f;
+    public float stealthAlpha = 0.35f;
+    public float decoyLevelLifeBonus = 0.20f;
+    public float decoyLevelHealthBonus = 0.20f;
+    public float minionLife = 18f;
+    public float minionHealth = 8f;
+    public float minionSizeMultiplier = 0.75f;
+    public float minionSpeed = 4.2f;
+    public int minionTouchDamage = 1;
+    public float minionTouchCooldown = 0.45f;
 
     private Rigidbody2D body;
     private Vector2 look = Vector2.down;
@@ -43,7 +109,10 @@ public class PlayerController : MonoBehaviour
     private float nextChargeReady;
     private float nextBurstReady;
     private float nextConsumableReady;
+    private float _activeChargeSpeedMultiplier = 1f;
     private float _speedBoostUntil;
+    private float _fireTrailBoostUntil;
+    private float _nextFireTrailAt;
     private bool _useExternalInput;
     private Vector2 _externalMove;
     private Vector2 _externalAim = Vector2.down;
@@ -63,6 +132,10 @@ public class PlayerController : MonoBehaviour
     private bool _networkConsumableIsSpeedBoost;
     private float _networkSpeedBoostDuration = 3f;
     private float _networkSpeedBoostMultiplier = 2f;
+    private Coroutine _quickBurstRoutine;
+    private float _stealthUntil;
+    private float _normalAlpha = 1f;
+    private SpriteRenderer _playerRenderer;
 
     public float ConsumableCooldownRemaining => Mathf.Max(0f, nextConsumableReady - Time.time);
     public Vector2 LastMoveInput { get; private set; }
@@ -73,6 +146,7 @@ public class PlayerController : MonoBehaviour
     public int NetworkConsumableSequence { get; private set; }
     public int NetworkSkinId => _hasNetworkLoadout ? _networkSkinId : PlayerLoadout.EquippedSkinId;
     public string NetworkSkinColor => _hasNetworkLoadout ? _networkSkinColor : PlayerSkinVisuals.GetEquippedSkinColorHex();
+    public bool EnemiesCanSee => Time.time >= _stealthUntil;
 
     public float ChargeCooldownProgress01
     {
@@ -142,6 +216,12 @@ public class PlayerController : MonoBehaviour
         {
             gameObject.AddComponent<ConsumableUI>();
         }
+
+        _playerRenderer = GetComponent<SpriteRenderer>();
+        if (_playerRenderer != null)
+        {
+            _normalAlpha = _playerRenderer.color.a;
+        }
     }
 
     private void Start()
@@ -181,7 +261,7 @@ public class PlayerController : MonoBehaviour
 
         if (Time.time < chargeUntil)
         {
-            float boost = Mathf.Max(1f, chargeSpeedMultiplier);
+            float boost = Mathf.Max(1f, _activeChargeSpeedMultiplier);
             body.linearVelocity = chargeDirection * (speed * boost);
         }
         else
@@ -191,6 +271,12 @@ public class PlayerController : MonoBehaviour
             float activeSpeed = Time.time < _speedBoostUntil
                 ? speed * GetSpeedBoostMultiplier()
                 : speed;
+            if (Time.time < _fireTrailBoostUntil)
+            {
+                activeSpeed = Mathf.Max(activeSpeed, speed * Mathf.Max(1f, fireTrailSpeedMultiplier));
+                MaybeSpawnFireTrail(move);
+            }
+
             body.linearVelocity = move * activeSpeed;
         }
 
@@ -203,6 +289,8 @@ public class PlayerController : MonoBehaviour
             Attack(look, 1f, 1f);
             nextAttack = Time.time + cooldown;
         }
+
+        UpdateStealthVisual();
     }
 
     public void SetExternalInputEnabled(bool enabled)
@@ -507,23 +595,354 @@ public class PlayerController : MonoBehaviour
 
     private void ActivateCharge()
     {
+        WeaponKind weaponKind = GetWeaponKind();
+        if (weaponKind == WeaponKind.Ranged)
+        {
+            ActivateRangedPower();
+            return;
+        }
+
+        string skillId = GetEquippedSwordSpearSkillId(SkillSlotKind.Active);
+        if (IsSwordSpearWeapon(weaponKind) && skillId == "swordspear_active_2")
+        {
+            ActivateWeaponThrow(weaponKind);
+            return;
+        }
+
+        if (IsSwordSpearWeapon(weaponKind) && skillId == "swordspear_active_3")
+        {
+            ActivateFireTrail();
+            return;
+        }
+
+        ActivateDefaultCharge();
+    }
+
+    private void ActivateDefaultCharge()
+    {
         Vector2 aim = ReadMouseAimDirection();
         look = aim;
         chargeDirection = aim;
 
-        chargeUntil = Time.time + Mathf.Max(0f, chargeDuration);
+        int level = GetEquippedSwordSpearSkillId(SkillSlotKind.Active) == "swordspear_active_1"
+            ? GetSwordSpearSkillLevel("swordspear_active_1")
+            : 0;
+        float jumpMultiplier = 1f + level * Mathf.Max(0f, chargeLevelJumpBonus);
+        float hitboxMultiplier = 1f + level * Mathf.Max(0f, chargeLevelHitboxBonus);
+        float damageMultiplier = 1f + level * Mathf.Max(0f, chargeLevelDamageBonus);
+
+        _activeChargeSpeedMultiplier = Mathf.Max(1f, chargeSpeedMultiplier * jumpMultiplier);
+        chargeUntil = Time.time + Mathf.Max(0f, chargeDuration * jumpMultiplier);
         nextChargeReady = Time.time + Mathf.Max(0f, chargeCooldown);
 
         Attack(
             aim,
-            Mathf.Max(1f, chargeDamageMultiplier),
-            Mathf.Max(1f, chargeRangeMultiplier),
-            Mathf.Max(0.01f, chargeDuration));
+            Mathf.Max(1f, chargeDamageMultiplier * damageMultiplier),
+            Mathf.Max(1f, chargeRangeMultiplier * hitboxMultiplier),
+            Mathf.Max(0.01f, chargeDuration * jumpMultiplier));
+    }
+
+    private void ActivateRangedPower()
+    {
+        string skillId = GetEquippedRangedSkillId(SkillSlotKind.Active);
+        if (skillId == "ranged_active_1")
+        {
+            ActivateBombShot();
+            return;
+        }
+
+        if (skillId == "ranged_active_2")
+        {
+            ActivateQuickBurst();
+            return;
+        }
+
+        if (skillId == "ranged_active_3")
+        {
+            ActivateSnipeShot();
+            return;
+        }
+
+        ActivateDefaultCharge();
+    }
+
+    private void ActivateBombShot()
+    {
+        Vector2 aim = GetCurrentAim();
+        int level = GetRangedSkillLevel("ranged_active_1");
+        float rangeMultiplier = 1f + level * Mathf.Max(0f, bombShotLevelRangeBonus);
+        float damageMultiplier = 1f + level * Mathf.Max(0f, bombShotLevelDamageBonus);
+        nextChargeReady = Time.time + Mathf.Max(0f, chargeCooldown);
+        SpawnRangedAbilityProjectile(
+            "BombShot",
+            aim,
+            Mathf.Max(rangedProjectileSize, bombShotProjectileSize),
+            Mathf.Max(0.1f, rangedProjectileSpeed * Mathf.Max(0.1f, bombShotSpeedMultiplier)),
+            rangedProjectileLife * rangeMultiplier,
+            Mathf.Max(1, Mathf.RoundToInt(GetWeaponDamage() * Mathf.Max(0.1f, bombShotDamageMultiplier) * damageMultiplier)),
+            true,
+            rangeMultiplier,
+            damageMultiplier);
+    }
+
+    private void ActivateQuickBurst()
+    {
+        Vector2 aim = GetCurrentAim();
+        nextChargeReady = Time.time + Mathf.Max(0f, chargeCooldown);
+        if (_quickBurstRoutine != null)
+        {
+            StopCoroutine(_quickBurstRoutine);
+        }
+
+        _quickBurstRoutine = StartCoroutine(QuickBurstRoutine(aim));
+    }
+
+    private IEnumerator QuickBurstRoutine(Vector2 aim)
+    {
+        int level = GetRangedSkillLevel("ranged_active_2");
+        int shotCount = Mathf.Max(1, quickBurstShotCount + level * Mathf.Max(0, quickBurstLevelExtraShots));
+        float interval = Mathf.Max(0.01f, quickBurstInterval);
+        for (int i = 0; i < shotCount; i++)
+        {
+            Vector2 usedAim = i == 0 ? aim : GetCurrentAim();
+            SpawnRangedAbilityProjectile(
+                "QuickBurstShot",
+                usedAim,
+                rangedProjectileSize,
+                rangedProjectileSpeed,
+                rangedProjectileLife,
+                Mathf.Max(1, Mathf.RoundToInt(GetWeaponDamage() * Mathf.Max(0.1f, quickBurstDamageMultiplier))),
+                false);
+
+            if (i < shotCount - 1)
+            {
+                yield return new WaitForSeconds(interval);
+            }
+        }
+
+        _quickBurstRoutine = null;
+    }
+
+    private void ActivateSnipeShot()
+    {
+        Vector2 aim = GetCurrentAim();
+        int level = GetRangedSkillLevel("ranged_active_3");
+        float damageMultiplier = 1f + level * Mathf.Max(0f, snipeShotLevelDamageBonus);
+        nextChargeReady = Time.time + Mathf.Max(0f, chargeCooldown);
+        SpawnRangedAbilityProjectile(
+            "SnipeShot",
+            aim,
+            rangedProjectileSize,
+            Mathf.Max(0.1f, rangedProjectileSpeed * Mathf.Max(0.1f, snipeShotSpeedMultiplier)),
+            rangedProjectileLife,
+            Mathf.Max(1, Mathf.RoundToInt(GetWeaponDamage() * Mathf.Max(0.1f, snipeShotDamageMultiplier) * damageMultiplier)),
+            false);
+    }
+
+    private void SpawnRangedAbilityProjectile(
+        string name,
+        Vector2 aim,
+        float projectileSize,
+        float projectileSpeed,
+        float projectileLife,
+        int projectileDamage,
+        bool explosive,
+        float explosionRadiusMultiplier = 1f,
+        float explosionDamageMultiplier = 1f)
+    {
+        if (aim.sqrMagnitude < 0.001f)
+        {
+            aim = Vector2.down;
+        }
+
+        aim.Normalize();
+        GameObject projectile = new GameObject(name);
+        projectile.transform.position = transform.position + (Vector3)(aim * 0.7f);
+        projectile.transform.localScale = Vector3.one * Mathf.Max(0.05f, projectileSize);
+        float angle = Mathf.Atan2(aim.y, aim.x) * Mathf.Rad2Deg;
+        projectile.transform.rotation = Quaternion.Euler(0f, 0f, angle);
+
+        SpriteRenderer renderer = projectile.AddComponent<SpriteRenderer>();
+        renderer.sprite = SimpleSprite.Square;
+        renderer.color = explosive
+            ? new Color(1f, 0.72f, 0.18f, 1f)
+            : GetAttackColor(1f);
+        renderer.sortingOrder = 12;
+
+        BoxCollider2D box = projectile.AddComponent<BoxCollider2D>();
+        box.isTrigger = true;
+
+        Rigidbody2D projectileBody = projectile.AddComponent<Rigidbody2D>();
+        projectileBody.bodyType = RigidbodyType2D.Kinematic;
+        projectileBody.gravityScale = 0f;
+
+        RangedAbilityProjectile abilityProjectile = projectile.AddComponent<RangedAbilityProjectile>();
+        abilityProjectile.direction = aim;
+        abilityProjectile.speed = Mathf.Max(0.1f, projectileSpeed);
+        abilityProjectile.life = Mathf.Max(0.05f, projectileLife);
+        abilityProjectile.damage = Mathf.Max(1, projectileDamage);
+        abilityProjectile.ownerPlayerIndex = playerIndex;
+        abilityProjectile.projectileColor = renderer.color;
+        abilityProjectile.explodesOnImpact = explosive;
+        abilityProjectile.explosionRadius = Mathf.Max(0.2f, bombShotExplosionRadius * Mathf.Max(0.1f, explosionRadiusMultiplier));
+        abilityProjectile.explosionDamage = Mathf.Max(0f, GetWeaponDamage() * Mathf.Max(0.1f, bombShotExplosionDamageMultiplier) * Mathf.Max(0.1f, explosionDamageMultiplier));
+        abilityProjectile.explosionDuration = Mathf.Max(0.01f, bombShotExplosionDuration);
+        abilityProjectile.explosionPushMultiplier = Mathf.Max(0f, bombShotExplosionPushMultiplier);
     }
 
     private void ActivateBurst()
     {
+        WeaponKind weaponKind = GetWeaponKind();
+        if (weaponKind == WeaponKind.Ranged)
+        {
+            ActivateRangedUtility();
+            return;
+        }
+
+        string skillId = GetEquippedSwordSpearSkillId(SkillSlotKind.Passive);
+        if (IsSwordSpearWeapon(weaponKind))
+        {
+            if (skillId == "swordspear_passive_2")
+            {
+                ActivateGuardWall();
+                return;
+            }
+
+            if (skillId == "swordspear_passive_3")
+            {
+                ActivateGravityBomb();
+                return;
+            }
+        }
+
+        ActivateDefaultBurst();
+    }
+
+    private void ActivateRangedUtility()
+    {
+        string skillId = GetEquippedRangedSkillId(SkillSlotKind.Passive);
+        if (skillId == "ranged_passive_2")
+        {
+            ActivateDecoy();
+            return;
+        }
+
+        if (skillId == "ranged_passive_3")
+        {
+            ActivateMinion();
+            return;
+        }
+
+        ActivateDefaultBurst();
+    }
+
+    private void ActivateDecoy()
+    {
+        int level = GetRangedSkillLevel("ranged_passive_2");
         nextBurstReady = Time.time + Mathf.Max(0f, burstCooldown);
+        _stealthUntil = Mathf.Max(_stealthUntil, Time.time + Mathf.Max(0.1f, decoyStealthDuration));
+        UpdateStealthVisual();
+        SpawnDecoy(level);
+    }
+
+    private void SpawnDecoy(int level)
+    {
+        float lifeMultiplier = 1f + level * Mathf.Max(0f, decoyLevelLifeBonus);
+        float healthMultiplier = 1f + level * Mathf.Max(0f, decoyLevelHealthBonus);
+
+        GameObject decoy = new GameObject("PlayerDecoy");
+        decoy.transform.position = transform.position;
+        decoy.transform.rotation = transform.rotation;
+        decoy.transform.localScale = transform.localScale;
+
+        SpriteRenderer decoyRenderer = decoy.AddComponent<SpriteRenderer>();
+        SpriteRenderer sourceRenderer = GetPlayerRenderer();
+        decoyRenderer.sprite = sourceRenderer != null ? sourceRenderer.sprite : SimpleSprite.Square;
+        Color decoyColor = sourceRenderer != null ? sourceRenderer.color : PlayerLoadout.GetSkinColor();
+        decoyColor.a = _normalAlpha;
+        decoyRenderer.color = decoyColor;
+        decoyRenderer.sortingOrder = sourceRenderer != null ? sourceRenderer.sortingOrder - 1 : 4;
+
+        BoxCollider2D box = decoy.AddComponent<BoxCollider2D>();
+        Rigidbody2D decoyBody = decoy.AddComponent<Rigidbody2D>();
+        decoyBody.bodyType = RigidbodyType2D.Kinematic;
+        decoyBody.gravityScale = 0f;
+        decoyBody.freezeRotation = true;
+
+        Health health = decoy.AddComponent<Health>();
+        health.hp = Mathf.Max(1f, decoyHealth * healthMultiplier);
+        health.maxHp = Mathf.Max(1f, decoyHealth * healthMultiplier);
+
+        PlayerDecoy playerDecoy = decoy.AddComponent<PlayerDecoy>();
+        playerDecoy.life = Mathf.Max(0.1f, decoyLife * lifeMultiplier);
+        playerDecoy.ownerPlayerIndex = playerIndex;
+    }
+
+    private void ActivateMinion()
+    {
+        int level = GetRangedSkillLevel("ranged_passive_3");
+        int maxMinions = GetMinionMaxAlive(level);
+        int activeMinions = CountActiveMinions();
+        if (activeMinions >= maxMinions)
+        {
+            return;
+        }
+
+        int spawnCount = Mathf.Min(GetMinionSpawnCount(level), maxMinions - activeMinions);
+        if (spawnCount <= 0)
+        {
+            return;
+        }
+
+        nextBurstReady = Time.time + Mathf.Max(0f, burstCooldown);
+        for (int i = 0; i < spawnCount; i++)
+        {
+            SpawnMinion(i, spawnCount);
+        }
+    }
+
+    private void SpawnMinion(int index, int total)
+    {
+        GameObject minion = new GameObject("PlayerMinion");
+        Vector2 spawnOffset = LastAimDirection.sqrMagnitude > 0.001f ? LastAimDirection.normalized : Vector2.down;
+        if (total > 1)
+        {
+            float angle = ((360f / total) * index + 90f) * Mathf.Deg2Rad;
+            spawnOffset = (spawnOffset + new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * 0.65f).normalized;
+        }
+        minion.transform.position = transform.position + (Vector3)(spawnOffset * 1.1f);
+        float minionScale = Mathf.Max(0.1f, minionSizeMultiplier);
+        minion.transform.localScale = transform.localScale * minionScale;
+
+        SpriteRenderer renderer = minion.AddComponent<SpriteRenderer>();
+        renderer.sprite = SimpleSprite.Circle;
+        renderer.color = new Color(1f, 0.88f, 0.12f, 1f);
+        renderer.sortingOrder = 6;
+
+        CircleCollider2D circle = minion.AddComponent<CircleCollider2D>();
+        circle.radius = 0.5f;
+
+        Rigidbody2D minionBody = minion.AddComponent<Rigidbody2D>();
+        minionBody.gravityScale = 0f;
+        minionBody.freezeRotation = true;
+
+        Health health = minion.AddComponent<Health>();
+        health.hp = Mathf.Max(1f, minionHealth);
+        health.maxHp = Mathf.Max(1f, minionHealth);
+
+        PlayerMinion playerMinion = minion.AddComponent<PlayerMinion>();
+        playerMinion.life = Mathf.Max(0.1f, minionLife);
+        playerMinion.speed = Mathf.Max(0.1f, minionSpeed);
+        playerMinion.touchDamage = Mathf.Max(1, minionTouchDamage);
+        playerMinion.touchCooldown = Mathf.Max(0.05f, minionTouchCooldown);
+        playerMinion.ownerPlayerIndex = playerIndex;
+    }
+
+    private void ActivateDefaultBurst()
+    {
+        nextBurstReady = Time.time + Mathf.Max(0f, burstCooldown);
+        int level = GetCurrentBurstSkillLevel();
+        float radiusMultiplier = 1f + level * Mathf.Max(0f, burstLevelRadiusBonus);
 
         GameObject burst = new GameObject("PlayerBurst");
         burst.transform.position = transform.position;
@@ -544,10 +963,185 @@ public class PlayerController : MonoBehaviour
 
         ExpansionBurst expansion = burst.AddComponent<ExpansionBurst>();
         expansion.duration = Mathf.Max(0.01f, burstDuration);
-        expansion.maxRadius = Mathf.Max(0.2f, burstRange);
+        expansion.maxRadius = Mathf.Max(0.2f, burstRange * radiusMultiplier);
         expansion.pushMultiplier = Mathf.Max(0f, burstPushMultiplier);
         float scaledBurstDamage = GetWeaponDamage() * burstDamageMultiplier;
         expansion.damage = Mathf.Max(0f, scaledBurstDamage);
+    }
+
+    private void ActivateWeaponThrow(WeaponKind weaponKind)
+    {
+        Vector2 aim = ReadMouseAimDirection();
+        if (aim.sqrMagnitude < 0.001f)
+        {
+            aim = look.sqrMagnitude > 0.001f ? look : Vector2.down;
+        }
+
+        aim.Normalize();
+        look = aim;
+        LastAimDirection = aim;
+        nextChargeReady = Time.time + Mathf.Max(0f, chargeCooldown);
+
+        bool boomerang = weaponKind == WeaponKind.Sword;
+        int level = GetSwordSpearSkillLevel("swordspear_active_2");
+        float rangeMultiplier = 1f + level * Mathf.Max(0f, weaponThrowLevelRangeBonus);
+        Vector3 thrownSize = GetThrownWeaponSize(weaponKind);
+        GameObject weapon = new GameObject(boomerang ? "SwordBoomerang" : "ThrownSpear");
+        weapon.transform.position = transform.position + (Vector3)(aim * 0.75f);
+        weapon.transform.localScale = thrownSize;
+        float angle = Mathf.Atan2(aim.y, aim.x) * Mathf.Rad2Deg;
+        weapon.transform.rotation = Quaternion.Euler(0f, 0f, angle);
+
+        SpriteRenderer renderer = weapon.AddComponent<SpriteRenderer>();
+        renderer.sprite = SimpleSprite.Square;
+        renderer.color = GetAttackColor(0.95f);
+        renderer.sortingOrder = 12;
+
+        BoxCollider2D box = weapon.AddComponent<BoxCollider2D>();
+        box.isTrigger = true;
+
+        Rigidbody2D weaponBody = weapon.AddComponent<Rigidbody2D>();
+        weaponBody.bodyType = RigidbodyType2D.Kinematic;
+        weaponBody.gravityScale = 0f;
+
+        PlayerThrownWeapon thrown = weapon.AddComponent<PlayerThrownWeapon>();
+        thrown.owner = transform;
+        thrown.direction = aim;
+        thrown.boomerang = boomerang;
+        thrown.speed = Mathf.Max(0.1f, weaponThrowSpeed);
+        thrown.returnSpeed = Mathf.Max(0.1f, boomerangReturnSpeed);
+        thrown.maxDistance = Mathf.Max(0.5f, weaponThrowRange * rangeMultiplier);
+        thrown.life = Mathf.Max(0.05f, weaponThrowLife * rangeMultiplier);
+        thrown.damage = Mathf.Max(1, Mathf.RoundToInt(GetWeaponDamage() * Mathf.Max(1f, weaponThrowDamageMultiplier)));
+        thrown.ownerPlayerIndex = playerIndex;
+        thrown.weaponColor = GetAttackColor(0.95f);
+    }
+
+    private void ActivateFireTrail()
+    {
+        int level = GetSwordSpearSkillLevel("swordspear_active_3");
+        float durationMultiplier = 1f + level * Mathf.Max(0f, fireTrailLevelDurationBonus);
+        nextChargeReady = Time.time + Mathf.Max(0f, chargeCooldown);
+        _fireTrailBoostUntil = Time.time + Mathf.Max(0.1f, fireTrailDuration * durationMultiplier);
+        _nextFireTrailAt = 0f;
+        MaybeSpawnFireTrail(LastMoveInput.sqrMagnitude > 0.001f ? LastMoveInput : ReadMove());
+    }
+
+    private void MaybeSpawnFireTrail(Vector2 move)
+    {
+        if (Time.time < _nextFireTrailAt)
+        {
+            return;
+        }
+
+        if (move.sqrMagnitude < 0.001f && body != null && body.linearVelocity.sqrMagnitude < 0.01f)
+        {
+            return;
+        }
+
+        _nextFireTrailAt = Time.time + Mathf.Max(0.02f, fireTrailSpawnInterval);
+        SpawnFireTrailSegment(transform.position);
+    }
+
+    private void SpawnFireTrailSegment(Vector3 position)
+    {
+        GameObject segment = new GameObject("FireTrailSegment");
+        segment.transform.position = new Vector3(position.x, position.y, 0f);
+        segment.transform.localScale = Vector3.one * Mathf.Max(0.1f, fireTrailSegmentSize);
+
+        SpriteRenderer renderer = segment.AddComponent<SpriteRenderer>();
+        renderer.sprite = SimpleSprite.Circle;
+        renderer.color = new Color(1f, 0.38f, 0.05f, 0.72f);
+        renderer.sortingOrder = 5;
+
+        CircleCollider2D circle = segment.AddComponent<CircleCollider2D>();
+        circle.isTrigger = true;
+        circle.radius = 0.5f;
+
+        Rigidbody2D segmentBody = segment.AddComponent<Rigidbody2D>();
+        segmentBody.bodyType = RigidbodyType2D.Kinematic;
+        segmentBody.gravityScale = 0f;
+
+        FireTrailSegment fire = segment.AddComponent<FireTrailSegment>();
+        int level = GetSwordSpearSkillLevel("swordspear_active_3");
+        float lifeMultiplier = 1f + level * Mathf.Max(0f, fireTrailLevelSegmentLifeBonus);
+        fire.life = Mathf.Max(0.05f, fireTrailSegmentLife * lifeMultiplier);
+        fire.damage = Mathf.Max(1, Mathf.RoundToInt(GetWeaponDamage() * Mathf.Max(0.1f, fireTrailDamageMultiplier)));
+        fire.ownerPlayerIndex = playerIndex;
+        fire.fireColor = new Color(1f, 0.38f, 0.05f, 0.72f);
+    }
+
+    private void ActivateGuardWall()
+    {
+        Vector2 aim = ReadMouseAimDirection();
+        if (aim.sqrMagnitude < 0.001f)
+        {
+            aim = look.sqrMagnitude > 0.001f ? look : Vector2.down;
+        }
+
+        aim.Normalize();
+        look = aim;
+        LastAimDirection = aim;
+        nextBurstReady = Time.time + Mathf.Max(0f, burstCooldown);
+        int level = GetSwordSpearSkillLevel("swordspear_passive_2");
+        float sizeMultiplier = 1f + level * Mathf.Max(0f, wallLevelSizeBonus);
+
+        GameObject wall = new GameObject("PlayerGuardWall");
+        wall.transform.position = transform.position + (Vector3)(aim * Mathf.Max(0.5f, wallDistance));
+        wall.transform.localScale = new Vector3(
+            Mathf.Max(0.4f, wallLength * sizeMultiplier),
+            Mathf.Max(0.1f, wallThickness * sizeMultiplier),
+            1f);
+        float angle = Mathf.Atan2(aim.y, aim.x) * Mathf.Rad2Deg + 90f;
+        wall.transform.rotation = Quaternion.Euler(0f, 0f, angle);
+
+        SpriteRenderer renderer = wall.AddComponent<SpriteRenderer>();
+        renderer.sprite = SimpleSprite.Square;
+        renderer.color = new Color(0.48f, 0.78f, 1f, 0.86f);
+        renderer.sortingOrder = 7;
+
+        BoxCollider2D box = wall.AddComponent<BoxCollider2D>();
+        Rigidbody2D wallBody = wall.AddComponent<Rigidbody2D>();
+        wallBody.bodyType = RigidbodyType2D.Static;
+        wallBody.gravityScale = 0f;
+
+        Health health = wall.AddComponent<Health>();
+        health.hp = Mathf.Max(1f, wallHealth * sizeMultiplier);
+        health.maxHp = Mathf.Max(1f, wallHealth * sizeMultiplier);
+
+        TemporaryWall temporaryWall = wall.AddComponent<TemporaryWall>();
+        temporaryWall.life = Mathf.Max(0.2f, wallLife * sizeMultiplier);
+        temporaryWall.decayDamagePerSecond = Mathf.Max(0f, wallDecayDamagePerSecond);
+        temporaryWall.ownerPlayerIndex = playerIndex;
+    }
+
+    private void ActivateGravityBomb()
+    {
+        Vector2 aim = ReadMouseAimDirection();
+        if (aim.sqrMagnitude < 0.001f)
+        {
+            aim = look.sqrMagnitude > 0.001f ? look : Vector2.down;
+        }
+
+        aim.Normalize();
+        look = aim;
+        LastAimDirection = aim;
+        nextBurstReady = Time.time + Mathf.Max(0f, burstCooldown);
+        int level = GetSwordSpearSkillLevel("swordspear_passive_3");
+        float radiusMultiplier = 1f + level * Mathf.Max(0f, gravityBombLevelRadiusBonus);
+
+        GameObject bomb = new GameObject("GravityBomb");
+        bomb.transform.position = transform.position + (Vector3)(aim * 0.7f);
+
+        GravityBombProjectile gravityBomb = bomb.AddComponent<GravityBombProjectile>();
+        gravityBomb.direction = aim;
+        gravityBomb.distance = Mathf.Max(0.5f, gravityBombDistance);
+        gravityBomb.travelTime = Mathf.Max(0.1f, gravityBombTravelTime);
+        gravityBomb.arcHeight = Mathf.Max(0f, gravityBombArcHeight);
+        gravityBomb.pullRadius = Mathf.Max(0.5f, gravityBombPullRadius * radiusMultiplier);
+        gravityBomb.pullDuration = Mathf.Max(0.1f, gravityBombPullDuration);
+        gravityBomb.pullStrength = Mathf.Max(0f, gravityBombPullStrength);
+        gravityBomb.bombColor = GetAttackColor(1f);
     }
 
     private void Attack(Vector2 direction, float damageMultiplier, float rangeMultiplier, float lifeOverride = -1f)
@@ -681,6 +1275,177 @@ public class PlayerController : MonoBehaviour
     private WeaponKind GetWeaponKind()
     {
         return _hasNetworkLoadout ? _networkWeaponKind : PlayerLoadout.CurrentWeaponKind;
+    }
+
+    private string GetEquippedSwordSpearSkillId(SkillSlotKind slotKind)
+    {
+        if (_hasNetworkLoadout)
+        {
+            return "";
+        }
+
+        PlayerSkillDefinition skill = PlayerSkillLoadout.GetEquipped(SkillWeaponBranch.SwordSpear, slotKind);
+        return skill != null ? skill.id : "";
+    }
+
+    private string GetEquippedRangedSkillId(SkillSlotKind slotKind)
+    {
+        if (_hasNetworkLoadout)
+        {
+            return "";
+        }
+
+        PlayerSkillDefinition skill = PlayerSkillLoadout.GetEquipped(SkillWeaponBranch.Ranged, slotKind);
+        return skill != null ? skill.id : "";
+    }
+
+    private int GetSwordSpearSkillLevel(string skillId)
+    {
+        if (_hasNetworkLoadout || string.IsNullOrWhiteSpace(skillId))
+        {
+            return 0;
+        }
+
+        return PlayerSkillLoadout.GetSkillLevel(skillId);
+    }
+
+    private int GetCurrentBurstSkillLevel()
+    {
+        if (_hasNetworkLoadout)
+        {
+            return 0;
+        }
+
+        WeaponKind weaponKind = GetWeaponKind();
+        if (weaponKind == WeaponKind.Ranged)
+        {
+            return GetEquippedRangedSkillId(SkillSlotKind.Passive) == "ranged_passive_1"
+                ? PlayerSkillLoadout.GetSkillLevel("ranged_passive_1")
+                : 0;
+        }
+
+        if (IsSwordSpearWeapon(weaponKind))
+        {
+            return GetEquippedSwordSpearSkillId(SkillSlotKind.Passive) == "swordspear_passive_1"
+                ? PlayerSkillLoadout.GetSkillLevel("swordspear_passive_1")
+                : 0;
+        }
+
+        return 0;
+    }
+
+    private int GetRangedSkillLevel(string skillId)
+    {
+        if (_hasNetworkLoadout || string.IsNullOrWhiteSpace(skillId))
+        {
+            return 0;
+        }
+
+        return PlayerSkillLoadout.GetSkillLevel(skillId);
+    }
+
+    private int CountActiveMinions()
+    {
+        int count = 0;
+        PlayerMinion[] minions = FindObjectsOfType<PlayerMinion>();
+        for (int i = 0; i < minions.Length; i++)
+        {
+            if (minions[i] != null && minions[i].ownerPlayerIndex == playerIndex)
+            {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    public static int GetMinionSpawnCountForLevel(int level)
+    {
+        if (level >= 3)
+            return 3;
+        if (level >= 1)
+            return 2;
+        return 1;
+    }
+
+    public static int GetMinionMaxAliveForLevel(int level)
+    {
+        if (level >= 3)
+            return 4;
+        if (level >= 2)
+            return 3;
+        return 2;
+    }
+
+    private static int GetMinionSpawnCount(int level)
+    {
+        return GetMinionSpawnCountForLevel(level);
+    }
+
+    private static int GetMinionMaxAlive(int level)
+    {
+        return GetMinionMaxAliveForLevel(level);
+    }
+
+    private SpriteRenderer GetPlayerRenderer()
+    {
+        if (_playerRenderer == null)
+        {
+            _playerRenderer = GetComponent<SpriteRenderer>();
+            if (_playerRenderer != null)
+            {
+                _normalAlpha = Mathf.Max(_normalAlpha, _playerRenderer.color.a);
+            }
+        }
+
+        return _playerRenderer;
+    }
+
+    private void UpdateStealthVisual()
+    {
+        SpriteRenderer renderer = GetPlayerRenderer();
+        if (renderer == null)
+        {
+            return;
+        }
+
+        Color color = renderer.color;
+        color.a = EnemiesCanSee ? _normalAlpha : Mathf.Clamp01(stealthAlpha);
+        renderer.color = color;
+    }
+
+    private Vector2 GetCurrentAim()
+    {
+        Vector2 aim = ReadMouseAimDirection();
+        if (aim.sqrMagnitude < 0.001f)
+        {
+            aim = look.sqrMagnitude > 0.001f ? look : Vector2.down;
+        }
+
+        aim.Normalize();
+        look = aim;
+        LastAimDirection = aim;
+        return aim;
+    }
+
+    private static bool IsSwordSpearWeapon(WeaponKind weaponKind)
+    {
+        return weaponKind == WeaponKind.Spear || weaponKind == WeaponKind.Sword;
+    }
+
+    private Vector3 GetThrownWeaponSize(WeaponKind weaponKind)
+    {
+        if (weaponKind == WeaponKind.Sword)
+        {
+            return new Vector3(
+                Mathf.Max(0.4f, length * 0.75f),
+                Mathf.Max(0.2f, width * swordWidthMultiplier),
+                1f);
+        }
+
+        return new Vector3(
+            Mathf.Max(0.4f, length),
+            Mathf.Max(0.2f, width),
+            1f);
     }
 
     private Color GetAttackColor(float alpha)

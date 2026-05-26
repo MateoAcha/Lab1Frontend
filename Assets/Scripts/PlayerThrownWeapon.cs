@@ -1,0 +1,144 @@
+using System.Collections.Generic;
+using UnityEngine;
+
+public class PlayerThrownWeapon : MonoBehaviour
+{
+    public Transform owner;
+    public Vector2 direction = Vector2.down;
+    public bool boomerang;
+    public float speed = 13f;
+    public float returnSpeed = 15f;
+    public float maxDistance = 8f;
+    public float life = 1.6f;
+    public int damage = 1;
+    public int ownerPlayerIndex;
+    public Color weaponColor = Color.white;
+
+    private Vector2 _origin;
+    private float _dieAt;
+    private bool _returning;
+    private readonly HashSet<int> _hitIds = new HashSet<int>();
+
+    private void Start()
+    {
+        if (direction.sqrMagnitude < 0.001f)
+        {
+            direction = Vector2.down;
+        }
+
+        direction.Normalize();
+        _origin = transform.position;
+        _dieAt = Time.time + Mathf.Max(0.05f, life);
+    }
+
+    private void Update()
+    {
+        float dt = Time.deltaTime;
+        if (Time.time >= _dieAt)
+        {
+            Destroy(gameObject);
+            return;
+        }
+
+        if (boomerang)
+        {
+            UpdateBoomerang(dt);
+            return;
+        }
+
+        transform.position += (Vector3)(direction * (Mathf.Max(0.1f, speed) * dt));
+        transform.rotation = Quaternion.Euler(0f, 0f, Mathf.Atan2(direction.y, direction.x) * Mathf.Rad2Deg);
+
+        if (Vector2.Distance(_origin, transform.position) >= Mathf.Max(0.5f, maxDistance))
+        {
+            Destroy(gameObject);
+        }
+    }
+
+    private void UpdateBoomerang(float dt)
+    {
+        Vector2 position = transform.position;
+        float outwardDistance = Mathf.Max(0.5f, maxDistance) * 0.65f;
+        if (!_returning && Vector2.Distance(_origin, position) >= outwardDistance)
+        {
+            _returning = true;
+        }
+
+        Vector2 moveDirection = direction;
+        if (_returning)
+        {
+            if (owner == null)
+            {
+                Destroy(gameObject);
+                return;
+            }
+
+            Vector2 toOwner = (Vector2)owner.position - position;
+            if (toOwner.magnitude <= 0.45f)
+            {
+                Destroy(gameObject);
+                return;
+            }
+
+            moveDirection = toOwner.normalized;
+        }
+
+        float usedSpeed = _returning ? Mathf.Max(0.1f, returnSpeed) : Mathf.Max(0.1f, speed);
+        transform.position += (Vector3)(moveDirection * (usedSpeed * dt));
+        transform.Rotate(0f, 0f, 860f * dt);
+    }
+
+    private void OnTriggerEnter2D(Collider2D other)
+    {
+        TryHit(other);
+    }
+
+    private void OnTriggerStay2D(Collider2D other)
+    {
+        TryHit(other);
+    }
+
+    private void TryHit(Collider2D other)
+    {
+        if (other == null)
+        {
+            return;
+        }
+
+        EnemyProjectile enemyProjectile = other.GetComponent<EnemyProjectile>();
+        if (enemyProjectile != null)
+        {
+            Destroy(enemyProjectile.gameObject);
+            return;
+        }
+
+        EnemyController melee = other.GetComponent<EnemyController>();
+        RangedEnemyController ranged = other.GetComponent<RangedEnemyController>();
+        GiantEnemyController giant = other.GetComponent<GiantEnemyController>();
+        GhostEnemy ghost = other.GetComponent<GhostEnemy>();
+
+        if (melee == null && ranged == null && giant == null && ghost == null)
+        {
+            return;
+        }
+
+        int id = other.GetInstanceID();
+        if (_hitIds.Contains(id))
+        {
+            return;
+        }
+
+        _hitIds.Add(id);
+
+        if (melee != null) melee.OnHit(transform.position);
+        if (ranged != null) ranged.OnHit(transform.position);
+        if (giant != null) giant.OnHit(transform.position);
+        if (ghost != null) ghost.OnHit(transform.position);
+
+        Health health = other.GetComponent<Health>();
+        if (health != null)
+        {
+            health.Hit(damage);
+        }
+    }
+}

@@ -5,11 +5,14 @@ using UnityEngine.UI;
 
 public class PauseMenu : MonoBehaviour
 {
+    public static bool IsPaused { get; private set; }
+
     private GameObject _overlay;
     private bool _paused;
 
     private void Start()
     {
+        IsPaused = false;
         BuildUI();
     }
 
@@ -22,7 +25,10 @@ public class PauseMenu : MonoBehaviour
     private void SetPaused(bool paused)
     {
         _paused = paused;
-        Time.timeScale = paused ? 0f : 1f;
+        IsPaused = paused;
+        bool controlsGlobalTime = !MultiplayerState.IsOnline || MultiplayerState.IsHost;
+        if (controlsGlobalTime)
+            Time.timeScale = paused ? 0f : 1f;
         _overlay.SetActive(paused);
     }
 
@@ -33,9 +39,16 @@ public class PauseMenu : MonoBehaviour
 
     private void GoToMainMenu()
     {
+        IsPaused = false;
         Time.timeScale = 1f;
         Destroy(_overlay.transform.root.gameObject);
         SceneManager.LoadScene("Menu");
+    }
+
+    private void OnDestroy()
+    {
+        if (_paused)
+            IsPaused = false;
     }
 
     private void BuildUI()
@@ -66,8 +79,7 @@ public class PauseMenu : MonoBehaviour
         cardRect.pivot = new Vector2(0.5f, 0.5f);
         cardRect.sizeDelta = new Vector2(360f, 260f);
         cardRect.anchoredPosition = Vector2.zero;
-        Image cardBg = card.AddComponent<Image>();
-        cardBg.color = new Color(0.08f, 0.11f, 0.16f, 0.98f);
+        GameUiThemeRuntime.StylePanel(card, GameUiThemeRuntime.Current.pauseBackground, true);
 
         VerticalLayoutGroup layout = card.AddComponent<VerticalLayoutGroup>();
         layout.padding = new RectOffset(36, 36, 36, 36);
@@ -99,7 +111,7 @@ public class PauseMenu : MonoBehaviour
         text.fontSize = 38;
         text.fontStyle = FontStyles.Bold;
         text.alignment = TextAlignmentOptions.Center;
-        text.color = new Color(0.95f, 0.96f, 1f, 1f);
+        text.color = GameUiThemeRuntime.Current.text;
         text.font = TMP_Settings.defaultFontAsset;
     }
 
@@ -114,16 +126,8 @@ public class PauseMenu : MonoBehaviour
         le.preferredHeight = 54f;
 
         Image img = obj.AddComponent<Image>();
-        img.color = color;
-
         Button btn = obj.AddComponent<Button>();
-        ColorBlock cb = btn.colors;
-        cb.normalColor = color;
-        cb.highlightedColor = color * 1.12f;
-        cb.pressedColor = color * 0.88f;
-        cb.selectedColor = color;
-        btn.colors = cb;
-        btn.targetGraphic = img;
+        GameUiThemeRuntime.StyleButton(btn, img, color);
         btn.onClick.AddListener(onClick);
 
         GameObject labelObj = new GameObject("Label");
@@ -139,7 +143,7 @@ public class PauseMenu : MonoBehaviour
         text.fontSize = 22;
         text.fontStyle = FontStyles.Bold;
         text.alignment = TextAlignmentOptions.Center;
-        text.color = Color.white;
+        text.color = GameUiThemeRuntime.Current.text;
         text.font = TMP_Settings.defaultFontAsset;
     }
 }

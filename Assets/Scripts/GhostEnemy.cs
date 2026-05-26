@@ -28,6 +28,15 @@ public class GhostEnemy : MonoBehaviour
     private void OnTriggerStay2D(Collider2D other)
     {
         if (Time.time < _nextTouchDamage) return;
+
+        TemporaryWall wall = other.GetComponent<TemporaryWall>();
+        if (wall != null)
+        {
+            wall.Hit(TouchDamage);
+            _nextTouchDamage = Time.time + TouchCooldown;
+            return;
+        }
+
         if (other.GetComponent<PlayerController>() == null) return;
 
         Health h = other.GetComponent<Health>();

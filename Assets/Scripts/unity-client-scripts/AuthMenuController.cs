@@ -4,10 +4,12 @@ using UnityEngine.UI;
 using TMPro;
 using System;
 using System.Collections;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Net;
 using System.Net.Sockets;
+using System.Threading.Tasks;
 
 public class AuthMenuController : MonoBehaviour
 {
@@ -51,6 +53,9 @@ public class AuthMenuController : MonoBehaviour
     public string dailyCoinsLoadingText = "Checking...";
     public string dailyCoinsClaimingText = "Claiming...";
 
+    [Header("UI Theme")]
+    public GameUiTheme uiTheme = new GameUiTheme();
+
     [Header("Skin Visuals")]
     public SkinVisualDatabase skinVisualDatabase;
 
@@ -59,9 +64,13 @@ public class AuthMenuController : MonoBehaviour
     public Transform gameParent;
     public GameObject menuRoot;
 
+    [Header("Maps")]
+    public MapSelectOption[] mapSelectOptions = GameMapSelection.CreateDefaultMapSelectOptions();
+
     [Header("Config")]
     public string apiBaseUrl = "http://localhost:8080";
     public string gameplaySceneName = "GameScene";
+    public string googleClientId = "";
 
     private AuthApiClient _apiClient;
     private GameObject _gameInstance;
@@ -75,6 +84,11 @@ public class AuthMenuController : MonoBehaviour
     private Button _shopButton;
     private Image _shopButtonImage;
     private TextMeshProUGUI _shopButtonText;
+    private GameObject _skillTreePanel;
+    private SkillTreePanelController _skillTreePanelController;
+    private Button _skillTreeButton;
+    private Image _skillTreeButtonImage;
+    private TextMeshProUGUI _skillTreeButtonText;
     private Button _statsCardButton;
     private Image _statsCardImage;
     private TextMeshProUGUI _statsCardText;
@@ -118,18 +132,41 @@ public class AuthMenuController : MonoBehaviour
     private Coroutine _lobbyPollRoutine;
     private bool _isHostSession;
     private Button _lobbyPlayButton;
+    private Image _lobbyPlayButtonImage;
+    private TextMeshProUGUI _lobbyPlayButtonText;
     private TextMeshProUGUI _lobbyWaitingText;
     private int _currentLobbyRoomNumber;
+    private int _lobbyPlayerCount;
     private GameObject _roomListPanel;
     private Transform _roomListContent;
     private TextMeshProUGUI _roomListStatusText;
+    private Button _createSessionButton;
+    private TextMeshProUGUI _createSessionTitleText;
+    private TextMeshProUGUI _createSessionSubtitleText;
     private GameObject _joinSessionPanel;
     private TMP_InputField _joinServerUrlInput;
     private TextMeshProUGUI _joinSessionTitleText;
     private TextMeshProUGUI _joinSessionAddressLabelText;
     private TextMeshProUGUI _joinSessionHintText;
     private TextMeshProUGUI _joinSessionSubmitText;
+    private GameObject _googleLoginPanel;
+    private GameObject _googleUsernameInputObj;
+    private TMP_InputField _googleIdTokenInput;
+    private TMP_InputField _googleUsernameInput;
+    private TextMeshProUGUI _googleStatusText;
+    private TextMeshProUGUI _googleSubmitText;
+    private Button _googleSubmitButton;
+    private Coroutine _googleOAuthRoutine;
+    private string _pendingGoogleAuthCode = "";
+    private string _pendingGoogleCodeVerifier = "";
+    private string _pendingGoogleRedirectUri = "";
+    private string _pendingGoogleSignupToken = "";
+    private GameObject _googleReturnPanel;
+    private GameObject _mapSelectPanel;
+    private GameObject _mapSelectReturnPanel;
+    private Action<int> _pendingMapSelection;
     private bool _launchMultiplayer;
+    private bool _mainMenuButtonsBuilt;
 
     private enum LoginReturn { MainMenu, OnlineLobby, OnlineRoomList }
     private enum ServerAddressMode { JoinSession, AuthServer }
@@ -143,6 +180,7 @@ public class AuthMenuController : MonoBehaviour
 
     private void Start()
     {
+        GameUiThemeRuntime.SetTheme(uiTheme);
         _lastOnlineServerUrl = PlayerPrefs.GetString(LastOnlineServerPrefsKey, "");
         AuthSession.LoadFromPrefs(apiBaseUrl);
         ApplyServerUrl(string.IsNullOrWhiteSpace(AuthSession.CurrentServerUrl)
@@ -157,11 +195,20 @@ public class AuthMenuController : MonoBehaviour
 
         Debug.Log($"[AuthUI] Menu initialized. LoggedIn={AuthSession.IsLoggedIn}, User='{AuthSession.Username}'");
 
+        EnsureMainMenuButtons();
         EnsureAuthScreensUI();
         RefreshSessionUI();
         ShowOnly(mainMenuPanel);
         EnsureProfileUI();
         EnsureMultiplayerPanel();
+
+        if (MultiplayerState.ConsumeReturnToOnlineMenu())
+        {
+            if (AuthSession.IsLoggedIn && !IsUsingLocalServer())
+                ShowRoomList();
+            else
+                OpenMultiplayer();
+        }
 
         if (errorPanel != null)
         {
@@ -225,6 +272,133 @@ public class AuthMenuController : MonoBehaviour
     private void AutoFocusNextFrame(TMP_InputField field)
     {
         if (field != null) StartCoroutine(FocusNextFrame(field));
+    }
+
+    private void EnsureMainMenuButtons()
+    {
+        if (_mainMenuButtonsBuilt || mainMenuPanel == null)
+            return;
+
+        _mainMenuButtonsBuilt = true;
+        GameUiThemeRuntime.StylePanel(mainMenuPanel, GameUiThemeRuntime.Current.mainMenuBackground, true);
+
+        CreateMainMenuButtonFromTemplate(
+            "PlaySPButton", "Play (Singleplayer)",
+            new Vector2(0f, -64f), new Vector2(465f, 80f),
+            GameUiThemeRuntime.Current.primaryButton,
+            PlayGame);
+
+        CreateMainMenuButtonFromTemplate(
+            "PlayMPButton", "Play (Multiplayer)",
+            new Vector2(0f, -182f), new Vector2(465f, 80f),
+            GameUiThemeRuntime.Current.primaryButton,
+            OpenMultiplayer);
+
+        CreateMainMenuButtonFromTemplate(
+            "QuitButton", "Exit to desktop",
+            new Vector2(0f, -300f), new Vector2(465f, 80f),
+            GameUiThemeRuntime.Current.dangerButton,
+            QuitGame);
+
+        Button profileMainButton = CreateMainMenuButtonFromTemplate(
+            "ProfileButton", "Player",
+            new Vector2(-976f, -626f), new Vector2(465f, 80f),
+            GameUiThemeRuntime.Current.secondaryButton,
+            OpenProfile);
+        profileButton = profileMainButton.gameObject;
+        loginButton = profileButton;
+
+        Button dailyButton = CreateMainMenuButtonFromTemplate(
+            "dailyCoinsButton", dailyCoinsLoadingText,
+            new Vector2(976f, -626f), new Vector2(465f, 80f),
+            GameUiThemeRuntime.Current.successButton,
+            null);
+        dailyCoinsButton = dailyButton;
+        _dailyCoinsButtonText = null;
+        _dailyCoinsUiHooked = false;
+    }
+
+    private Button CreateMainMenuButtonFromTemplate(
+        string name, string fallbackLabel,
+        Vector2 fallbackAnchoredPosition, Vector2 fallbackSize,
+        Color buttonColor,
+        UnityEngine.Events.UnityAction onClick)
+    {
+        Transform parent = mainMenuPanel.transform;
+        Transform template = parent.Find(name);
+        RectTransform templateRect = template != null ? template.GetComponent<RectTransform>() : null;
+        Image templateImage = template != null ? template.GetComponent<Image>() : null;
+        TextMeshProUGUI templateText = template != null ? template.GetComponentInChildren<TextMeshProUGUI>(true) : null;
+        int siblingIndex = template != null ? template.GetSiblingIndex() : parent.childCount;
+        string label = templateText != null && !string.IsNullOrWhiteSpace(templateText.text)
+            ? templateText.text
+            : fallbackLabel;
+
+        if (template != null)
+            template.gameObject.SetActive(false);
+
+        GameObject obj = new GameObject(name);
+        obj.transform.SetParent(parent, false);
+        obj.transform.SetSiblingIndex(Mathf.Clamp(siblingIndex, 0, parent.childCount - 1));
+
+        RectTransform rect = obj.AddComponent<RectTransform>();
+        if (templateRect != null)
+        {
+            rect.anchorMin = templateRect.anchorMin;
+            rect.anchorMax = templateRect.anchorMax;
+            rect.pivot = templateRect.pivot;
+            rect.anchoredPosition = templateRect.anchoredPosition;
+            rect.sizeDelta = templateRect.sizeDelta;
+            rect.localRotation = templateRect.localRotation;
+            rect.localScale = templateRect.localScale;
+        }
+        else
+        {
+            rect.anchorMin = new Vector2(0.5f, 0.5f);
+            rect.anchorMax = new Vector2(0.5f, 0.5f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.anchoredPosition = fallbackAnchoredPosition;
+            rect.sizeDelta = fallbackSize;
+        }
+
+        Image image = obj.AddComponent<Image>();
+        if (templateImage != null)
+        {
+            image.sprite = templateImage.sprite;
+            image.type = templateImage.type;
+            image.material = templateImage.material;
+            image.preserveAspect = templateImage.preserveAspect;
+            image.fillCenter = templateImage.fillCenter;
+            image.pixelsPerUnitMultiplier = templateImage.pixelsPerUnitMultiplier;
+        }
+
+        Button button = obj.AddComponent<Button>();
+        GameUiThemeRuntime.StyleButton(button, image, buttonColor);
+        button.interactable = true;
+        if (onClick != null)
+            button.onClick.AddListener(onClick);
+
+        TextMeshProUGUI labelText = GetOrCreateButtonLabel(obj.transform);
+        labelText.text = label;
+        labelText.raycastTarget = false;
+        labelText.alignment = TextAlignmentOptions.Center;
+        if (templateText != null)
+        {
+            labelText.font = templateText.font;
+            labelText.fontSize = templateText.fontSize;
+            labelText.fontStyle = templateText.fontStyle;
+            labelText.enableWordWrapping = templateText.enableWordWrapping;
+            labelText.overflowMode = templateText.overflowMode;
+        }
+        else
+        {
+            labelText.font = TMP_Settings.defaultFontAsset;
+            labelText.fontSize = 35f;
+            labelText.fontStyle = FontStyles.Normal;
+        }
+        labelText.color = GameUiThemeRuntime.Current.text;
+
+        return button;
     }
 
     private IEnumerator FocusNextFrame(TMP_InputField field)
@@ -354,6 +528,27 @@ public class AuthMenuController : MonoBehaviour
         Debug.Log("[AuthUI] Open Shop panel");
     }
 
+    public void OpenSkillTree()
+    {
+        if (!AuthSession.IsLoggedIn)
+        {
+            ShowError("Please log in first to open the skill tree.");
+            return;
+        }
+
+        EnsureSkillTreeUI();
+
+        if (_skillTreePanel == null || _skillTreePanelController == null)
+        {
+            ShowError("Skill tree panel is not available.");
+            return;
+        }
+
+        ShowOnly(_skillTreePanel);
+        _skillTreePanelController.Open();
+        Debug.Log("[AuthUI] Open Skill Tree panel");
+    }
+
     public void BackToProfile()
     {
         if (profilePanel == null)
@@ -370,6 +565,7 @@ public class AuthMenuController : MonoBehaviour
     public void OpenMultiplayer()
     {
         EnsureMultiplayerPanel();
+        RefreshCreateSessionButtonState();
         ShowOnly(_multiplayerPanel);
     }
 
@@ -475,6 +671,7 @@ public class AuthMenuController : MonoBehaviour
         GameStatsTracker.SetApiBaseUrl(_currentServerUrl);
         if (_inventoryPanelController != null) _inventoryPanelController.Initialize(_apiClient, BackToProfile);
         if (_shopPanelController != null) _shopPanelController.Initialize(_apiClient, BackToProfile);
+        if (_skillTreePanelController != null) _skillTreePanelController.Initialize(_apiClient, BackToProfile);
         RefreshAuthServerIndicators();
         Debug.Log($"[AuthUI] Server set to: {_currentServerUrl}");
     }
@@ -522,22 +719,34 @@ public class AuthMenuController : MonoBehaviour
     public void PlayGame()
     {
         _launchMultiplayer = false;
+        Time.timeScale = 1f;
+        MultiplayerState.SetMultiplayer(false);
+        MultiplayerState.SetOnline(false);
+        MultiplayerState.SetHost(false);
         Debug.Log("[AuthUI] Play clicked.");
-        StartCoroutine(FetchLoadoutThenPlay());
+        OpenMapSelect(mainMenuPanel, _ => StartCoroutine(FetchLoadoutThenPlay()));
     }
 
     public void PlayLocalMultiplayer()
     {
         _launchMultiplayer = true;
+        Time.timeScale = 1f;
+        MultiplayerState.SetOnline(false);
+        MultiplayerState.SetHost(false);
         Debug.Log("[AuthUI] Local multiplayer clicked.");
-        StartCoroutine(FetchLoadoutThenPlay());
+        OpenMapSelect(_multiplayerPanel, _ => StartCoroutine(FetchLoadoutThenPlay()));
     }
 
-    private IEnumerator FetchLoadoutThenPlay()
+    private IEnumerator FetchLoadoutThenPlay(bool waitForLoadout = true)
     {
-        if (AuthSession.IsLoggedIn)
+        if (waitForLoadout && AuthSession.IsLoggedIn)
             yield return FetchLoadoutSilently(AuthSession.UserId);
 
+        LaunchGame();
+    }
+
+    private void LaunchGame()
+    {
         MultiplayerState.SetMultiplayer(_launchMultiplayer);
 
         if (gamePrefab != null)
@@ -545,6 +754,7 @@ public class AuthMenuController : MonoBehaviour
             if (_gameInstance == null)
             {
                 _gameInstance = Instantiate(gamePrefab, gameParent);
+                _gameInstance.SetActive(true);
                 Debug.Log("[AuthUI] Game prefab instantiated.");
             }
             else
@@ -557,14 +767,14 @@ public class AuthMenuController : MonoBehaviour
             else
                 Destroy(gameObject);
 
-            yield break;
+            return;
         }
 
         if (!string.IsNullOrWhiteSpace(gameplaySceneName))
         {
             Debug.LogWarning($"[AuthUI] gamePrefab is not assigned. Falling back to loading scene '{gameplaySceneName}'.");
             SceneManager.LoadScene(gameplaySceneName);
-            yield break;
+            return;
         }
 
         ShowError("Game prefab is not assigned.");
@@ -651,6 +861,422 @@ public class AuthMenuController : MonoBehaviour
             }));
     }
 
+    public void SubmitGoogleLogin()
+    {
+        if (AuthSession.IsLoggedIn)
+        {
+            ShowError("You are already logged in. Please log out first.");
+            return;
+        }
+
+        _googleReturnPanel = registerPanel != null && registerPanel.activeSelf
+            ? registerPanel
+            : loginPanel;
+        ClearPendingGoogleLogin();
+        EnsureGoogleLoginPanel();
+
+        if (_googleIdTokenInput != null) _googleIdTokenInput.text = "";
+        if (_googleUsernameInput != null) _googleUsernameInput.text = "";
+        SetGoogleUsernameStep(false, "Opening Google sign-in in your browser...");
+        ShowOnly(_googleLoginPanel);
+
+        if (_googleOAuthRoutine != null)
+        {
+            StopCoroutine(_googleOAuthRoutine);
+        }
+        _googleOAuthRoutine = StartCoroutine(RunGoogleBrowserLogin());
+    }
+
+    private void SubmitGooglePanel()
+    {
+        bool askingUsername = _googleUsernameInputObj != null && _googleUsernameInputObj.activeSelf;
+        string username = askingUsername && _googleUsernameInput != null ? _googleUsernameInput.text.Trim() : "";
+
+        if (!askingUsername)
+        {
+            SetGoogleStatus("Google sign-in is already open in your browser.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_pendingGoogleSignupToken))
+        {
+            SetGoogleStatus("Google sign-in expired. Go back and try again.");
+            return;
+        }
+
+        if (!Regex.IsMatch(username, @"^[A-Za-z0-9_]{3,20}$"))
+        {
+            SetGoogleStatus("Username must be 3-20 letters, numbers or underscores.");
+            AutoFocusNextFrame(_googleUsernameInput);
+            return;
+        }
+
+        SetGoogleStatus("Creating Google user...");
+        StartCoroutine(_apiClient.GoogleLoginWithSignupToken(
+            _pendingGoogleSignupToken,
+            username,
+            onSuccess: loginData =>
+            {
+                ClearPendingGoogleLogin();
+                HandleLoginSuccess(loginData, "Google login success");
+            },
+            onNeedsUsername: (email, signupToken) =>
+            {
+                HandleGoogleUsernameRequired(email, signupToken);
+            },
+            onError: error =>
+            {
+                SetGoogleStatus(error);
+                AutoFocusNextFrame(_googleUsernameInput);
+            }));
+    }
+
+    private void BackFromGoogleLogin()
+    {
+        if (_googleOAuthRoutine != null)
+        {
+            StopCoroutine(_googleOAuthRoutine);
+            _googleOAuthRoutine = null;
+        }
+        ClearPendingGoogleLogin();
+        ShowOnly(_googleReturnPanel != null ? _googleReturnPanel : loginPanel);
+    }
+
+    private IEnumerator RunGoogleBrowserLogin()
+    {
+        if (string.IsNullOrWhiteSpace(googleClientId))
+        {
+            SetGoogleStatus("Google client id is not configured in the menu.");
+            yield break;
+        }
+
+        int port = GetAvailableLoopbackPort();
+        string redirectUri = $"http://127.0.0.1:{port}/google-login/";
+        string state = Guid.NewGuid().ToString("N");
+        string codeVerifier = CreateRandomUrlSafeString(64);
+        string codeChallenge = CreatePkceChallenge(codeVerifier);
+
+        TcpListener listener = new TcpListener(IPAddress.Loopback, port);
+        try
+        {
+            listener.Start();
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError($"[AuthUI] Could not start Google callback listener: {ex}");
+            SetGoogleStatus("Could not listen for the Google browser callback.");
+            yield break;
+        }
+
+        Task<GoogleOAuthCallback> callbackTask = WaitForGoogleCallbackAsync(listener, state);
+        Application.OpenURL(BuildGoogleAuthUrl(redirectUri, state, codeChallenge));
+        SetGoogleStatus("Complete Google sign-in in the browser window.");
+
+        float deadline = Time.realtimeSinceStartup + 180f;
+        while (!callbackTask.IsCompleted && Time.realtimeSinceStartup < deadline)
+        {
+            yield return null;
+        }
+
+        if (!callbackTask.IsCompleted)
+        {
+            StopGoogleListener(listener);
+            SetGoogleStatus("Google sign-in timed out. Go back and try again.");
+            _googleOAuthRoutine = null;
+            yield break;
+        }
+
+        GoogleOAuthCallback callback;
+        try
+        {
+            callback = callbackTask.Result;
+        }
+        catch (Exception ex)
+        {
+            StopGoogleListener(listener);
+            Debug.LogError($"[AuthUI] Google callback failed: {ex}");
+            SetGoogleStatus("Google sign-in callback failed.");
+            _googleOAuthRoutine = null;
+            yield break;
+        }
+
+        StopGoogleListener(listener);
+
+        if (!string.IsNullOrWhiteSpace(callback.Error))
+        {
+            SetGoogleStatus("Google sign-in was cancelled.");
+            _googleOAuthRoutine = null;
+            yield break;
+        }
+
+        if (!callback.StateMatches)
+        {
+            SetGoogleStatus("Google sign-in returned an invalid state. Try again.");
+            _googleOAuthRoutine = null;
+            yield break;
+        }
+
+        if (string.IsNullOrWhiteSpace(callback.AuthCode))
+        {
+            SetGoogleStatus("Google did not return a login code. Try again.");
+            _googleOAuthRoutine = null;
+            yield break;
+        }
+
+        _pendingGoogleAuthCode = callback.AuthCode;
+        _pendingGoogleCodeVerifier = codeVerifier;
+        _pendingGoogleRedirectUri = redirectUri;
+        SetGoogleStatus("Finishing Google login...");
+
+        yield return _apiClient.GoogleLoginWithCode(
+            _pendingGoogleAuthCode,
+            _pendingGoogleCodeVerifier,
+            _pendingGoogleRedirectUri,
+            "",
+            onSuccess: loginData =>
+            {
+                ClearPendingGoogleLogin();
+                HandleLoginSuccess(loginData, "Google login success");
+            },
+            onNeedsUsername: (email, signupToken) =>
+            {
+                HandleGoogleUsernameRequired(email, signupToken);
+            },
+            onError: loginError =>
+            {
+                SetGoogleStatus(loginError);
+            });
+
+        _googleOAuthRoutine = null;
+    }
+
+    private void HandleGoogleUsernameRequired(string email, string signupToken)
+    {
+        _pendingGoogleAuthCode = "";
+        _pendingGoogleCodeVerifier = "";
+        _pendingGoogleRedirectUri = "";
+
+        if (string.IsNullOrWhiteSpace(signupToken))
+        {
+            _pendingGoogleSignupToken = "";
+            SetGoogleUsernameStep(false, "Google signup session was not returned. Restart the backend and try again.");
+            return;
+        }
+
+        _pendingGoogleSignupToken = signupToken;
+        SetGoogleUsernameStep(true, string.IsNullOrWhiteSpace(email)
+            ? "Choose a username for this Google account."
+            : $"Choose a username for {email}.");
+        AutoFocusNextFrame(_googleUsernameInput);
+    }
+
+    private string BuildGoogleAuthUrl(string redirectUri, string state, string codeChallenge)
+    {
+        return "https://accounts.google.com/o/oauth2/v2/auth"
+            + "?client_id=" + Uri.EscapeDataString(googleClientId.Trim())
+            + "&redirect_uri=" + Uri.EscapeDataString(redirectUri)
+            + "&response_type=code"
+            + "&scope=" + Uri.EscapeDataString("openid email profile")
+            + "&state=" + Uri.EscapeDataString(state)
+            + "&code_challenge=" + Uri.EscapeDataString(codeChallenge)
+            + "&code_challenge_method=S256"
+            + "&prompt=select_account";
+    }
+
+    private int GetAvailableLoopbackPort()
+    {
+        TcpListener tcpListener = new TcpListener(IPAddress.Loopback, 0);
+        tcpListener.Start();
+        int port = ((IPEndPoint)tcpListener.LocalEndpoint).Port;
+        tcpListener.Stop();
+        return port;
+    }
+
+    private string CreatePkceChallenge(string codeVerifier)
+    {
+        using (SHA256 sha256 = SHA256.Create())
+        {
+            byte[] hash = sha256.ComputeHash(Encoding.ASCII.GetBytes(codeVerifier));
+            return Base64Url(hash);
+        }
+    }
+
+    private string CreateRandomUrlSafeString(int byteCount)
+    {
+        byte[] bytes = new byte[byteCount];
+        using (RandomNumberGenerator rng = RandomNumberGenerator.Create())
+        {
+            rng.GetBytes(bytes);
+        }
+        return Base64Url(bytes);
+    }
+
+    private string Base64Url(byte[] bytes)
+    {
+        return Convert.ToBase64String(bytes)
+            .TrimEnd('=')
+            .Replace('+', '-')
+            .Replace('/', '_');
+    }
+
+    private async Task<GoogleOAuthCallback> WaitForGoogleCallbackAsync(TcpListener listener, string expectedState)
+    {
+        while (true)
+        {
+            using (TcpClient client = await listener.AcceptTcpClientAsync())
+            using (NetworkStream stream = client.GetStream())
+            {
+                string request = await ReadHttpRequestAsync(stream);
+                string target = ExtractHttpRequestTarget(request);
+                string error = ExtractQueryValue(target, "error");
+                string returnedState = ExtractQueryValue(target, "state");
+                string authCode = ExtractQueryValue(target, "code");
+
+                bool hasOAuthResult = !string.IsNullOrWhiteSpace(error)
+                    || !string.IsNullOrWhiteSpace(authCode)
+                    || !string.IsNullOrWhiteSpace(returnedState);
+
+                if (!hasOAuthResult)
+                {
+                    Debug.LogWarning($"[AuthUI] Ignoring non-OAuth Google callback request: {target} "
+                        + $"parsedState='{returnedState}' parsedCodeLength={authCode.Length} parsedError='{error}'");
+                    WriteGoogleBrowserResponse(stream, false, "Still waiting for Google sign-in.");
+                    continue;
+                }
+
+                bool stateMatches = string.Equals(
+                    returnedState.Trim(),
+                    expectedState,
+                    StringComparison.Ordinal);
+                bool success = string.IsNullOrWhiteSpace(error)
+                    && stateMatches
+                    && !string.IsNullOrWhiteSpace(authCode);
+
+                WriteGoogleBrowserResponse(stream, success, success
+                    ? "Google login complete."
+                    : "Google login failed.");
+                return new GoogleOAuthCallback(authCode, error, stateMatches);
+            }
+        }
+    }
+
+    private async Task<string> ReadHttpRequestAsync(NetworkStream stream)
+    {
+        byte[] buffer = new byte[4096];
+        StringBuilder request = new StringBuilder();
+
+        while (request.Length < 32768)
+        {
+            int bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length);
+            if (bytesRead <= 0)
+                break;
+
+            request.Append(Encoding.UTF8.GetString(buffer, 0, bytesRead));
+            string text = request.ToString();
+            if (text.Contains("\r\n\r\n") || text.Contains("\n\n"))
+                break;
+        }
+
+        return request.ToString();
+    }
+
+    private string ExtractHttpRequestTarget(string request)
+    {
+        if (string.IsNullOrWhiteSpace(request))
+            return "";
+
+        string firstLine = request.Split('\n')[0].Trim();
+        string[] parts = firstLine.Split(' ');
+        if (parts.Length < 2)
+            return "";
+
+        return parts[1];
+    }
+
+    private string ExtractQueryValue(string requestTarget, string key)
+    {
+        if (string.IsNullOrWhiteSpace(requestTarget) || string.IsNullOrWhiteSpace(key))
+            return "";
+
+        string markerAfterQuestion = "?" + key + "=";
+        string markerAfterAmpersand = "&" + key + "=";
+        int start = requestTarget.IndexOf(markerAfterQuestion, StringComparison.Ordinal);
+        int valueStartOffset = markerAfterQuestion.Length;
+
+        if (start < 0)
+        {
+            start = requestTarget.IndexOf(markerAfterAmpersand, StringComparison.Ordinal);
+            valueStartOffset = markerAfterAmpersand.Length;
+        }
+
+        if (start < 0)
+            return "";
+
+        int valueStart = start + valueStartOffset;
+        int valueEnd = requestTarget.IndexOf('&', valueStart);
+        if (valueEnd < 0)
+            valueEnd = requestTarget.IndexOf(' ', valueStart);
+        if (valueEnd < 0)
+            valueEnd = requestTarget.Length;
+
+        string rawValue = requestTarget.Substring(valueStart, Math.Max(0, valueEnd - valueStart));
+        return UrlDecode(rawValue);
+    }
+
+    private string UrlDecode(string value)
+    {
+        return Uri.UnescapeDataString((value ?? "").Replace("+", " "));
+    }
+
+    private void WriteGoogleBrowserResponse(NetworkStream stream, bool success, string title)
+    {
+        string body = success
+            ? "<html><body><h2>" + title + "</h2><p>You can return to the game.</p></body></html>"
+            : "<html><body><h2>" + title + "</h2><p>Return to the game and try again.</p></body></html>";
+        byte[] bytes = Encoding.UTF8.GetBytes(body);
+        string headers = "HTTP/1.1 200 OK\r\n"
+            + "Content-Type: text/html; charset=utf-8\r\n"
+            + "Content-Length: " + bytes.Length + "\r\n"
+            + "Connection: close\r\n\r\n";
+        byte[] headerBytes = Encoding.UTF8.GetBytes(headers);
+        stream.Write(headerBytes, 0, headerBytes.Length);
+        stream.Write(bytes, 0, bytes.Length);
+    }
+
+    private void StopGoogleListener(TcpListener listener)
+    {
+        try
+        {
+            listener.Stop();
+        }
+        catch
+        {
+            // The listener is best-effort; shutting down twice is harmless.
+        }
+    }
+
+    private void ClearPendingGoogleLogin()
+    {
+        _pendingGoogleAuthCode = "";
+        _pendingGoogleCodeVerifier = "";
+        _pendingGoogleRedirectUri = "";
+        _pendingGoogleSignupToken = "";
+    }
+
+    private struct GoogleOAuthCallback
+    {
+        public readonly string AuthCode;
+        public readonly string Error;
+        public readonly bool StateMatches;
+
+        public GoogleOAuthCallback(string authCode, string error, bool stateMatches)
+        {
+            AuthCode = authCode;
+            Error = error;
+            StateMatches = stateMatches;
+        }
+    }
+
     public void Logout()
     {
         if (!AuthSession.IsLoggedIn)
@@ -713,6 +1339,17 @@ public class AuthMenuController : MonoBehaviour
             {
                 Debug.LogWarning($"[AuthUI] Silent skin fetch failed: {err}");
             });
+
+        yield return _apiClient.GetSkillTree(userId,
+            onSuccess: data =>
+            {
+                PlayerSkillLoadout.ApplyServerState(data);
+                Debug.Log("[AuthUI] Skill loadout applied from profile.");
+            },
+            onError: err =>
+            {
+                Debug.LogWarning($"[AuthUI] Silent skill fetch failed: {err}");
+            });
     }
 
     private void ShowError(string message)
@@ -753,8 +1390,7 @@ public class AuthMenuController : MonoBehaviour
         cardRect.sizeDelta = new Vector2(500f, 220f);
         cardRect.anchoredPosition = Vector2.zero;
 
-        UnityEngine.UI.Image cardImg = card.AddComponent<UnityEngine.UI.Image>();
-        cardImg.color = new Color(0.12f, 0.08f, 0.08f, 0.97f);
+        GameUiThemeRuntime.StylePanel(card, GameUiThemeRuntime.Current.panelBackground, true);
 
         UnityEngine.UI.VerticalLayoutGroup vg = card.AddComponent<UnityEngine.UI.VerticalLayoutGroup>();
         vg.padding = new RectOffset(30, 30, 28, 28);
@@ -793,15 +1429,8 @@ public class AuthMenuController : MonoBehaviour
         btnObj.AddComponent<UnityEngine.UI.LayoutElement>().preferredHeight = 44f;
 
         UnityEngine.UI.Image btnImg = btnObj.AddComponent<UnityEngine.UI.Image>();
-        btnImg.color = new Color(0.55f, 0.15f, 0.15f, 1f);
-
         UnityEngine.UI.Button btn = btnObj.AddComponent<UnityEngine.UI.Button>();
-        btn.targetGraphic = btnImg;
-        UnityEngine.UI.ColorBlock cb = btn.colors;
-        cb.normalColor      = new Color(0.55f, 0.15f, 0.15f, 1f);
-        cb.highlightedColor = new Color(0.70f, 0.20f, 0.20f, 1f);
-        cb.pressedColor     = new Color(0.38f, 0.10f, 0.10f, 1f);
-        btn.colors = cb;
+        GameUiThemeRuntime.StyleButton(btn, btnImg, GameUiThemeRuntime.Current.dangerButton);
         btn.onClick.AddListener(CloseError);
 
         GameObject btnLabel = new GameObject("Label");
@@ -816,7 +1445,7 @@ public class AuthMenuController : MonoBehaviour
         btnTmp.font = TMP_Settings.defaultFontAsset;
         btnTmp.fontSize = 20f;
         btnTmp.fontStyle = FontStyles.Bold;
-        btnTmp.color = Color.white;
+        btnTmp.color = GameUiThemeRuntime.Current.text;
         btnTmp.alignment = TextAlignmentOptions.Center;
         btnTmp.raycastTarget = false;
 
@@ -832,10 +1461,13 @@ public class AuthMenuController : MonoBehaviour
         if (statsPanel != null) statsPanel.SetActive(activePanel == statsPanel);
         if (_inventoryPanel != null) _inventoryPanel.SetActive(activePanel == _inventoryPanel);
         if (_shopPanel != null) _shopPanel.SetActive(activePanel == _shopPanel);
+        if (_skillTreePanel != null) _skillTreePanel.SetActive(activePanel == _skillTreePanel);
         if (_multiplayerPanel != null) _multiplayerPanel.SetActive(activePanel == _multiplayerPanel);
         if (_onlineLobbyPanel != null) _onlineLobbyPanel.SetActive(activePanel == _onlineLobbyPanel);
         if (_roomListPanel != null) _roomListPanel.SetActive(activePanel == _roomListPanel);
         if (_joinSessionPanel != null) _joinSessionPanel.SetActive(activePanel == _joinSessionPanel);
+        if (_googleLoginPanel != null) _googleLoginPanel.SetActive(activePanel == _googleLoginPanel);
+        if (_mapSelectPanel != null) _mapSelectPanel.SetActive(activePanel == _mapSelectPanel);
     }
 
     private void RefreshSessionUI()
@@ -863,6 +1495,7 @@ public class AuthMenuController : MonoBehaviour
         RefreshProfileTopButtonState(loggedIn);
         RefreshAuthServerIndicators();
         RefreshDailyCoinsUI();
+        RefreshCreateSessionButtonState();
 
         if (!loggedIn)
         {
@@ -1100,20 +1733,13 @@ public class AuthMenuController : MonoBehaviour
 
         if (image != null)
         {
-            image.color = color;
+            GameUiThemeRuntime.StyleButton(dailyCoinsButton, image, color);
         }
-
-        ColorBlock colors = dailyCoinsButton.colors;
-        colors.normalColor = color;
-        colors.highlightedColor = color * 1.10f;
-        colors.pressedColor = color * 0.90f;
-        colors.selectedColor = color;
-        colors.disabledColor = color;
-        dailyCoinsButton.colors = colors;
 
         if (_dailyCoinsButtonText != null)
         {
             _dailyCoinsButtonText.text = label;
+            _dailyCoinsButtonText.color = GameUiThemeRuntime.Current.text;
         }
     }
 
@@ -1147,13 +1773,19 @@ public class AuthMenuController : MonoBehaviour
         StyleAuthButton(loginPanel, "LoginSubmitButton", "Login",
             new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
             new Vector2(0f, -150f), new Vector2(620f, 64f),
-            new Color(0.12f, 0.40f, 0.52f, 1f),
+            GameUiThemeRuntime.Current.primaryButton,
             SubmitLogin);
+
+        StyleAuthButton(loginPanel, "GoogleLoginButton", "G  Continue with Google",
+            new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+            new Vector2(0f, -226f), new Vector2(620f, 54f),
+            GameUiThemeRuntime.Current.secondaryButton,
+            SubmitGoogleLogin);
 
         StyleAuthButton(loginPanel, "BackButton", "Back",
             new Vector2(0f, 1f), new Vector2(0f, 1f),
             new Vector2(16f, -16f), new Vector2(130f, 46f),
-            new Color(0.18f, 0.23f, 0.30f, 1f),
+            GameUiThemeRuntime.Current.secondaryButton,
             BackToMain);
     }
 
@@ -1173,13 +1805,19 @@ public class AuthMenuController : MonoBehaviour
         StyleAuthButton(registerPanel, "RegisterSubmitButton", "Register",
             new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
             new Vector2(0f, -200f), new Vector2(620f, 64f),
-            new Color(0.12f, 0.40f, 0.52f, 1f),
+            GameUiThemeRuntime.Current.primaryButton,
             SubmitRegister);
+
+        StyleAuthButton(registerPanel, "GoogleRegisterButton", "G  Continue with Google",
+            new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+            new Vector2(0f, -276f), new Vector2(620f, 54f),
+            GameUiThemeRuntime.Current.secondaryButton,
+            SubmitGoogleLogin);
 
         StyleAuthButton(registerPanel, "BackButton", "Back",
             new Vector2(0f, 1f), new Vector2(0f, 1f),
             new Vector2(16f, -16f), new Vector2(130f, 46f),
-            new Color(0.18f, 0.23f, 0.30f, 1f),
+            GameUiThemeRuntime.Current.secondaryButton,
             OpenLogin);
     }
 
@@ -1191,8 +1829,7 @@ public class AuthMenuController : MonoBehaviour
         rect.offsetMin = Vector2.zero;
         rect.offsetMax = Vector2.zero;
 
-        Image background = GetOrAddComponent<Image>(panel);
-        background.color = new Color(0.07f, 0.10f, 0.14f, 0.97f);
+        GameUiThemeRuntime.StylePanel(panel, GameUiThemeRuntime.Current.authBackground, true);
     }
 
     private void StyleAuthTitle(GameObject panel, string objectName, string title, Vector2 position)
@@ -1222,7 +1859,7 @@ public class AuthMenuController : MonoBehaviour
         text.fontSize = 46f;
         text.fontStyle = FontStyles.Bold;
         text.alignment = TextAlignmentOptions.Center;
-        text.color = new Color(0.95f, 0.97f, 1f, 1f);
+        text.color = GameUiThemeRuntime.Current.text;
         text.raycastTarget = false;
     }
 
@@ -1374,17 +2011,9 @@ public class AuthMenuController : MonoBehaviour
         if (button == null || image == null) return;
 
         Color color = active
-            ? new Color(0.12f, 0.40f, 0.52f, 1f)
-            : new Color(0.18f, 0.22f, 0.28f, 1f);
-        image.color = color;
-
-        ColorBlock colors = button.colors;
-        colors.normalColor = color;
-        colors.highlightedColor = color * 1.10f;
-        colors.pressedColor = color * 0.90f;
-        colors.selectedColor = color;
-        colors.disabledColor = new Color(color.r * 0.65f, color.g * 0.65f, color.b * 0.65f, 0.8f);
-        button.colors = colors;
+            ? GameUiThemeRuntime.Current.primaryButton
+            : GameUiThemeRuntime.Current.secondaryButton;
+        GameUiThemeRuntime.StyleButton(button, image, color);
     }
 
     private void StyleAuthInput(TMP_InputField input, string placeholder, Vector2 position)
@@ -1399,15 +2028,16 @@ public class AuthMenuController : MonoBehaviour
         rect.anchoredPosition = position;
 
         Image background = GetOrAddComponent<Image>(input.gameObject);
-        background.color = new Color(0.11f, 0.14f, 0.19f, 1f);
+        background.color = GameUiThemeRuntime.Current.surface;
+        GameUiThemeRuntime.ApplyBorder(input.gameObject);
         input.targetGraphic = background;
 
         ColorBlock colors = input.colors;
-        colors.normalColor = new Color(0.11f, 0.14f, 0.19f, 1f);
-        colors.highlightedColor = new Color(0.15f, 0.20f, 0.27f, 1f);
-        colors.selectedColor = new Color(0.15f, 0.20f, 0.27f, 1f);
-        colors.pressedColor = new Color(0.10f, 0.13f, 0.18f, 1f);
-        colors.disabledColor = new Color(0.09f, 0.10f, 0.12f, 0.7f);
+        colors.normalColor = GameUiThemeRuntime.Current.surface;
+        colors.highlightedColor = GameUiThemeRuntime.Current.Hover(GameUiThemeRuntime.Current.surface);
+        colors.selectedColor = GameUiThemeRuntime.Current.Hover(GameUiThemeRuntime.Current.surface);
+        colors.pressedColor = GameUiThemeRuntime.Current.Pressed(GameUiThemeRuntime.Current.surface);
+        colors.disabledColor = GameUiThemeRuntime.Current.Disabled(GameUiThemeRuntime.Current.surface, 0.7f);
         input.colors = colors;
         input.caretColor = new Color(0.82f, 0.92f, 1f, 1f);
         input.selectionColor = new Color(0.20f, 0.50f, 0.62f, 0.55f);
@@ -1422,7 +2052,7 @@ public class AuthMenuController : MonoBehaviour
         {
             input.textComponent.font = TMP_Settings.defaultFontAsset;
             input.textComponent.fontSize = 28f;
-            input.textComponent.color = new Color(0.96f, 0.98f, 1f, 1f);
+            input.textComponent.color = GameUiThemeRuntime.Current.text;
             input.textComponent.alignment = TextAlignmentOptions.MidlineLeft;
             input.textComponent.enableWordWrapping = false;
             input.textComponent.raycastTarget = false;
@@ -1434,7 +2064,7 @@ public class AuthMenuController : MonoBehaviour
             placeholderText.font = TMP_Settings.defaultFontAsset;
             placeholderText.fontSize = 26f;
             placeholderText.fontStyle = FontStyles.Italic;
-            placeholderText.color = new Color(0.66f, 0.72f, 0.80f, 0.88f);
+            placeholderText.color = GameUiThemeRuntime.Current.MutedText(0.68f);
             placeholderText.alignment = TextAlignmentOptions.MidlineLeft;
             placeholderText.raycastTarget = false;
         }
@@ -1468,17 +2098,8 @@ public class AuthMenuController : MonoBehaviour
         rect.anchoredPosition = position;
 
         Image image = GetOrAddComponent<Image>(buttonObj);
-        image.color = color;
-
         Button button = GetOrAddComponent<Button>(buttonObj);
-        button.targetGraphic = image;
-        ColorBlock colors = button.colors;
-        colors.normalColor = color;
-        colors.highlightedColor = color * 1.10f;
-        colors.pressedColor = color * 0.90f;
-        colors.selectedColor = color;
-        colors.disabledColor = new Color(color.r * 0.6f, color.g * 0.6f, color.b * 0.6f, 0.7f);
-        button.colors = colors;
+        GameUiThemeRuntime.StyleButton(button, image, color);
         if (created && fallbackAction != null)
         {
             button.onClick.AddListener(fallbackAction);
@@ -1490,7 +2111,7 @@ public class AuthMenuController : MonoBehaviour
         text.fontSize = 24f;
         text.fontStyle = FontStyles.Bold;
         text.alignment = TextAlignmentOptions.Center;
-        text.color = Color.white;
+        text.color = GameUiThemeRuntime.Current.text;
         text.raycastTarget = false;
     }
 
@@ -1505,11 +2126,13 @@ public class AuthMenuController : MonoBehaviour
         if (profilePanel == null) return;
 
         StyleProfilePanel();
+        EnsureSkillTreeUI();
         EnsureStatsCardButton();
         EnsureInventoryUI();
         EnsureShopUI();
 
         bool loggedIn = AuthSession.IsLoggedIn;
+        RefreshSkillTreeButtonState(loggedIn);
         RefreshStatsCardState(loggedIn);
         RefreshInventoryButtonState(loggedIn);
         RefreshShopButtonState(loggedIn);
@@ -1527,8 +2150,7 @@ public class AuthMenuController : MonoBehaviour
         rect.offsetMin = Vector2.zero;
         rect.offsetMax = Vector2.zero;
 
-        Image background = GetOrAddComponent<Image>(profilePanel);
-        background.color = new Color(0.07f, 0.10f, 0.14f, 0.97f);
+        GameUiThemeRuntime.StylePanel(profilePanel, GameUiThemeRuntime.Current.profileBackground, true);
 
         StyleProfileTitle();
         EnsureProfileBackButton();
@@ -1562,7 +2184,7 @@ public class AuthMenuController : MonoBehaviour
         titleText.fontSize = 36f;
         titleText.fontStyle = FontStyles.Bold;
         titleText.alignment = TextAlignmentOptions.Center;
-        titleText.color = new Color(0.95f, 0.97f, 1f, 1f);
+        titleText.color = GameUiThemeRuntime.Current.text;
         titleText.raycastTarget = false;
     }
 
@@ -1575,7 +2197,7 @@ public class AuthMenuController : MonoBehaviour
                 backTransform.gameObject, "Back",
                 new Vector2(0f, 1f), new Vector2(0f, 1f),
                 new Vector2(16f, -16f), new Vector2(130f, 46f),
-                new Color(0.18f, 0.23f, 0.30f, 1f));
+                GameUiThemeRuntime.Current.secondaryButton);
             return;
         }
 
@@ -1583,7 +2205,7 @@ public class AuthMenuController : MonoBehaviour
             "BackButton", "Back",
             new Vector2(0f, 1f), new Vector2(0f, 1f),
             new Vector2(16f, -16f), new Vector2(130f, 46f),
-            new Color(0.18f, 0.23f, 0.30f, 1f),
+            GameUiThemeRuntime.Current.secondaryButton,
             BackToMain);
         (_profileBackButton, _profileBackButtonImage) = (backObj.GetComponent<Button>(), backObj.GetComponent<Image>());
     }
@@ -1601,7 +2223,7 @@ public class AuthMenuController : MonoBehaviour
                 logoutTransform.gameObject, "Logout",
                 new Vector2(1f, 1f), new Vector2(1f, 1f),
                 new Vector2(-16f, -16f), new Vector2(150f, 46f),
-                new Color(0.34f, 0.15f, 0.16f, 1f));
+                GameUiThemeRuntime.Current.dangerButton);
             return;
         }
 
@@ -1609,7 +2231,7 @@ public class AuthMenuController : MonoBehaviour
             "MainLogoutButton", "Logout",
             new Vector2(1f, 1f), new Vector2(1f, 1f),
             new Vector2(-16f, -16f), new Vector2(150f, 46f),
-            new Color(0.34f, 0.15f, 0.16f, 1f),
+            GameUiThemeRuntime.Current.dangerButton,
             Logout);
         logoutButton = logoutObj;
         (_profileLogoutButton, _profileLogoutButtonImage) = (logoutObj.GetComponent<Button>(), logoutObj.GetComponent<Image>());
@@ -1626,9 +2248,9 @@ public class AuthMenuController : MonoBehaviour
                 statsTransform.gameObject,
                 "STATS", "Review your\nmatch records",
                 new Vector2(-550f, -134f), new Vector2(480f, 760f),
-                new Color(0.22f, 0.25f, 0.34f, 1f),
-                new Color(0.28f, 0.32f, 0.42f, 1f),
-                new Color(0.15f, 0.17f, 0.24f, 1f));
+                GameUiThemeRuntime.Current.primaryButton,
+                GameUiThemeRuntime.Current.Hover(GameUiThemeRuntime.Current.primaryButton),
+                GameUiThemeRuntime.Current.Pressed(GameUiThemeRuntime.Current.primaryButton));
         }
         else
         {
@@ -1636,11 +2258,126 @@ public class AuthMenuController : MonoBehaviour
                 "StatsButton", profilePanel.transform,
                 "STATS", "Review your\nmatch records",
                 new Vector2(-550f, -134f), new Vector2(480f, 760f),
-                new Color(0.22f, 0.25f, 0.34f, 1f),
-                new Color(0.28f, 0.32f, 0.42f, 1f),
-                new Color(0.15f, 0.17f, 0.24f, 1f),
+                GameUiThemeRuntime.Current.primaryButton,
+                GameUiThemeRuntime.Current.Hover(GameUiThemeRuntime.Current.primaryButton),
+                GameUiThemeRuntime.Current.Pressed(GameUiThemeRuntime.Current.primaryButton),
                 OpenStats);
         }
+    }
+
+    private void EnsureSkillTreeUI()
+    {
+        EnsureSkillTreeButton();
+        EnsureSkillTreePanel();
+    }
+
+    private void EnsureSkillTreeButton()
+    {
+        if (_skillTreeButton != null || profilePanel == null) return;
+
+        Color baseColor = GameUiThemeRuntime.Current.secondaryButton;
+        Transform skillTreeTransform = profilePanel.transform.Find("SkillTreeButton");
+        if (skillTreeTransform != null)
+        {
+            (_skillTreeButton, _skillTreeButtonImage, _skillTreeButtonText) = StyleProfileWideButton(
+                skillTreeTransform.gameObject,
+                "SKILL TREE", "Unlock and equip placeholder powers",
+                new Vector2(0f, 334f), new Vector2(1580f, 92f),
+                baseColor, GameUiThemeRuntime.Current.Hover(baseColor), GameUiThemeRuntime.Current.Pressed(baseColor));
+        }
+        else
+        {
+            (_skillTreeButton, _skillTreeButtonImage, _skillTreeButtonText) = CreateWideButton(
+                "SkillTreeButton", profilePanel.transform,
+                "SKILL TREE", "Unlock and equip placeholder powers",
+                new Vector2(0f, 334f), new Vector2(1580f, 92f),
+                baseColor, GameUiThemeRuntime.Current.Hover(baseColor), GameUiThemeRuntime.Current.Pressed(baseColor),
+                OpenSkillTree);
+        }
+
+        RefreshSkillTreeButtonState(AuthSession.IsLoggedIn);
+    }
+
+    private (Button btn, Image img, TextMeshProUGUI label) StyleProfileWideButton(
+        GameObject obj,
+        string title, string subtitle,
+        Vector2 position, Vector2 size,
+        Color baseColor, Color hoverColor, Color pressColor)
+    {
+        RectTransform rect = GetOrAddComponent<RectTransform>(obj);
+        rect.anchorMin = new Vector2(0.5f, 0.5f);
+        rect.anchorMax = new Vector2(0.5f, 0.5f);
+        rect.pivot = new Vector2(0.5f, 0.5f);
+        rect.sizeDelta = size;
+        rect.anchoredPosition = position;
+
+        Image img = GetOrAddComponent<Image>(obj);
+
+        Button btn = GetOrAddComponent<Button>(obj);
+        GameUiThemeRuntime.StyleButton(btn, img, baseColor);
+
+        DisableExistingChildren(obj.transform);
+
+        GameObject content = new GameObject("StyledContent");
+        content.transform.SetParent(obj.transform, false);
+        RectTransform contentRect = content.AddComponent<RectTransform>();
+        contentRect.anchorMin = Vector2.zero;
+        contentRect.anchorMax = Vector2.one;
+        contentRect.offsetMin = new Vector2(32f, 0f);
+        contentRect.offsetMax = new Vector2(-32f, 0f);
+
+        HorizontalLayoutGroup layout = content.AddComponent<HorizontalLayoutGroup>();
+        layout.spacing = 18f;
+        layout.childAlignment = TextAnchor.MiddleCenter;
+        layout.childControlWidth = true;
+        layout.childControlHeight = true;
+        layout.childForceExpandWidth = false;
+        layout.childForceExpandHeight = true;
+
+        GameObject titleObj = new GameObject("Title");
+        titleObj.transform.SetParent(content.transform, false);
+        LayoutElement titleLayout = titleObj.AddComponent<LayoutElement>();
+        titleLayout.preferredWidth = 360f;
+        TextMeshProUGUI titleText = titleObj.AddComponent<TextMeshProUGUI>();
+        titleText.text = title;
+        titleText.font = TMP_Settings.defaultFontAsset;
+        titleText.fontSize = 40f;
+        titleText.fontStyle = FontStyles.Bold;
+        titleText.alignment = TextAlignmentOptions.MidlineLeft;
+        titleText.color = GameUiThemeRuntime.Current.text;
+        titleText.raycastTarget = false;
+
+        GameObject subtitleObj = new GameObject("Subtitle");
+        subtitleObj.transform.SetParent(content.transform, false);
+        LayoutElement subtitleLayout = subtitleObj.AddComponent<LayoutElement>();
+        subtitleLayout.flexibleWidth = 1f;
+        TextMeshProUGUI subtitleText = subtitleObj.AddComponent<TextMeshProUGUI>();
+        subtitleText.text = subtitle;
+        subtitleText.font = TMP_Settings.defaultFontAsset;
+        subtitleText.fontSize = 22f;
+        subtitleText.fontStyle = FontStyles.Normal;
+        subtitleText.alignment = TextAlignmentOptions.MidlineLeft;
+        subtitleText.color = GameUiThemeRuntime.Current.MutedText(0.9f);
+        subtitleText.enableWordWrapping = false;
+        subtitleText.overflowMode = TextOverflowModes.Ellipsis;
+        subtitleText.raycastTarget = false;
+
+        return (btn, img, titleText);
+    }
+
+    private (Button btn, Image img, TextMeshProUGUI label) CreateWideButton(
+        string name, Transform parent,
+        string title, string subtitle,
+        Vector2 position, Vector2 size,
+        Color baseColor, Color hoverColor, Color pressColor,
+        UnityEngine.Events.UnityAction onClick)
+    {
+        GameObject obj = new GameObject(name);
+        obj.transform.SetParent(parent, false);
+        (Button btn, Image img, TextMeshProUGUI label) = StyleProfileWideButton(
+            obj, title, subtitle, position, size, baseColor, hoverColor, pressColor);
+        btn.onClick.AddListener(onClick);
+        return (btn, img, label);
     }
 
     private (Button btn, Image img, TextMeshProUGUI label) StyleProfileCardButton(
@@ -1657,17 +2394,9 @@ public class AuthMenuController : MonoBehaviour
         rect.anchoredPosition = position;
 
         Image img = GetOrAddComponent<Image>(obj);
-        img.color = baseColor;
 
         Button btn = GetOrAddComponent<Button>(obj);
-        btn.targetGraphic = img;
-        ColorBlock colors = btn.colors;
-        colors.normalColor = baseColor;
-        colors.highlightedColor = hoverColor;
-        colors.pressedColor = pressColor;
-        colors.selectedColor = hoverColor;
-        colors.disabledColor = new Color(0.15f, 0.15f, 0.17f, 0.85f);
-        btn.colors = colors;
+        GameUiThemeRuntime.StyleButton(btn, img, baseColor);
 
         DisableExistingChildren(obj.transform);
 
@@ -1697,7 +2426,7 @@ public class AuthMenuController : MonoBehaviour
         titleText.fontSize = 52f;
         titleText.fontStyle = FontStyles.Bold;
         titleText.alignment = TextAlignmentOptions.Center;
-        titleText.color = Color.white;
+        titleText.color = GameUiThemeRuntime.Current.text;
         titleText.raycastTarget = false;
 
         GameObject subtitleObj = new GameObject("Subtitle");
@@ -1709,7 +2438,7 @@ public class AuthMenuController : MonoBehaviour
         subtitleText.fontSize = 26f;
         subtitleText.fontStyle = FontStyles.Normal;
         subtitleText.alignment = TextAlignmentOptions.Center;
-        subtitleText.color = new Color(0.85f, 0.90f, 1f, 0.85f);
+        subtitleText.color = GameUiThemeRuntime.Current.MutedText(0.85f);
         subtitleText.enableWordWrapping = true;
         subtitleText.raycastTarget = false;
 
@@ -1729,17 +2458,8 @@ public class AuthMenuController : MonoBehaviour
         rect.anchoredPosition = position;
 
         Image image = GetOrAddComponent<Image>(obj);
-        image.color = color;
-
         Button button = GetOrAddComponent<Button>(obj);
-        button.targetGraphic = image;
-        ColorBlock colors = button.colors;
-        colors.normalColor = color;
-        colors.highlightedColor = color * 1.10f;
-        colors.pressedColor = color * 0.90f;
-        colors.selectedColor = color;
-        colors.disabledColor = new Color(color.r * 0.6f, color.g * 0.6f, color.b * 0.6f, 0.7f);
-        button.colors = colors;
+        GameUiThemeRuntime.StyleButton(button, image, color);
 
         TextMeshProUGUI text = GetOrCreateButtonLabel(obj.transform);
         text.text = label;
@@ -1747,7 +2467,7 @@ public class AuthMenuController : MonoBehaviour
         text.fontSize = 20f;
         text.fontStyle = FontStyles.Bold;
         text.alignment = TextAlignmentOptions.Center;
-        text.color = Color.white;
+        text.color = GameUiThemeRuntime.Current.text;
         text.raycastTarget = false;
 
         return (button, image);
@@ -1804,9 +2524,9 @@ public class AuthMenuController : MonoBehaviour
         _statsCardButton.gameObject.SetActive(loggedIn);
         _statsCardButton.interactable = loggedIn;
         if (_statsCardImage != null)
-            _statsCardImage.color = loggedIn ? new Color(0.22f, 0.25f, 0.34f, 1f) : new Color(0.15f, 0.15f, 0.17f, 0.85f);
+            _statsCardImage.color = loggedIn ? GameUiThemeRuntime.Current.primaryButton : GameUiThemeRuntime.Current.Disabled(GameUiThemeRuntime.Current.primaryButton, 0.85f);
         if (_statsCardText != null)
-            _statsCardText.color = loggedIn ? Color.white : new Color(0.6f, 0.6f, 0.6f, 0.7f);
+            _statsCardText.color = loggedIn ? GameUiThemeRuntime.Current.text : GameUiThemeRuntime.Current.MutedText(0.55f);
     }
 
     private void RefreshProfileTopButtonState(bool loggedIn)
@@ -1816,7 +2536,7 @@ public class AuthMenuController : MonoBehaviour
             _profileBackButton.interactable = true;
             if (_profileBackButtonImage != null)
             {
-                _profileBackButtonImage.color = new Color(0.18f, 0.23f, 0.30f, 1f);
+                _profileBackButtonImage.color = GameUiThemeRuntime.Current.secondaryButton;
             }
         }
 
@@ -1827,8 +2547,8 @@ public class AuthMenuController : MonoBehaviour
             if (_profileLogoutButtonImage != null)
             {
                 _profileLogoutButtonImage.color = loggedIn
-                    ? new Color(0.34f, 0.15f, 0.16f, 1f)
-                    : new Color(0.15f, 0.15f, 0.17f, 0.85f);
+                    ? GameUiThemeRuntime.Current.dangerButton
+                    : GameUiThemeRuntime.Current.Disabled(GameUiThemeRuntime.Current.dangerButton, 0.85f);
             }
         }
     }
@@ -1837,12 +2557,12 @@ public class AuthMenuController : MonoBehaviour
     {
         if (_inventoryButton != null || profilePanel == null) return;
 
-        Color baseColor = new Color(0.10f, 0.34f, 0.42f, 1f);
+        Color baseColor = GameUiThemeRuntime.Current.primaryButton;
         (_inventoryButton, _inventoryButtonImage, _inventoryButtonText) = CreateCardButton(
             "InventoryButton", profilePanel.transform,
             "INVENTORY", "View and equip\nyour items",
             new Vector2(0f, -134f), new Vector2(480f, 760f),
-            baseColor, new Color(0.13f, 0.42f, 0.52f, 1f), new Color(0.07f, 0.24f, 0.30f, 1f),
+            baseColor, GameUiThemeRuntime.Current.Hover(baseColor), GameUiThemeRuntime.Current.Pressed(baseColor),
             OpenInventory);
 
         RefreshInventoryButtonState(AuthSession.IsLoggedIn);
@@ -1881,12 +2601,12 @@ public class AuthMenuController : MonoBehaviour
     {
         if (_shopButton != null || profilePanel == null) return;
 
-        Color baseColor = new Color(0.32f, 0.14f, 0.44f, 1f);
+        Color baseColor = GameUiThemeRuntime.Current.primaryButton;
         (_shopButton, _shopButtonImage, _shopButtonText) = CreateCardButton(
             "ShopButton", profilePanel.transform,
             "STORE", "Buy new gear\nwith gold coins",
             new Vector2(550f, -134f), new Vector2(480f, 760f),
-            baseColor, new Color(0.40f, 0.18f, 0.54f, 1f), new Color(0.22f, 0.10f, 0.30f, 1f),
+            baseColor, GameUiThemeRuntime.Current.Hover(baseColor), GameUiThemeRuntime.Current.Pressed(baseColor),
             OpenStore);
 
         RefreshShopButtonState(AuthSession.IsLoggedIn);
@@ -1910,17 +2630,8 @@ public class AuthMenuController : MonoBehaviour
         rect.anchoredPosition = position;
 
         Image img = obj.AddComponent<Image>();
-        img.color = baseColor;
-
         Button btn = obj.AddComponent<Button>();
-        btn.targetGraphic = img;
-        ColorBlock cb = btn.colors;
-        cb.normalColor      = baseColor;
-        cb.highlightedColor = hoverColor;
-        cb.pressedColor     = pressColor;
-        cb.selectedColor    = hoverColor;
-        cb.disabledColor    = new Color(0.15f, 0.15f, 0.17f, 0.85f);
-        btn.colors = cb;
+        GameUiThemeRuntime.StyleButton(btn, img, baseColor);
         btn.onClick.AddListener(onClick);
 
         // Inner layout
@@ -1943,7 +2654,7 @@ public class AuthMenuController : MonoBehaviour
         titleTMP.fontSize = 52f;
         titleTMP.fontStyle = FontStyles.Bold;
         titleTMP.alignment = TextAlignmentOptions.Center;
-        titleTMP.color = Color.white;
+        titleTMP.color = GameUiThemeRuntime.Current.text;
         titleTMP.raycastTarget = false;
 
         // Subtitle
@@ -1956,7 +2667,7 @@ public class AuthMenuController : MonoBehaviour
         subtitleTMP.fontSize = 26f;
         subtitleTMP.fontStyle = FontStyles.Normal;
         subtitleTMP.alignment = TextAlignmentOptions.Center;
-        subtitleTMP.color = new Color(0.85f, 0.90f, 1f, 0.85f);
+        subtitleTMP.color = GameUiThemeRuntime.Current.MutedText(0.85f);
         subtitleTMP.enableWordWrapping = true;
         subtitleTMP.raycastTarget = false;
 
@@ -1983,15 +2694,46 @@ public class AuthMenuController : MonoBehaviour
         _shopPanel.SetActive(false);
     }
 
+    private void EnsureSkillTreePanel()
+    {
+        if (_skillTreePanel != null) return;
+
+        Transform panelParent = mainMenuPanel != null ? mainMenuPanel.transform.parent : transform;
+
+        _skillTreePanel = new GameObject("SkillTreePanel");
+        _skillTreePanel.transform.SetParent(panelParent, false);
+
+        RectTransform rect = _skillTreePanel.AddComponent<RectTransform>();
+        rect.anchorMin = Vector2.zero;
+        rect.anchorMax = Vector2.one;
+        rect.offsetMin = Vector2.zero;
+        rect.offsetMax = Vector2.zero;
+
+        _skillTreePanelController = _skillTreePanel.AddComponent<SkillTreePanelController>();
+        _skillTreePanelController.Initialize(_apiClient, BackToProfile);
+        _skillTreePanel.SetActive(false);
+    }
+
     private void RefreshShopButtonState(bool loggedIn)
     {
         if (_shopButton == null) return;
         _shopButton.gameObject.SetActive(loggedIn);
         _shopButton.interactable = loggedIn;
         if (_shopButtonImage != null)
-            _shopButtonImage.color = loggedIn ? new Color(0.32f, 0.14f, 0.44f, 1f) : new Color(0.15f, 0.15f, 0.17f, 0.85f);
+            _shopButtonImage.color = loggedIn ? GameUiThemeRuntime.Current.primaryButton : GameUiThemeRuntime.Current.Disabled(GameUiThemeRuntime.Current.primaryButton, 0.85f);
         if (_shopButtonText != null)
-            _shopButtonText.color = loggedIn ? Color.white : new Color(0.6f, 0.6f, 0.6f, 0.7f);
+            _shopButtonText.color = loggedIn ? GameUiThemeRuntime.Current.text : GameUiThemeRuntime.Current.MutedText(0.55f);
+    }
+
+    private void RefreshSkillTreeButtonState(bool loggedIn)
+    {
+        if (_skillTreeButton == null) return;
+        _skillTreeButton.gameObject.SetActive(loggedIn);
+        _skillTreeButton.interactable = loggedIn;
+        if (_skillTreeButtonImage != null)
+            _skillTreeButtonImage.color = loggedIn ? GameUiThemeRuntime.Current.secondaryButton : GameUiThemeRuntime.Current.Disabled(GameUiThemeRuntime.Current.secondaryButton, 0.85f);
+        if (_skillTreeButtonText != null)
+            _skillTreeButtonText.color = loggedIn ? GameUiThemeRuntime.Current.text : GameUiThemeRuntime.Current.MutedText(0.55f);
     }
 
     private void RefreshInventoryButtonState(bool loggedIn)
@@ -2000,9 +2742,9 @@ public class AuthMenuController : MonoBehaviour
         _inventoryButton.gameObject.SetActive(loggedIn);
         _inventoryButton.interactable = loggedIn;
         if (_inventoryButtonImage != null)
-            _inventoryButtonImage.color = loggedIn ? new Color(0.10f, 0.34f, 0.42f, 1f) : new Color(0.15f, 0.15f, 0.17f, 0.85f);
+            _inventoryButtonImage.color = loggedIn ? GameUiThemeRuntime.Current.primaryButton : GameUiThemeRuntime.Current.Disabled(GameUiThemeRuntime.Current.primaryButton, 0.85f);
         if (_inventoryButtonText != null)
-            _inventoryButtonText.color = loggedIn ? Color.white : new Color(0.6f, 0.6f, 0.6f, 0.7f);
+            _inventoryButtonText.color = loggedIn ? GameUiThemeRuntime.Current.text : GameUiThemeRuntime.Current.MutedText(0.55f);
     }
 
     private void HandleLoginSuccess(AuthUserData loginData, string source)
@@ -2112,7 +2854,8 @@ public class AuthMenuController : MonoBehaviour
 
         SetOtherPlayerWaiting();
 
-        if (_lobbyPlayButton  != null) _lobbyPlayButton.gameObject.SetActive(_isHostSession);
+        _lobbyPlayerCount = 1;
+        RefreshLobbyStartButtonState();
         if (_lobbyWaitingText != null) _lobbyWaitingText.gameObject.SetActive(!_isHostSession);
 
         ShowOnly(_onlineLobbyPanel);
@@ -2164,6 +2907,7 @@ public class AuthMenuController : MonoBehaviour
             yield return _apiClient.LobbyPing(_currentLobbyRoomNumber, weapon, armor, item, 0f, 0f,
                 onSuccess: (players, started) =>
                 {
+                    _lobbyPlayerCount = CountLobbyPlayers(players);
                     LobbyPlayerData other = null;
                     foreach (LobbyPlayerData p in players)
                     {
@@ -2180,6 +2924,7 @@ public class AuthMenuController : MonoBehaviour
                     {
                         SetOtherPlayerWaiting();
                     }
+                    RefreshLobbyStartButtonState();
                     // Guest auto-launches when host starts the game
                     if (started && !_isHostSession) shouldLaunch = true;
                 },
@@ -2214,6 +2959,18 @@ public class AuthMenuController : MonoBehaviour
 
     private IEnumerator HostStartGame()
     {
+        if (_lobbyPlayerCount < 2)
+        {
+            RefreshLobbyStartButtonState();
+            yield break;
+        }
+
+        OpenMapSelect(_onlineLobbyPanel, _ => StartCoroutine(HostStartGameAfterMapSelection()));
+        yield break;
+    }
+
+    private IEnumerator HostStartGameAfterMapSelection()
+    {
         bool started = false;
         string startError = null;
         yield return _apiClient.LobbyStart(
@@ -2228,6 +2985,37 @@ public class AuthMenuController : MonoBehaviour
         }
 
         PlayOnlineGame();
+    }
+
+    private int CountLobbyPlayers(LobbyPlayerData[] players)
+    {
+        if (players == null) return 0;
+
+        int count = 0;
+        foreach (LobbyPlayerData player in players)
+        {
+            if (player != null && !string.IsNullOrWhiteSpace(player.username))
+                count++;
+        }
+        return count;
+    }
+
+    private void RefreshLobbyStartButtonState()
+    {
+        if (_lobbyPlayButton == null) return;
+
+        bool visible = _isHostSession;
+        bool canStart = visible && _lobbyPlayerCount >= 2;
+        _lobbyPlayButton.gameObject.SetActive(visible);
+        _lobbyPlayButton.interactable = canStart;
+
+        if (_lobbyPlayButtonText != null)
+            _lobbyPlayButtonText.text = canStart ? "Start Game" : "Waiting for Player";
+
+        if (_lobbyPlayButtonImage != null)
+            _lobbyPlayButtonImage.color = canStart
+                ? new Color(0.15f, 0.42f, 0.25f, 1f)
+                : new Color(0.20f, 0.23f, 0.28f, 0.95f);
     }
 
     public void BackFromLobby()
@@ -2438,7 +3226,7 @@ public class AuthMenuController : MonoBehaviour
         bg.anchorMax = Vector2.one;
         bg.offsetMin = Vector2.zero;
         bg.offsetMax = Vector2.zero;
-        _roomListPanel.AddComponent<Image>().color = new Color(0.06f, 0.08f, 0.12f, 0.97f);
+        GameUiThemeRuntime.StylePanel(_roomListPanel, GameUiThemeRuntime.Current.multiplayerBackground, true);
 
         CreateMenuButton("BackBtn", _roomListPanel.transform,
             "Back", new Vector2(110f, -40f), new Vector2(160f, 50f),
@@ -2462,7 +3250,7 @@ public class AuthMenuController : MonoBehaviour
         titleTmp.fontSize = 44f;
         titleTmp.fontStyle = FontStyles.Bold;
         titleTmp.alignment = TextAlignmentOptions.Center;
-        titleTmp.color = Color.white;
+        titleTmp.color = GameUiThemeRuntime.Current.text;
 
         GameObject statusObj = new GameObject("Status");
         statusObj.transform.SetParent(_roomListPanel.transform, false);
@@ -2510,6 +3298,7 @@ public class AuthMenuController : MonoBehaviour
         image.color = full
             ? new Color(0.20f, 0.13f, 0.14f, 0.96f)
             : new Color(0.10f, 0.18f, 0.27f, 0.96f);
+        GameUiThemeRuntime.ApplyBorder(row);
 
         Button button = row.AddComponent<Button>();
         button.targetGraphic = image;
@@ -2602,7 +3391,7 @@ public class AuthMenuController : MonoBehaviour
         RectTransform bg = _joinSessionPanel.AddComponent<RectTransform>();
         bg.anchorMin = Vector2.zero; bg.anchorMax = Vector2.one;
         bg.offsetMin = Vector2.zero; bg.offsetMax = Vector2.zero;
-        _joinSessionPanel.AddComponent<Image>().color = new Color(0.06f, 0.08f, 0.12f, 0.97f);
+        GameUiThemeRuntime.StylePanel(_joinSessionPanel, GameUiThemeRuntime.Current.multiplayerBackground, true);
 
         CreateMenuButton("BackBtn", _joinSessionPanel.transform,
             "Back", new Vector2(110f, -40f), new Vector2(160f, 50f),
@@ -2620,7 +3409,7 @@ public class AuthMenuController : MonoBehaviour
         _joinSessionTitleText = titleTmp;
         titleTmp.text = "Join Session"; titleTmp.font = TMP_Settings.defaultFontAsset;
         titleTmp.fontSize = 44f; titleTmp.fontStyle = FontStyles.Bold;
-        titleTmp.alignment = TextAlignmentOptions.Center; titleTmp.color = Color.white;
+        titleTmp.alignment = TextAlignmentOptions.Center; titleTmp.color = GameUiThemeRuntime.Current.text;
 
         // Card
         GameObject card = new GameObject("Card");
@@ -2630,7 +3419,7 @@ public class AuthMenuController : MonoBehaviour
         cardRect.pivot = new Vector2(0.5f, 0.5f);
         cardRect.sizeDelta = new Vector2(680f, 280f);
         cardRect.anchoredPosition = new Vector2(0f, 20f);
-        card.AddComponent<Image>().color = new Color(0.10f, 0.13f, 0.18f, 1f);
+        GameUiThemeRuntime.StyleSurface(card);
         VerticalLayoutGroup vg = card.AddComponent<VerticalLayoutGroup>();
         vg.padding = new RectOffset(40, 40, 36, 36); vg.spacing = 20f;
         vg.childAlignment = TextAnchor.UpperCenter;
@@ -2663,7 +3452,7 @@ public class AuthMenuController : MonoBehaviour
         GameObject inputObj = new GameObject("ServerUrlInput");
         inputObj.transform.SetParent(card.transform, false);
         inputObj.AddComponent<LayoutElement>().preferredHeight = 56f;
-        inputObj.AddComponent<Image>().color = new Color(0.06f, 0.08f, 0.12f, 1f);
+        GameUiThemeRuntime.StyleSurface(inputObj);
         _joinServerUrlInput = inputObj.AddComponent<TMP_InputField>();
 
         GameObject textArea = new GameObject("TextArea");
@@ -2680,7 +3469,7 @@ public class AuthMenuController : MonoBehaviour
         textRect.offsetMin = Vector2.zero; textRect.offsetMax = Vector2.zero;
         TextMeshProUGUI textTmp = textObj.AddComponent<TextMeshProUGUI>();
         textTmp.font = TMP_Settings.defaultFontAsset; textTmp.fontSize = 22f;
-        textTmp.color = Color.white; textTmp.enableWordWrapping = false;
+        textTmp.color = GameUiThemeRuntime.Current.text; textTmp.enableWordWrapping = false;
 
         _joinServerUrlInput.textViewport = taRect;
         _joinServerUrlInput.textComponent = textTmp;
@@ -2692,14 +3481,8 @@ public class AuthMenuController : MonoBehaviour
         btnObj.transform.SetParent(card.transform, false);
         btnObj.AddComponent<LayoutElement>().preferredHeight = 54f;
         Image btnImg = btnObj.AddComponent<Image>();
-        btnImg.color = new Color(0.14f, 0.22f, 0.42f, 1f);
         Button btn = btnObj.AddComponent<Button>();
-        btn.targetGraphic = btnImg;
-        ColorBlock cb = btn.colors;
-        cb.normalColor = new Color(0.14f, 0.22f, 0.42f, 1f);
-        cb.highlightedColor = new Color(0.18f, 0.28f, 0.54f, 1f);
-        cb.pressedColor = new Color(0.10f, 0.15f, 0.30f, 1f);
-        btn.colors = cb;
+        GameUiThemeRuntime.StyleButton(btn, btnImg, GameUiThemeRuntime.Current.primaryButton);
         btn.onClick.AddListener(SubmitJoinSession);
 
         GameObject btnLabel = new GameObject("Label");
@@ -2711,10 +3494,321 @@ public class AuthMenuController : MonoBehaviour
         _joinSessionSubmitText = btnTmp;
         btnTmp.text = "Connect & Log In"; btnTmp.font = TMP_Settings.defaultFontAsset;
         btnTmp.fontSize = 22f; btnTmp.fontStyle = FontStyles.Bold;
-        btnTmp.alignment = TextAlignmentOptions.Center; btnTmp.color = Color.white;
+        btnTmp.alignment = TextAlignmentOptions.Center; btnTmp.color = GameUiThemeRuntime.Current.text;
         btnTmp.raycastTarget = false;
 
         _joinSessionPanel.SetActive(false);
+    }
+
+    private void EnsureGoogleLoginPanel()
+    {
+        if (_googleLoginPanel != null) return;
+
+        Transform panelParent = mainMenuPanel != null ? mainMenuPanel.transform.parent : transform;
+
+        _googleLoginPanel = new GameObject("GoogleLoginPanel");
+        _googleLoginPanel.transform.SetParent(panelParent, false);
+        RectTransform bg = _googleLoginPanel.AddComponent<RectTransform>();
+        bg.anchorMin = Vector2.zero;
+        bg.anchorMax = Vector2.one;
+        bg.offsetMin = Vector2.zero;
+        bg.offsetMax = Vector2.zero;
+        GameUiThemeRuntime.StylePanel(_googleLoginPanel, GameUiThemeRuntime.Current.authBackground, true);
+
+        CreateMenuButton("BackBtn", _googleLoginPanel.transform,
+            "Back", new Vector2(110f, -40f), new Vector2(160f, 50f),
+            new Color(0.18f, 0.22f, 0.3f, 1f), BackFromGoogleLogin);
+
+        GameObject titleObj = new GameObject("Title");
+        titleObj.transform.SetParent(_googleLoginPanel.transform, false);
+        RectTransform titleRect = titleObj.AddComponent<RectTransform>();
+        titleRect.anchorMin = new Vector2(0.5f, 1f);
+        titleRect.anchorMax = new Vector2(0.5f, 1f);
+        titleRect.pivot = new Vector2(0.5f, 1f);
+        titleRect.sizeDelta = new Vector2(760f, 70f);
+        titleRect.anchoredPosition = new Vector2(0f, -50f);
+        TextMeshProUGUI titleTmp = titleObj.AddComponent<TextMeshProUGUI>();
+        titleTmp.text = "Google Login";
+        titleTmp.font = TMP_Settings.defaultFontAsset;
+        titleTmp.fontSize = 44f;
+        titleTmp.fontStyle = FontStyles.Bold;
+        titleTmp.alignment = TextAlignmentOptions.Center;
+        titleTmp.color = GameUiThemeRuntime.Current.text;
+
+        GameObject card = new GameObject("Card");
+        card.transform.SetParent(_googleLoginPanel.transform, false);
+        RectTransform cardRect = card.AddComponent<RectTransform>();
+        cardRect.anchorMin = new Vector2(0.5f, 0.5f);
+        cardRect.anchorMax = new Vector2(0.5f, 0.5f);
+        cardRect.pivot = new Vector2(0.5f, 0.5f);
+        cardRect.sizeDelta = new Vector2(720f, 380f);
+        cardRect.anchoredPosition = new Vector2(0f, 10f);
+        GameUiThemeRuntime.StyleSurface(card);
+        VerticalLayoutGroup layout = card.AddComponent<VerticalLayoutGroup>();
+        layout.padding = new RectOffset(40, 40, 34, 34);
+        layout.spacing = 18f;
+        layout.childAlignment = TextAnchor.UpperCenter;
+        layout.childControlWidth = true;
+        layout.childControlHeight = true;
+        layout.childForceExpandWidth = true;
+        layout.childForceExpandHeight = false;
+
+        GameObject statusObj = new GameObject("Status");
+        statusObj.transform.SetParent(card.transform, false);
+        statusObj.AddComponent<LayoutElement>().preferredHeight = 58f;
+        _googleStatusText = statusObj.AddComponent<TextMeshProUGUI>();
+        _googleStatusText.font = TMP_Settings.defaultFontAsset;
+        _googleStatusText.fontSize = 19f;
+        _googleStatusText.alignment = TextAlignmentOptions.Center;
+        _googleStatusText.color = new Color(0.75f, 0.85f, 1f, 0.92f);
+        _googleStatusText.enableWordWrapping = true;
+        _googleStatusText.raycastTarget = false;
+
+        _googleIdTokenInput = CreateGoogleInput(card.transform, "GoogleIdTokenInput", "Google ID token");
+        _googleUsernameInput = CreateGoogleInput(card.transform, "GoogleUsernameInput", "Choose username");
+        _googleUsernameInputObj = _googleUsernameInput != null ? _googleUsernameInput.gameObject : null;
+
+        GameObject btnObj = new GameObject("ContinueButton");
+        btnObj.transform.SetParent(card.transform, false);
+        btnObj.AddComponent<LayoutElement>().preferredHeight = 56f;
+        Image btnImg = btnObj.AddComponent<Image>();
+        _googleSubmitButton = btnObj.AddComponent<Button>();
+        GameUiThemeRuntime.StyleButton(_googleSubmitButton, btnImg, GameUiThemeRuntime.Current.primaryButton);
+        _googleSubmitButton.onClick.AddListener(SubmitGooglePanel);
+
+        GameObject btnLabel = new GameObject("Label");
+        btnLabel.transform.SetParent(btnObj.transform, false);
+        RectTransform blr = btnLabel.AddComponent<RectTransform>();
+        blr.anchorMin = Vector2.zero;
+        blr.anchorMax = Vector2.one;
+        blr.offsetMin = Vector2.zero;
+        blr.offsetMax = Vector2.zero;
+        _googleSubmitText = btnLabel.AddComponent<TextMeshProUGUI>();
+        _googleSubmitText.text = "Continue";
+        _googleSubmitText.font = TMP_Settings.defaultFontAsset;
+        _googleSubmitText.fontSize = 23f;
+        _googleSubmitText.fontStyle = FontStyles.Bold;
+        _googleSubmitText.alignment = TextAlignmentOptions.Center;
+        _googleSubmitText.color = GameUiThemeRuntime.Current.text;
+        _googleSubmitText.raycastTarget = false;
+
+        _googleLoginPanel.SetActive(false);
+        SetGoogleUsernameStep(false, "Sign in with Google to continue.");
+    }
+
+    private TMP_InputField CreateGoogleInput(Transform parent, string name, string placeholder)
+    {
+        GameObject inputObj = new GameObject(name);
+        inputObj.transform.SetParent(parent, false);
+        inputObj.AddComponent<LayoutElement>().preferredHeight = 58f;
+        GameUiThemeRuntime.StyleSurface(inputObj);
+        TMP_InputField input = inputObj.AddComponent<TMP_InputField>();
+
+        GameObject textArea = new GameObject("TextArea");
+        textArea.transform.SetParent(inputObj.transform, false);
+        RectTransform taRect = textArea.AddComponent<RectTransform>();
+        taRect.anchorMin = Vector2.zero;
+        taRect.anchorMax = Vector2.one;
+        taRect.offsetMin = new Vector2(14f, 5f);
+        taRect.offsetMax = new Vector2(-14f, -5f);
+        textArea.AddComponent<RectMask2D>();
+
+        GameObject placeholderObj = new GameObject("Placeholder");
+        placeholderObj.transform.SetParent(textArea.transform, false);
+        RectTransform placeholderRect = placeholderObj.AddComponent<RectTransform>();
+        placeholderRect.anchorMin = Vector2.zero;
+        placeholderRect.anchorMax = Vector2.one;
+        placeholderRect.offsetMin = Vector2.zero;
+        placeholderRect.offsetMax = Vector2.zero;
+        TextMeshProUGUI placeholderText = placeholderObj.AddComponent<TextMeshProUGUI>();
+        placeholderText.text = placeholder;
+        placeholderText.font = TMP_Settings.defaultFontAsset;
+        placeholderText.fontSize = 22f;
+        placeholderText.fontStyle = FontStyles.Italic;
+        placeholderText.color = new Color(0.62f, 0.70f, 0.78f, 0.82f);
+        placeholderText.alignment = TextAlignmentOptions.MidlineLeft;
+        placeholderText.raycastTarget = false;
+
+        GameObject textObj = new GameObject("Text");
+        textObj.transform.SetParent(textArea.transform, false);
+        RectTransform textRect = textObj.AddComponent<RectTransform>();
+        textRect.anchorMin = Vector2.zero;
+        textRect.anchorMax = Vector2.one;
+        textRect.offsetMin = Vector2.zero;
+        textRect.offsetMax = Vector2.zero;
+        TextMeshProUGUI textTmp = textObj.AddComponent<TextMeshProUGUI>();
+        textTmp.font = TMP_Settings.defaultFontAsset;
+        textTmp.fontSize = 22f;
+        textTmp.color = GameUiThemeRuntime.Current.text;
+        textTmp.alignment = TextAlignmentOptions.MidlineLeft;
+        textTmp.enableWordWrapping = false;
+        textTmp.raycastTarget = false;
+
+        input.textViewport = taRect;
+        input.textComponent = textTmp;
+        input.placeholder = placeholderText;
+        input.fontAsset = TMP_Settings.defaultFontAsset;
+        input.pointSize = 22f;
+        return input;
+    }
+
+    private void SetGoogleUsernameStep(bool usernameStep, string status)
+    {
+        if (_googleIdTokenInput != null)
+            _googleIdTokenInput.gameObject.SetActive(false);
+        if (_googleUsernameInputObj != null)
+            _googleUsernameInputObj.SetActive(usernameStep);
+        if (_googleSubmitButton != null)
+            _googleSubmitButton.gameObject.SetActive(usernameStep);
+        if (_googleSubmitText != null)
+            _googleSubmitText.text = usernameStep ? "Create Google User" : "Continue";
+        SetGoogleStatus(status);
+    }
+
+    private void SetGoogleStatus(string status)
+    {
+        if (_googleStatusText != null)
+            _googleStatusText.text = status ?? "";
+    }
+
+    private void OpenMapSelect(GameObject returnPanel, Action<int> onSelected)
+    {
+        EnsureMapSelectPanel();
+        _mapSelectReturnPanel = returnPanel != null ? returnPanel : mainMenuPanel;
+        _pendingMapSelection = onSelected;
+        ShowOnly(_mapSelectPanel);
+    }
+
+    private void BackFromMapSelect()
+    {
+        Action<int> pending = _pendingMapSelection;
+        _pendingMapSelection = null;
+        ShowOnly(_mapSelectReturnPanel != null ? _mapSelectReturnPanel : mainMenuPanel);
+    }
+
+    private void SelectMap(int index)
+    {
+        GameMapSelection.Select(index);
+        Action<int> pending = _pendingMapSelection;
+        _pendingMapSelection = null;
+        pending?.Invoke(index);
+    }
+
+    private void EnsureMapSelectPanel()
+    {
+        if (_mapSelectPanel != null) return;
+
+        if (mapSelectOptions == null || mapSelectOptions.Length < 3)
+            mapSelectOptions = GameMapSelection.CreateDefaultMapSelectOptions();
+
+        Transform panelParent = mainMenuPanel != null ? mainMenuPanel.transform.parent : transform;
+
+        _mapSelectPanel = new GameObject("MapSelectPanel");
+        _mapSelectPanel.transform.SetParent(panelParent, false);
+        RectTransform bg = _mapSelectPanel.AddComponent<RectTransform>();
+        bg.anchorMin = Vector2.zero;
+        bg.anchorMax = Vector2.one;
+        bg.offsetMin = Vector2.zero;
+        bg.offsetMax = Vector2.zero;
+        GameUiThemeRuntime.StylePanel(_mapSelectPanel, GameUiThemeRuntime.Current.mapSelectBackground, true);
+
+        CreateMenuButton("BackBtn", _mapSelectPanel.transform,
+            "Back", new Vector2(110f, -40f), new Vector2(160f, 50f),
+            new Color(0.18f, 0.22f, 0.3f, 1f), BackFromMapSelect);
+
+        GameObject titleObj = new GameObject("Title");
+        titleObj.transform.SetParent(_mapSelectPanel.transform, false);
+        RectTransform titleRect = titleObj.AddComponent<RectTransform>();
+        titleRect.anchorMin = new Vector2(0.5f, 1f);
+        titleRect.anchorMax = new Vector2(0.5f, 1f);
+        titleRect.pivot = new Vector2(0.5f, 1f);
+        titleRect.sizeDelta = new Vector2(760f, 70f);
+        titleRect.anchoredPosition = new Vector2(0f, -54f);
+        TextMeshProUGUI titleTmp = titleObj.AddComponent<TextMeshProUGUI>();
+        titleTmp.text = "Select Map";
+        titleTmp.font = TMP_Settings.defaultFontAsset;
+        titleTmp.fontSize = 44f;
+        titleTmp.fontStyle = FontStyles.Bold;
+        titleTmp.alignment = TextAlignmentOptions.Center;
+        titleTmp.color = GameUiThemeRuntime.Current.text;
+        titleTmp.raycastTarget = false;
+
+        GameObject row = new GameObject("MapRow");
+        row.transform.SetParent(_mapSelectPanel.transform, false);
+        RectTransform rowRect = row.AddComponent<RectTransform>();
+        rowRect.anchorMin = new Vector2(0.5f, 0.5f);
+        rowRect.anchorMax = new Vector2(0.5f, 0.5f);
+        rowRect.pivot = new Vector2(0.5f, 0.5f);
+        rowRect.sizeDelta = new Vector2(980f, 360f);
+        rowRect.anchoredPosition = new Vector2(0f, -10f);
+
+        HorizontalLayoutGroup layout = row.AddComponent<HorizontalLayoutGroup>();
+        layout.spacing = 30f;
+        layout.childAlignment = TextAnchor.MiddleCenter;
+        layout.childControlWidth = false;
+        layout.childControlHeight = false;
+        layout.childForceExpandWidth = false;
+        layout.childForceExpandHeight = false;
+
+        int count = Mathf.Min(3, mapSelectOptions.Length);
+        for (int i = 0; i < count; i++)
+        {
+            CreateMapCard(row.transform, mapSelectOptions[i], i);
+        }
+
+        _mapSelectPanel.SetActive(false);
+    }
+
+    private void CreateMapCard(Transform parent, MapSelectOption option, int index)
+    {
+        GameObject card = new GameObject("MapCard_" + index);
+        card.transform.SetParent(parent, false);
+        RectTransform rect = card.AddComponent<RectTransform>();
+        rect.sizeDelta = new Vector2(290f, 330f);
+        LayoutElement layoutElement = card.AddComponent<LayoutElement>();
+        layoutElement.preferredWidth = 290f;
+        layoutElement.preferredHeight = 330f;
+
+        Button button = card.AddComponent<Button>();
+        Image bg = card.AddComponent<Image>();
+        GameUiThemeRuntime.StyleButton(button, bg, GameUiThemeRuntime.Current.surface);
+        int capturedIndex = index;
+        button.onClick.AddListener(() => SelectMap(capturedIndex));
+
+        GameObject imageObj = new GameObject("Preview");
+        imageObj.transform.SetParent(card.transform, false);
+        RectTransform imageRect = imageObj.AddComponent<RectTransform>();
+        imageRect.anchorMin = new Vector2(0.5f, 1f);
+        imageRect.anchorMax = new Vector2(0.5f, 1f);
+        imageRect.pivot = new Vector2(0.5f, 1f);
+        imageRect.sizeDelta = new Vector2(238f, 238f);
+        imageRect.anchoredPosition = new Vector2(0f, -24f);
+        Image preview = imageObj.AddComponent<Image>();
+        preview.color = option != null ? option.previewColor : Color.gray;
+        preview.sprite = option != null && option.previewTexture != null
+            ? Sprite.Create(option.previewTexture, new Rect(0f, 0f, option.previewTexture.width, option.previewTexture.height), new Vector2(0.5f, 0.5f), Mathf.Max(option.previewTexture.width, option.previewTexture.height))
+            : SimpleSprite.Square;
+        preview.raycastTarget = false;
+
+        GameObject nameObj = new GameObject("Name");
+        nameObj.transform.SetParent(card.transform, false);
+        RectTransform nameRect = nameObj.AddComponent<RectTransform>();
+        nameRect.anchorMin = new Vector2(0f, 0f);
+        nameRect.anchorMax = new Vector2(1f, 0f);
+        nameRect.pivot = new Vector2(0.5f, 0f);
+        nameRect.offsetMin = new Vector2(18f, 20f);
+        nameRect.offsetMax = new Vector2(-18f, 78f);
+        TextMeshProUGUI nameText = nameObj.AddComponent<TextMeshProUGUI>();
+        nameText.text = option != null && !string.IsNullOrWhiteSpace(option.mapName)
+            ? option.mapName
+            : "Map " + (index + 1);
+        nameText.font = TMP_Settings.defaultFontAsset;
+        nameText.fontSize = 24f;
+        nameText.fontStyle = FontStyles.Bold;
+        nameText.alignment = TextAlignmentOptions.Center;
+        nameText.color = GameUiThemeRuntime.Current.text;
+        nameText.enableWordWrapping = true;
+        nameText.raycastTarget = false;
     }
 
     private void EnsureOnlineLobbyPanel()
@@ -2728,7 +3822,7 @@ public class AuthMenuController : MonoBehaviour
         RectTransform bg = _onlineLobbyPanel.AddComponent<RectTransform>();
         bg.anchorMin = Vector2.zero; bg.anchorMax = Vector2.one;
         bg.offsetMin = Vector2.zero; bg.offsetMax = Vector2.zero;
-        _onlineLobbyPanel.AddComponent<Image>().color = new Color(0.06f, 0.08f, 0.12f, 0.97f);
+        GameUiThemeRuntime.StylePanel(_onlineLobbyPanel, GameUiThemeRuntime.Current.multiplayerBackground, true);
 
         // Back button
         CreateMenuButton("BackBtn", _onlineLobbyPanel.transform,
@@ -2746,7 +3840,7 @@ public class AuthMenuController : MonoBehaviour
         TextMeshProUGUI titleTmp = titleObj.AddComponent<TextMeshProUGUI>();
         titleTmp.text = "Online Lobby"; titleTmp.font = TMP_Settings.defaultFontAsset;
         titleTmp.fontSize = 44f; titleTmp.fontStyle = FontStyles.Bold;
-        titleTmp.alignment = TextAlignmentOptions.Center; titleTmp.color = Color.white;
+        titleTmp.alignment = TextAlignmentOptions.Center; titleTmp.color = GameUiThemeRuntime.Current.text;
 
         // Host address (shown only when hosting)
         GameObject addrObj = new GameObject("HostAddress");
@@ -2793,14 +3887,9 @@ public class AuthMenuController : MonoBehaviour
         playRect.sizeDelta = new Vector2(300f, 60f);
         playRect.anchoredPosition = new Vector2(0f, 60f);
         Image playBtnImg = playBtnObj.AddComponent<Image>();
-        playBtnImg.color = new Color(0.15f, 0.42f, 0.25f, 1f);
+        _lobbyPlayButtonImage = playBtnImg;
         _lobbyPlayButton = playBtnObj.AddComponent<Button>();
-        _lobbyPlayButton.targetGraphic = playBtnImg;
-        ColorBlock cb = _lobbyPlayButton.colors;
-        cb.normalColor = new Color(0.15f, 0.42f, 0.25f, 1f);
-        cb.highlightedColor = new Color(0.20f, 0.52f, 0.32f, 1f);
-        cb.pressedColor = new Color(0.10f, 0.30f, 0.18f, 1f);
-        _lobbyPlayButton.colors = cb;
+        GameUiThemeRuntime.StyleButton(_lobbyPlayButton, playBtnImg, GameUiThemeRuntime.Current.successButton);
         _lobbyPlayButton.onClick.AddListener(() => StartCoroutine(HostStartGame()));
 
         GameObject playLabel = new GameObject("Label");
@@ -2809,9 +3898,10 @@ public class AuthMenuController : MonoBehaviour
         plr.anchorMin = Vector2.zero; plr.anchorMax = Vector2.one;
         plr.offsetMin = Vector2.zero; plr.offsetMax = Vector2.zero;
         TextMeshProUGUI playTmp = playLabel.AddComponent<TextMeshProUGUI>();
+        _lobbyPlayButtonText = playTmp;
         playTmp.text = "Start Game"; playTmp.font = TMP_Settings.defaultFontAsset;
         playTmp.fontSize = 26f; playTmp.fontStyle = FontStyles.Bold;
-        playTmp.alignment = TextAlignmentOptions.Center; playTmp.color = Color.white;
+        playTmp.alignment = TextAlignmentOptions.Center; playTmp.color = GameUiThemeRuntime.Current.text;
         playTmp.raycastTarget = false;
 
         // Waiting label (guest only)
@@ -2841,7 +3931,7 @@ public class AuthMenuController : MonoBehaviour
         RectTransform cr = card.AddComponent<RectTransform>();
         cr.sizeDelta = new Vector2(420f, 320f);
         card.AddComponent<LayoutElement>().preferredWidth = 420f;
-        card.AddComponent<Image>().color = cardColor;
+        GameUiThemeRuntime.StylePanel(card, cardColor, true);
 
         VerticalLayoutGroup vg = card.AddComponent<VerticalLayoutGroup>();
         vg.padding = new RectOffset(28, 28, 24, 24);
@@ -2859,7 +3949,7 @@ public class AuthMenuController : MonoBehaviour
             tmp.font = TMP_Settings.defaultFontAsset;
             tmp.fontSize = size;
             tmp.fontStyle = bold ? FontStyles.Bold : FontStyles.Normal;
-            tmp.color = Color.white;
+            tmp.color = GameUiThemeRuntime.Current.text;
             tmp.alignment = TextAlignmentOptions.Center;
             tmp.enableWordWrapping = true;
             tmp.raycastTarget = false;
@@ -2898,7 +3988,7 @@ public class AuthMenuController : MonoBehaviour
         bg.anchorMax = Vector2.one;
         bg.offsetMin = Vector2.zero;
         bg.offsetMax = Vector2.zero;
-        _multiplayerPanel.AddComponent<Image>().color = new Color(0.06f, 0.08f, 0.12f, 0.97f);
+        GameUiThemeRuntime.StylePanel(_multiplayerPanel, GameUiThemeRuntime.Current.multiplayerBackground, true);
 
         // Title
         GameObject titleObj = new GameObject("Title");
@@ -2915,7 +4005,7 @@ public class AuthMenuController : MonoBehaviour
         titleTmp.fontSize = 48f;
         titleTmp.fontStyle = FontStyles.Bold;
         titleTmp.alignment = TextAlignmentOptions.Center;
-        titleTmp.color = Color.white;
+        titleTmp.color = GameUiThemeRuntime.Current.text;
 
         // Back button
         CreateMenuButton("BackBtn", _multiplayerPanel.transform,
@@ -2948,12 +4038,18 @@ public class AuthMenuController : MonoBehaviour
             interactable: true, PlayLocalMultiplayer);
 
         // Create online session
-        CreateModeCard(container.transform, "CREATE\nSESSION",
+        _createSessionButton = CreateModeCard(container.transform, "CREATE\nSESSION",
             "Host a game,\nshare your IP",
             new Color(0.32f, 0.18f, 0.10f, 1f),
             new Color(0.42f, 0.24f, 0.12f, 1f),
             new Color(0.22f, 0.12f, 0.07f, 1f),
             interactable: true, OpenCreateSession);
+        if (_createSessionButton != null)
+        {
+            Transform createCard = _createSessionButton.transform;
+            _createSessionTitleText = createCard.Find("Title")?.GetComponent<TextMeshProUGUI>();
+            _createSessionSubtitleText = createCard.Find("Subtitle")?.GetComponent<TextMeshProUGUI>();
+        }
 
         // Join online session
         CreateModeCard(container.transform, "JOIN\nSESSION",
@@ -2964,9 +4060,10 @@ public class AuthMenuController : MonoBehaviour
             interactable: true, OpenJoinSession);
 
         _multiplayerPanel.SetActive(false);
+        RefreshCreateSessionButtonState();
     }
 
-    private void CreateModeCard(Transform parent, string title, string subtitle,
+    private Button CreateModeCard(Transform parent, string title, string subtitle,
         Color baseColor, Color hoverColor, Color pressColor,
         bool interactable, UnityEngine.Events.UnityAction onClick)
     {
@@ -2980,18 +4077,9 @@ public class AuthMenuController : MonoBehaviour
         le.preferredHeight = 300f;
 
         Image img = card.AddComponent<Image>();
-        img.color = baseColor;
-
         Button btn = card.AddComponent<Button>();
-        btn.targetGraphic = img;
+        GameUiThemeRuntime.StyleButton(btn, img, baseColor);
         btn.interactable = interactable;
-        ColorBlock cb = btn.colors;
-        cb.normalColor = baseColor;
-        cb.highlightedColor = hoverColor;
-        cb.pressedColor = pressColor;
-        cb.selectedColor = hoverColor;
-        cb.disabledColor = new Color(baseColor.r * 0.6f, baseColor.g * 0.6f, baseColor.b * 0.6f, 0.7f);
-        btn.colors = cb;
         if (interactable && onClick != null)
             btn.onClick.AddListener(onClick);
 
@@ -3014,7 +4102,7 @@ public class AuthMenuController : MonoBehaviour
         titleTmp.fontSize = 34f;
         titleTmp.fontStyle = FontStyles.Bold;
         titleTmp.alignment = TextAlignmentOptions.Center;
-        titleTmp.color = interactable ? Color.white : new Color(0.5f, 0.5f, 0.55f, 0.8f);
+        titleTmp.color = interactable ? GameUiThemeRuntime.Current.text : GameUiThemeRuntime.Current.MutedText(0.55f);
         titleTmp.enableWordWrapping = true;
         titleTmp.raycastTarget = false;
 
@@ -3027,9 +4115,24 @@ public class AuthMenuController : MonoBehaviour
         subTmp.font = TMP_Settings.defaultFontAsset;
         subTmp.fontSize = 22f;
         subTmp.alignment = TextAlignmentOptions.Center;
-        subTmp.color = interactable ? new Color(0.8f, 0.92f, 0.82f, 0.9f) : new Color(0.4f, 0.4f, 0.45f, 0.7f);
+        subTmp.color = interactable ? GameUiThemeRuntime.Current.MutedText(0.9f) : GameUiThemeRuntime.Current.MutedText(0.45f);
         subTmp.enableWordWrapping = true;
         subTmp.raycastTarget = false;
+
+        return btn;
+    }
+
+    private void RefreshCreateSessionButtonState()
+    {
+        if (_createSessionButton == null) return;
+        bool canCreate = AuthSession.IsLoggedIn && IsUsingLocalServer();
+        _createSessionButton.interactable = canCreate;
+        if (_createSessionTitleText != null)
+            _createSessionTitleText.color = canCreate ? GameUiThemeRuntime.Current.text : GameUiThemeRuntime.Current.MutedText(0.6f);
+        if (_createSessionSubtitleText != null)
+            _createSessionSubtitleText.color = canCreate
+                ? GameUiThemeRuntime.Current.MutedText(0.9f)
+                : GameUiThemeRuntime.Current.MutedText(0.5f);
     }
 
     private void CreateMenuButton(string name, Transform parent, string label,
@@ -3046,16 +4149,8 @@ public class AuthMenuController : MonoBehaviour
         rect.anchoredPosition = anchoredPos;
 
         Image img = obj.AddComponent<Image>();
-        img.color = color;
-
         Button btn = obj.AddComponent<Button>();
-        btn.targetGraphic = img;
-        ColorBlock cb = btn.colors;
-        cb.normalColor = color;
-        cb.highlightedColor = color * 1.1f;
-        cb.pressedColor = color * 0.88f;
-        cb.selectedColor = color;
-        btn.colors = cb;
+        GameUiThemeRuntime.StyleButton(btn, img, color);
         btn.onClick.AddListener(onClick);
 
         GameObject labelObj = new GameObject("Label");
@@ -3071,7 +4166,7 @@ public class AuthMenuController : MonoBehaviour
         tmp.fontSize = 22f;
         tmp.fontStyle = FontStyles.Bold;
         tmp.alignment = TextAlignmentOptions.Center;
-        tmp.color = Color.white;
+        tmp.color = GameUiThemeRuntime.Current.text;
         tmp.raycastTarget = false;
     }
 

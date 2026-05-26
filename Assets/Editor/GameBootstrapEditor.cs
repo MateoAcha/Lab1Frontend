@@ -8,12 +8,20 @@ public class GameBootstrapEditor : Editor
     private SerializedProperty playerSize;
     private SerializedProperty meleeEnemySize;
     private SerializedProperty rangedEnemySize;
+    private SerializedProperty cameraOrthographicSize;
     private SerializedProperty giantEnemySize;
     private SerializedProperty giantEnemyMaterial;
     private SerializedProperty giantEnemyHealth;
     private SerializedProperty giantEnemyAttackRange;
 
     private SerializedProperty mapSize;
+    private SerializedProperty maps;
+
+    private SerializedProperty exitTexture;
+    private SerializedProperty exitColor;
+    private SerializedProperty exitSize;
+    private SerializedProperty exitTextureSize;
+    private SerializedProperty exitCount;
 
     private SerializedProperty backgroundMaterial;
     private SerializedProperty playerMaterial;
@@ -23,7 +31,6 @@ public class GameBootstrapEditor : Editor
 
     private SerializedProperty rockSprite;
     private SerializedProperty rockMaterial;
-    private SerializedProperty rockColor;
     private SerializedProperty rockBaseSize;
     private SerializedProperty rockSizeJitter;
     private SerializedProperty rocksPer100Units;
@@ -35,8 +42,10 @@ public class GameBootstrapEditor : Editor
     private SerializedProperty borderSpacing;
 
     private bool showSizes = true;
+    private bool showCamera = true;
     private bool showGiantEnemy = true;
     private bool showMap = true;
+    private bool showExit = true;
     private bool showMaterials = true;
     private bool showRocks = true;
 
@@ -45,12 +54,20 @@ public class GameBootstrapEditor : Editor
         playerSize = serializedObject.FindProperty("playerSize");
         meleeEnemySize = serializedObject.FindProperty("meleeEnemySize");
         rangedEnemySize = serializedObject.FindProperty("rangedEnemySize");
+        cameraOrthographicSize = serializedObject.FindProperty("cameraOrthographicSize");
         giantEnemySize = serializedObject.FindProperty("giantEnemySize");
         giantEnemyMaterial = serializedObject.FindProperty("giantEnemyMaterial");
         giantEnemyHealth = serializedObject.FindProperty("giantEnemyHealth");
         giantEnemyAttackRange = serializedObject.FindProperty("giantEnemyAttackRange");
 
         mapSize = serializedObject.FindProperty("mapSize");
+        maps = serializedObject.FindProperty("maps");
+
+        exitTexture = serializedObject.FindProperty("exitTexture");
+        exitColor = serializedObject.FindProperty("exitColor");
+        exitSize = serializedObject.FindProperty("exitSize");
+        exitTextureSize = serializedObject.FindProperty("exitTextureSize");
+        exitCount = serializedObject.FindProperty("exitCount");
 
         backgroundMaterial = serializedObject.FindProperty("backgroundMaterial");
         playerMaterial = serializedObject.FindProperty("playerMaterial");
@@ -60,7 +77,6 @@ public class GameBootstrapEditor : Editor
 
         rockSprite = serializedObject.FindProperty("rockSprite");
         rockMaterial = serializedObject.FindProperty("rockMaterial");
-        rockColor = serializedObject.FindProperty("rockColor");
         rockBaseSize = serializedObject.FindProperty("rockBaseSize");
         rockSizeJitter = serializedObject.FindProperty("rockSizeJitter");
         rocksPer100Units = serializedObject.FindProperty("rocksPer100Units");
@@ -89,6 +105,14 @@ public class GameBootstrapEditor : Editor
             EditorGUI.indentLevel--;
         }
 
+        showCamera = EditorGUILayout.Foldout(showCamera, "Camera", true);
+        if (showCamera)
+        {
+            EditorGUI.indentLevel++;
+            EditorGUILayout.PropertyField(cameraOrthographicSize);
+            EditorGUI.indentLevel--;
+        }
+
         showGiantEnemy = EditorGUILayout.Foldout(showGiantEnemy, "Giant Enemy", true);
         if (showGiantEnemy)
         {
@@ -105,6 +129,19 @@ public class GameBootstrapEditor : Editor
         {
             EditorGUI.indentLevel++;
             EditorGUILayout.PropertyField(mapSize);
+            EditorGUILayout.PropertyField(maps, true);
+            EditorGUI.indentLevel--;
+        }
+
+        showExit = EditorGUILayout.Foldout(showExit, "Exit", true);
+        if (showExit)
+        {
+            EditorGUI.indentLevel++;
+            EditorGUILayout.PropertyField(exitTexture);
+            EditorGUILayout.PropertyField(exitColor);
+            EditorGUILayout.PropertyField(exitSize, new GUIContent("Exit Trigger Size"));
+            EditorGUILayout.PropertyField(exitTextureSize, new GUIContent("Exit Texture Size"));
+            EditorGUILayout.PropertyField(exitCount);
             EditorGUI.indentLevel--;
         }
 
@@ -112,7 +149,7 @@ public class GameBootstrapEditor : Editor
         if (showMaterials)
         {
             EditorGUI.indentLevel++;
-            EditorGUILayout.PropertyField(backgroundMaterial);
+            EditorGUILayout.PropertyField(backgroundMaterial, new GUIContent("Default Floor Material"));
             EditorGUILayout.PropertyField(playerMaterial);
             EditorGUILayout.PropertyField(meleeEnemyMaterial);
             EditorGUILayout.PropertyField(rangedEnemyMaterial);
@@ -125,8 +162,7 @@ public class GameBootstrapEditor : Editor
         {
             EditorGUI.indentLevel++;
             EditorGUILayout.PropertyField(rockSprite);
-            EditorGUILayout.PropertyField(rockMaterial);
-            EditorGUILayout.PropertyField(rockColor);
+            EditorGUILayout.PropertyField(rockMaterial, new GUIContent("Default Obstacle Material"));
             EditorGUILayout.PropertyField(rockBaseSize);
             EditorGUILayout.PropertyField(rockSizeJitter);
             EditorGUILayout.PropertyField(rocksPer100Units);

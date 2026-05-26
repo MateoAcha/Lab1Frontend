@@ -7,13 +7,22 @@ public static class MultiplayerState
     public static bool IsOnline      { get; private set; }
     public static bool IsHost        { get; private set; }
     public static int OnlineRoomNumber { get; private set; } = 1;
+    private static bool _returnToOnlineMenu;
 
     private static readonly List<PlayerController> _players = new List<PlayerController>();
+    private static readonly List<Transform> _enemyTargets = new List<Transform>();
 
     public static void SetMultiplayer(bool value) { IsMultiplayer = value; }
     public static void SetOnline(bool value)      { IsOnline = value; }
     public static void SetHost(bool value)        { IsHost = value; }
     public static void SetOnlineRoomNumber(int value) { OnlineRoomNumber = Mathf.Max(1, value); }
+    public static void RequestReturnToOnlineMenu() { _returnToOnlineMenu = true; }
+    public static bool ConsumeReturnToOnlineMenu()
+    {
+        bool value = _returnToOnlineMenu;
+        _returnToOnlineMenu = false;
+        return value;
+    }
 
     public static void RegisterPlayer(PlayerController player)
     {
@@ -24,6 +33,17 @@ public static class MultiplayerState
     public static void UnregisterPlayer(PlayerController player)
     {
         _players.Remove(player);
+    }
+
+    public static void RegisterEnemyTarget(Transform target)
+    {
+        if (target != null && !_enemyTargets.Contains(target))
+            _enemyTargets.Add(target);
+    }
+
+    public static void UnregisterEnemyTarget(Transform target)
+    {
+        _enemyTargets.Remove(target);
     }
 
     public static Transform GetOtherPlayer(Transform exclude)
@@ -51,9 +71,27 @@ public static class MultiplayerState
         Transform nearest = null;
         float nearestSqDist = float.MaxValue;
 
+        for (int i = _enemyTargets.Count - 1; i >= 0; i--)
+        {
+            Transform target = _enemyTargets[i];
+            if (target == null)
+            {
+                _enemyTargets.RemoveAt(i);
+                continue;
+            }
+
+            float sqDist = (target.position - position).sqrMagnitude;
+            if (sqDist < nearestSqDist)
+            {
+                nearestSqDist = sqDist;
+                nearest = target;
+            }
+        }
+
         foreach (PlayerController p in _players)
         {
             if (p == null) continue;
+            if (!p.EnemiesCanSee) continue;
             float sqDist = (p.transform.position - position).sqrMagnitude;
             if (sqDist < nearestSqDist)
             {
@@ -75,7 +113,7 @@ public static class MultiplayerState
             }
         }
 
-        if (nearest == null && PlayerController.main != null)
+        if (nearest == null && PlayerController.main != null && PlayerController.main.EnemiesCanSee)
             nearest = PlayerController.main.transform;
 
         return nearest;
@@ -102,5 +140,6 @@ public static class MultiplayerState
         IsOnline = false;
         IsHost = false;
         OnlineRoomNumber = 1;
+        _enemyTargets.Clear();
     }
 }

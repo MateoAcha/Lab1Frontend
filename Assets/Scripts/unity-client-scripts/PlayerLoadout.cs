@@ -6,6 +6,7 @@ public enum WeaponKind
 {
     Spear,
     Sword,
+    Hammer,
     Ranged
 }
 
@@ -86,6 +87,10 @@ public static class PlayerLoadout
     // Keeps the current equipped item if it's still in inventory; otherwise picks the best.
     private static InventoryItemData ResolveSlot(InventoryItemData[] items, string type, InventoryItemData current)
     {
+        InventoryItemData serverEquipped = FindEquipped(items, type);
+        if (serverEquipped != null)
+            return serverEquipped;
+
         if (current != null && items != null)
         {
             foreach (InventoryItemData item in items)
@@ -96,6 +101,19 @@ public static class PlayerLoadout
             }
         }
         return FindBest(items, type);
+    }
+
+    private static InventoryItemData FindEquipped(InventoryItemData[] items, string itemType)
+    {
+        if (items == null) return null;
+        foreach (InventoryItemData item in items)
+        {
+            if (item == null) continue;
+            if (!item.equipped) continue;
+            if (string.Equals(item.itemType, itemType, StringComparison.OrdinalIgnoreCase))
+                return item;
+        }
+        return null;
     }
 
     // Picks the highest-rarity item; breaks ties by primary stat (DMG for weapons, DEF for armor).
@@ -174,6 +192,8 @@ public static class PlayerLoadout
             WeaponColor = parsed;
         }
 
+        PlayerSkillLoadout.RefreshForWeapon(CurrentWeaponKind);
+
         if (armor != null)
         {
             int def = ParseKeyValue(armor.detailSummary, "DEF");
@@ -233,6 +253,14 @@ public static class PlayerLoadout
             return WeaponKind.Spear;
 
         string normalized = NormalizeWeaponKindText(value);
+        if (normalized.Contains("hammer") ||
+            normalized.Contains("mace") ||
+            normalized.Contains("maul") ||
+            normalized.Contains("club"))
+        {
+            return WeaponKind.Hammer;
+        }
+
         if (normalized.Contains("ranged") ||
             normalized.Contains("range") ||
             normalized.Contains("bow") ||

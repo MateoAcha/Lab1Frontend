@@ -32,12 +32,30 @@ public class OnlineMatchStateMessage
     public string type = "state";
     public int tick;
     public bool matchEnded;
+    public bool matchEnding;
+    public bool matchFinished;
+    public bool pausedByHost;
     public int meleeKills;
     public int rangedKills;
+    public int giantKills;
     public int elapsedSeconds;
+    public int mapIndex;
+    public bool exitActive;
+    public float exitX;
+    public float exitY;
+    public OnlineExitState[] exits;
     public OnlinePlayerState[] players;
     public OnlineEnemyState[] enemies;
     public OnlineProjectileState[] projectiles;
+}
+
+[Serializable]
+public class OnlineExitState
+{
+    public int id;
+    public bool active;
+    public float x;
+    public float y;
 }
 
 [Serializable]

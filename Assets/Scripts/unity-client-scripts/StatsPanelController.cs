@@ -225,6 +225,7 @@ public class StatsPanelController : MonoBehaviour
         _playerStats.Add(new StatListItem { label = "Matches Played", value = stats.matchesPlayed.ToString() });
         _playerStats.Add(new StatListItem { label = "Melee Enemies Killed", value = stats.meleeEnemiesKilled.ToString() });
         _playerStats.Add(new StatListItem { label = "Ranged Enemies Killed", value = stats.rangedEnemiesKilled.ToString() });
+        _playerStats.Add(new StatListItem { label = "Giants Killed", value = stats.giantEnemiesKilled.ToString() });
         _playerStats.Add(new StatListItem { label = "Deaths", value = stats.deaths.ToString() });
         _playerStats.Add(new StatListItem { label = "Time Played", value = FormatDuration(stats.timePlayedSeconds) });
     }
@@ -336,7 +337,7 @@ public class StatsPanelController : MonoBehaviour
         rootRect.anchorMax = Vector2.one;
         rootRect.offsetMin = Vector2.zero;
         rootRect.offsetMax = Vector2.zero;
-        GetOrAddImage(gameObject).color = new Color(0.07f, 0.10f, 0.14f, 0.97f);
+        GameUiThemeRuntime.StylePanel(gameObject, GameUiThemeRuntime.Current.statsBackground, true);
 
         GameObject backBtn = CreateButton("BackBtn", transform, "Back",
             new Vector2(16f, -16f), new Vector2(130f, 46f),
@@ -408,17 +409,8 @@ public class StatsPanelController : MonoBehaviour
     {
         GameObject obj = CreateUIObj("Tab_" + label, parent);
         Image image = obj.AddComponent<Image>();
-        image.color = color;
-
         Button button = obj.AddComponent<Button>();
-        button.targetGraphic = image;
-        ColorBlock colors = button.colors;
-        colors.normalColor = color;
-        colors.highlightedColor = color * 1.12f;
-        colors.pressedColor = color * 0.88f;
-        colors.selectedColor = color;
-        colors.disabledColor = new Color(color.r * 0.7f, color.g * 0.7f, color.b * 0.7f, 1f);
-        button.colors = colors;
+        GameUiThemeRuntime.StyleButton(button, image, color);
 
         GameObject labelObj = CreateUIObj("Label", obj.transform);
         RectTransform labelRT = GetOrAddRT(labelObj);
@@ -431,7 +423,7 @@ public class StatsPanelController : MonoBehaviour
         text.text = label;
         text.fontSize = 24f;
         text.fontStyle = FontStyles.Bold;
-        text.color = Color.white;
+        text.color = GameUiThemeRuntime.Current.text;
         text.alignment = TextAlignmentOptions.Center;
         text.font = TMP_Settings.defaultFontAsset;
         text.raycastTarget = false;
@@ -469,7 +461,7 @@ public class StatsPanelController : MonoBehaviour
         scrollRT.offsetMin = Vector2.zero;
         scrollRT.offsetMax = Vector2.zero;
         scrollRT.anchoredPosition = Vector2.zero;
-        GetOrAddImage(scrollRoot).color = new Color(0.11f, 0.14f, 0.19f, 0.92f);
+        GameUiThemeRuntime.StyleSurface(scrollRoot);
 
         ScrollRect scroll = scrollRoot.AddComponent<ScrollRect>();
         scroll.horizontal = false;
@@ -570,16 +562,8 @@ public class StatsPanelController : MonoBehaviour
         rect.anchoredPosition = anchoredPosition;
 
         Image image = GetOrAddImage(obj);
-        image.color = color;
-
         Button button = obj.AddComponent<Button>();
-        button.targetGraphic = image;
-        ColorBlock colors = button.colors;
-        colors.normalColor = color;
-        colors.highlightedColor = color * 1.10f;
-        colors.pressedColor = color * 0.90f;
-        colors.selectedColor = color;
-        button.colors = colors;
+        GameUiThemeRuntime.StyleButton(button, image, color);
 
         GameObject labelObj = CreateUIObj("Label", obj.transform);
         RectTransform labelRT = GetOrAddRT(labelObj);
@@ -592,7 +576,7 @@ public class StatsPanelController : MonoBehaviour
         text.text = label;
         text.fontSize = 24f;
         text.fontStyle = FontStyles.Bold;
-        text.color = Color.white;
+        text.color = GameUiThemeRuntime.Current.text;
         text.alignment = TextAlignmentOptions.Center;
         text.font = TMP_Settings.defaultFontAsset;
         text.raycastTarget = false;

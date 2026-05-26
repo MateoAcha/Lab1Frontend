@@ -13,6 +13,9 @@ public class EnemySpawner : MonoBehaviour
     public float giantEnemySize = 2.8f;
     public float giantEnemyHealth = 40f;
     public float giantEnemyAttackRange = 14f;
+    public bool giantMinuteSpawns = true;
+    public float giantMinuteInterval = 60f;
+    public MapEnemySpawnRule[] spawnRules;
     public Material meleeEnemyMaterial;
     public Material rangedEnemyMaterial;
     public Material giantEnemyMaterial;
@@ -72,18 +75,23 @@ public class EnemySpawner : MonoBehaviour
 
     private void Spawn()
     {
-        float rangedChance = GetRangedChance(ElapsedTime);
-        bool shouldSpawnRanged = Random.value < rangedChance;
-        float size = shouldSpawnRanged ? rangedEnemySize : meleeEnemySize;
+        MapEnemyType enemyType = ChooseEnemyType();
+        float size = GetEnemySize(enemyType);
 
-        if (!TryGetSpawnPoint(size, out Vector2 point))
+        if (!TryGetSpawnPoint(size, out Vector2 point, enemyType == MapEnemyType.Giant))
         {
             return;
         }
 
-        if (shouldSpawnRanged)
+        if (enemyType == MapEnemyType.Ranged)
         {
             SpawnRanged(point);
+            return;
+        }
+
+        if (enemyType == MapEnemyType.Giant)
+        {
+            SpawnGiant(point);
             return;
         }
 
@@ -172,15 +180,73 @@ public class EnemySpawner : MonoBehaviour
         return true;
     }
 
-    private float GetRangedChance(float timeSinceStart)
+    private MapEnemyType ChooseEnemyType()
     {
-        if (timeSinceStart < 15f)
+        if (spawnRules == null || spawnRules.Length == 0)
         {
-            return 0f;
+            return GetFallbackEnemyType();
         }
 
-        float ramp = Mathf.Clamp01((timeSinceStart - 15f) / 30f);
-        return 0.4f * ramp;
+        float totalWeight = 0f;
+        for (int i = 0; i < spawnRules.Length; i++)
+        {
+            MapEnemySpawnRule rule = spawnRules[i];
+            if (rule == null || !rule.enabled || rule.spawnWeight <= 0f || ElapsedTime < rule.startsAfterSeconds)
+            {
+                continue;
+            }
+
+            totalWeight += rule.spawnWeight;
+        }
+
+        if (totalWeight <= 0f)
+        {
+            return MapEnemyType.Melee;
+        }
+
+        float roll = Random.Range(0f, totalWeight);
+        for (int i = 0; i < spawnRules.Length; i++)
+        {
+            MapEnemySpawnRule rule = spawnRules[i];
+            if (rule == null || !rule.enabled || rule.spawnWeight <= 0f || ElapsedTime < rule.startsAfterSeconds)
+            {
+                continue;
+            }
+
+            roll -= rule.spawnWeight;
+            if (roll <= 0f)
+            {
+                return rule.enemyType;
+            }
+        }
+
+        return MapEnemyType.Melee;
+    }
+
+    private MapEnemyType GetFallbackEnemyType()
+    {
+        if (ElapsedTime < 15f)
+        {
+            return MapEnemyType.Melee;
+        }
+
+        float ramp = Mathf.Clamp01((ElapsedTime - 15f) / 30f);
+        return Random.value < 0.4f * ramp ? MapEnemyType.Ranged : MapEnemyType.Melee;
+    }
+
+    private float GetEnemySize(MapEnemyType enemyType)
+    {
+        if (enemyType == MapEnemyType.Ranged)
+        {
+            return rangedEnemySize;
+        }
+
+        if (enemyType == MapEnemyType.Giant)
+        {
+            return giantEnemySize;
+        }
+
+        return meleeEnemySize;
     }
 
     private void SpawnMelee(Vector2 point)
@@ -230,7 +296,13 @@ public class EnemySpawner : MonoBehaviour
 
     private void SpawnGiantsAtMinuteMarks()
     {
-        while (ElapsedTime >= nextGiantMinute * 60f)
+        if (!giantMinuteSpawns)
+        {
+            return;
+        }
+
+        float interval = Mathf.Max(1f, giantMinuteInterval);
+        while (ElapsedTime >= nextGiantMinute * interval)
         {
             if (TryGetSpawnPoint(giantEnemySize, out Vector2 point, true))
             {

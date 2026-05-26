@@ -136,7 +136,7 @@ public class InventoryPanelController : MonoBehaviour
         panelRect.offsetMin = Vector2.zero;
         panelRect.offsetMax = Vector2.zero;
 
-        GetOrAddImage(gameObject).color = new Color(0.07f, 0.1f, 0.14f, 0.96f);
+        GameUiThemeRuntime.StylePanel(gameObject, GameUiThemeRuntime.Current.inventoryBackground, true);
 
         GameObject titleObj = CreateUIObject("Title", transform);
         RectTransform titleRect = GetOrAddRectTransform(titleObj);
@@ -187,7 +187,7 @@ public class InventoryPanelController : MonoBehaviour
         scrollRect.offsetMax = Vector2.zero;
         scrollRect.sizeDelta = Vector2.zero;
         scrollRect.anchoredPosition = Vector2.zero;
-        GetOrAddImage(scrollRoot).color = new Color(0.12f, 0.15f, 0.2f, 0.92f);
+        GameUiThemeRuntime.StyleSurface(scrollRoot);
 
         ScrollRect scroll = scrollRoot.AddComponent<ScrollRect>();
         scroll.horizontal = false;
@@ -244,13 +244,7 @@ public class InventoryPanelController : MonoBehaviour
             : new Color(0.18f, 0.22f, 0.29f, 0.98f);
 
         Button rowButton = row.AddComponent<Button>();
-        rowButton.targetGraphic = rowImage;
-        ColorBlock cb = rowButton.colors;
-        cb.normalColor = rowImage.color;
-        cb.highlightedColor = rowImage.color * 1.12f;
-        cb.pressedColor = rowImage.color * 0.9f;
-        cb.selectedColor = rowImage.color;
-        rowButton.colors = cb;
+        GameUiThemeRuntime.StyleButton(rowButton, rowImage, rowImage.color);
 
         InventoryItemData captured = item;
         rowButton.onClick.AddListener(() => ShowInspectPanel(captured));
@@ -317,7 +311,7 @@ public class InventoryPanelController : MonoBehaviour
         cardRect.pivot = new Vector2(0.5f, 0.5f);
         cardRect.sizeDelta = new Vector2(540f, 380f);
         cardRect.anchoredPosition = Vector2.zero;
-        GetOrAddImage(card).color = new Color(0.1f, 0.13f, 0.18f, 0.99f);
+        GameUiThemeRuntime.StyleSurface(card);
 
         VerticalLayoutGroup cardLayout = card.AddComponent<VerticalLayoutGroup>();
         cardLayout.padding = new RectOffset(28, 28, 24, 24);
@@ -417,9 +411,40 @@ public class InventoryPanelController : MonoBehaviour
     private void HandleEquipPressed()
     {
         if (_inspectItem == null) return;
+        if (_apiClient != null && AuthSession.IsLoggedIn)
+        {
+            StartCoroutine(EquipItemRoutine(_inspectItem));
+            return;
+        }
+
         PlayerLoadout.EquipItem(_inspectItem);
         HideInspectPanel();
         LoadInventory(_userId);
+    }
+
+    private IEnumerator EquipItemRoutine(InventoryItemData item)
+    {
+        if (item == null)
+            yield break;
+
+        string error = null;
+        UserInventoryData inventory = null;
+        yield return _apiClient.EquipInventoryItem(
+            _userId,
+            item.userInventoryId,
+            data => inventory = data,
+            err => error = err);
+
+        if (!string.IsNullOrWhiteSpace(error))
+        {
+            Debug.LogWarning($"[Inventory] Equip item failed: {error}");
+            yield break;
+        }
+
+        PlayerLoadout.ApplyFromItems(inventory?.items);
+        HideInspectPanel();
+        if (_loadRoutine != null) StopCoroutine(_loadRoutine);
+        _loadRoutine = StartCoroutine(LoadInventoryRoutine(_userId));
     }
 
     private void ClearRows()
@@ -600,7 +625,7 @@ public class InventoryPanelController : MonoBehaviour
         equippedRect.offsetMax = Vector2.zero;
         equippedRect.sizeDelta = Vector2.zero;
         equippedRect.anchoredPosition = Vector2.zero;
-        GetOrAddImage(equippedRoot).color = new Color(0.11f, 0.14f, 0.19f, 0.94f);
+        GameUiThemeRuntime.StyleSurface(equippedRoot);
 
         VerticalLayoutGroup layout = equippedRoot.AddComponent<VerticalLayoutGroup>();
         layout.padding = new RectOffset(16, 16, 18, 18);
@@ -638,7 +663,7 @@ public class InventoryPanelController : MonoBehaviour
     {
         GameObject slot = CreateUIObject(slotName + "Slot", parent);
         GetOrAddRectTransform(slot).sizeDelta = new Vector2(0f, 112f);
-        GetOrAddImage(slot).color = new Color(0.17f, 0.21f, 0.28f, 1f);
+        GameUiThemeRuntime.StyleSurface(slot);
 
         LayoutElement layout = slot.AddComponent<LayoutElement>();
         layout.preferredHeight = 112f;
@@ -675,17 +700,8 @@ public class InventoryPanelController : MonoBehaviour
         le.preferredHeight = size.y;
 
         Image image = GetOrAddImage(buttonObj);
-        image.color = color;
-
         Button button = buttonObj.AddComponent<Button>();
-        ColorBlock colors = button.colors;
-        colors.normalColor = color;
-        colors.highlightedColor = color * 1.1f;
-        colors.pressedColor = color * 0.88f;
-        colors.selectedColor = color;
-        colors.disabledColor = new Color(color.r * 0.5f, color.g * 0.5f, color.b * 0.5f, 0.8f);
-        button.colors = colors;
-        button.targetGraphic = image;
+        GameUiThemeRuntime.StyleButton(button, image, color);
 
         GameObject labelObj = CreateUIObject("Label", buttonObj.transform);
         RectTransform labelRect = GetOrAddRectTransform(labelObj);
@@ -695,7 +711,7 @@ public class InventoryPanelController : MonoBehaviour
         labelRect.offsetMax = Vector2.zero;
         TextMeshProUGUI text = CreateText(labelObj.transform, label, 20, FontStyles.Bold);
         text.alignment = TextAlignmentOptions.Center;
-        text.color = Color.white;
+        text.color = GameUiThemeRuntime.Current.text;
 
         return buttonObj;
     }
@@ -712,17 +728,8 @@ public class InventoryPanelController : MonoBehaviour
         rect.anchoredPosition = anchoredPosition;
 
         Image image = GetOrAddImage(buttonObj);
-        image.color = color;
-
         Button button = buttonObj.AddComponent<Button>();
-        ColorBlock colors = button.colors;
-        colors.normalColor = color;
-        colors.highlightedColor = color * 1.08f;
-        colors.pressedColor = color * 0.92f;
-        colors.selectedColor = color;
-        colors.disabledColor = new Color(color.r * 0.55f, color.g * 0.55f, color.b * 0.55f, 0.85f);
-        button.colors = colors;
-        button.targetGraphic = image;
+        GameUiThemeRuntime.StyleButton(button, image, color);
 
         GameObject labelObj = CreateUIObject("Label", buttonObj.transform);
         RectTransform labelRect = GetOrAddRectTransform(labelObj);
@@ -732,7 +739,7 @@ public class InventoryPanelController : MonoBehaviour
         labelRect.offsetMax = Vector2.zero;
         TextMeshProUGUI text = CreateText(labelObj.transform, label, 22, FontStyles.Bold);
         text.alignment = TextAlignmentOptions.Center;
-        text.color = Color.white;
+        text.color = GameUiThemeRuntime.Current.text;
 
         return buttonObj;
     }

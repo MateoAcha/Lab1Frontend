@@ -12,6 +12,8 @@ public class InventoryItemData
     public int quantity;
     public string acquiredAt;
     public string detailSummary;
+    public string materialKey;
+    public string material_key;
     public string weaponType;
     public string weaponColor;
     public string weapon_type;
@@ -20,6 +22,7 @@ public class InventoryItemData
     public string weapon_subtype;
     public string weaponClass;
     public string weapon_class;
+    public bool equipped;
 }
 
 [Serializable]

@@ -18,6 +18,7 @@ public class ShopPanelController : MonoBehaviour
     private ShopItemData[] _shopItems;
     private Coroutine _loadRoutine;
     private SkinVisualDatabase _skinVisualDatabase;
+    private readonly HashSet<int> _claimedChallenges = new HashSet<int>();
 
     private TextMeshProUGUI _coinsText;
     private TextMeshProUGUI _stateText;
@@ -31,6 +32,7 @@ public class ShopPanelController : MonoBehaviour
     private static readonly Color TabActive   = new Color(0.12f, 0.40f, 0.52f, 1f);
     private static readonly Color TabInactive = new Color(0.18f, 0.22f, 0.28f, 1f);
     private static readonly Color TabActiveChallenge = new Color(0.34f, 0.16f, 0.50f, 1f);
+    private const int ChallengeRewardCoins = 100;
 
     public void Initialize(AuthApiClient apiClient, Action backAction, SkinVisualDatabase skinVisualDatabase = null)
     {
@@ -85,6 +87,7 @@ public class ShopPanelController : MonoBehaviour
             yield return LoadStoreItems();
         else
         {
+            yield return LoadChallengeClaims();
             HideState();
             RenderChallenges();
         }
@@ -135,9 +138,8 @@ public class ShopPanelController : MonoBehaviour
     {
         _activeTab = ShopTab.Challenges;
         RefreshTabVisuals();
-        ClearRows();
-        HideState();
-        RenderChallenges();
+        if (_loadRoutine != null) StopCoroutine(_loadRoutine);
+        _loadRoutine = StartCoroutine(LoadRoutine());
     }
 
     private void RefreshTabVisuals()
@@ -156,7 +158,7 @@ public class ShopPanelController : MonoBehaviour
 
         GameObject row = CreateUIObj("ShopRow", _contentRoot);
         _rows.Add(row);
-        row.AddComponent<Image>().color = new Color(0.16f, 0.20f, 0.27f, 0.98f);
+        GameUiThemeRuntime.StyleSurface(row);
         row.AddComponent<LayoutElement>().minHeight = 220f;
 
         VerticalLayoutGroup vg = row.AddComponent<VerticalLayoutGroup>();
@@ -213,17 +215,9 @@ public class ShopPanelController : MonoBehaviour
         GameObject btnObj = CreateUIObj("BuyBtn", bottom.transform);
         btnObj.AddComponent<LayoutElement>().preferredWidth = 145f;
         Image btnImg = btnObj.AddComponent<Image>();
-        btnImg.color = btnColor;
         Button btn = btnObj.AddComponent<Button>();
-        btn.targetGraphic = btnImg;
+        GameUiThemeRuntime.StyleButton(btn, btnImg, btnColor);
         btn.interactable = canAfford;
-        ColorBlock cb = btn.colors;
-        cb.normalColor   = btnColor;
-        cb.highlightedColor = canAfford ? btnColor * 1.15f : btnColor;
-        cb.pressedColor  = canAfford ? btnColor * 0.85f : btnColor;
-        cb.selectedColor = btnColor;
-        cb.disabledColor = new Color(0.22f, 0.22f, 0.22f, 0.55f);
-        btn.colors = cb;
         btn.onClick.AddListener(() => StartCoroutine(DoPurchase(capturedId)));
 
         GameObject btnLabel = CreateUIObj("Label", btnObj.transform);
@@ -252,16 +246,86 @@ public class ShopPanelController : MonoBehaviour
         CreateChallengeRow(2, "Survive 1 Minute Total",  (int)stats.timePlayedSeconds, 60);
     }
 
+    private static string GetChallengeKey(int index)
+    {
+        switch (index)
+        {
+            case 0: return "kill_melee_100";
+            case 1: return "kill_ranged_100";
+            case 2: return "survive_total_60";
+            default: return "challenge_" + index;
+        }
+    }
+
     private static string ClaimKey(int userId, int index) =>
         $"challenge_claimed_{userId}_{index}";
 
     private bool IsClaimed(int index) =>
-        PlayerPrefs.GetInt(ClaimKey(_userId, index), 0) == 1;
+        _claimedChallenges.Contains(index) || PlayerPrefs.GetInt(ClaimKey(_userId, index), 0) == 1;
 
     private void MarkClaimed(int index)
     {
+        _claimedChallenges.Add(index);
         PlayerPrefs.SetInt(ClaimKey(_userId, index), 1);
         PlayerPrefs.Save();
+    }
+
+    private IEnumerator LoadChallengeClaims()
+    {
+        _claimedChallenges.Clear();
+        LoadLocalChallengeClaims();
+
+        if (_apiClient == null || !AuthSession.IsLoggedIn || string.IsNullOrWhiteSpace(AuthSession.AccessToken))
+        {
+            yield break;
+        }
+
+        ChallengeClaimsData data = null;
+        string error = null;
+        yield return _apiClient.GetClaimedChallengeRewards(_userId, d => data = d, e => error = e);
+
+        if (error != null)
+        {
+            Debug.LogWarning($"[Shop] Challenge claim load failed: {error}");
+            yield break;
+        }
+
+        _claimedChallenges.Clear();
+        if (data?.claimedChallengeIds != null)
+        {
+            for (int i = 0; i < data.claimedChallengeIds.Length; i++)
+            {
+                _claimedChallenges.Add(data.claimedChallengeIds[i]);
+            }
+        }
+
+        if (data?.claims != null)
+        {
+            for (int i = 0; i < data.claims.Length; i++)
+            {
+                if (data.claims[i] != null)
+                {
+                    _claimedChallenges.Add(data.claims[i].challengeId);
+                }
+            }
+        }
+
+        foreach (int claimedIndex in _claimedChallenges)
+        {
+            PlayerPrefs.SetInt(ClaimKey(_userId, claimedIndex), 1);
+        }
+        PlayerPrefs.Save();
+    }
+
+    private void LoadLocalChallengeClaims()
+    {
+        for (int i = 0; i < 3; i++)
+        {
+            if (PlayerPrefs.GetInt(ClaimKey(_userId, i), 0) == 1)
+            {
+                _claimedChallenges.Add(i);
+            }
+        }
     }
 
     private void CreateChallengeRow(int index, string title, int current, int goal)
@@ -273,11 +337,13 @@ public class ShopPanelController : MonoBehaviour
 
         GameObject row = CreateUIObj("ChallengeRow", _contentRoot);
         _rows.Add(row);
-        row.AddComponent<Image>().color = claimed
+        Image rowImage = row.AddComponent<Image>();
+        rowImage.color = claimed
             ? new Color(0.10f, 0.14f, 0.18f, 0.98f)
             : completed
                 ? new Color(0.12f, 0.22f, 0.15f, 0.98f)
                 : new Color(0.16f, 0.18f, 0.24f, 0.98f);
+        GameUiThemeRuntime.ApplyBorder(row);
         row.AddComponent<LayoutElement>().minHeight = 205f;
 
         VerticalLayoutGroup vg = row.AddComponent<VerticalLayoutGroup>();
@@ -296,7 +362,7 @@ public class ShopPanelController : MonoBehaviour
             : completed
                 ? new Color(0.35f, 1f, 0.50f, 1f)
                 : new Color(0.95f, 0.97f, 1f, 1f);
-        MakeLabel(row.transform, $"{title}  —  🏆 100 coins", 27, FontStyles.Bold, titleColor, 44f);
+        MakeLabel(row.transform, $"{title}  —  🏆 {ChallengeRewardCoins} coins", 27, FontStyles.Bold, titleColor, 44f);
 
         // Progress bar
         int filled = Mathf.RoundToInt(24 * progress);
@@ -345,16 +411,9 @@ public class ShopPanelController : MonoBehaviour
         GameObject claimObj = CreateUIObj("ClaimBtn", bottom.transform);
         claimObj.AddComponent<LayoutElement>().preferredWidth = 190f;
         Image claimImg = claimObj.AddComponent<Image>();
-        claimImg.color = claimColor;
         Button claimBtn = claimObj.AddComponent<Button>();
-        claimBtn.targetGraphic = claimImg;
+        GameUiThemeRuntime.StyleButton(claimBtn, claimImg, claimColor);
         claimBtn.interactable = claimable;
-        ColorBlock cb = claimBtn.colors;
-        cb.normalColor      = claimColor;
-        cb.highlightedColor = claimable ? new Color(0.72f, 0.50f, 0.12f, 1f) : claimColor;
-        cb.pressedColor     = claimable ? new Color(0.38f, 0.25f, 0.06f, 1f) : claimColor;
-        cb.disabledColor    = new Color(0.25f, 0.25f, 0.27f, 0.50f);
-        claimBtn.colors = cb;
 
         if (claimable)
         {
@@ -369,7 +428,7 @@ public class ShopPanelController : MonoBehaviour
         claimLabelRT.offsetMin = Vector2.zero;
         claimLabelRT.offsetMax = Vector2.zero;
         var claimTMP = claimLabel.AddComponent<TextMeshProUGUI>();
-        claimTMP.text = claimed ? "Claimed" : "Claim 100 coins";
+        claimTMP.text = claimed ? "Claimed" : $"Claim {ChallengeRewardCoins} coins";
         claimTMP.fontSize = 20f;
         claimTMP.fontStyle = FontStyles.Bold;
         claimTMP.color = claimable ? Color.white : new Color(0.60f, 0.62f, 0.65f, 0.85f);
@@ -380,13 +439,22 @@ public class ShopPanelController : MonoBehaviour
 
     private IEnumerator ClaimReward(int index)
     {
-        MarkClaimed(index);
-
         string error = null;
-        yield return _apiClient.AddCoins(_userId, 100, () => { }, e => error = e);
+        yield return _apiClient.SaveChallengeClaim(
+            _userId,
+            index,
+            GetChallengeKey(index),
+            ChallengeRewardCoins,
+            () => { },
+            e => error = e);
 
         if (error != null)
+        {
             Debug.LogWarning($"[Shop] Claim reward failed: {error}");
+            yield break;
+        }
+
+        MarkClaimed(index);
 
         if (_loadRoutine != null) StopCoroutine(_loadRoutine);
         _loadRoutine = StartCoroutine(LoadRoutine());
@@ -405,7 +473,7 @@ public class ShopPanelController : MonoBehaviour
         rt.anchorMax = Vector2.one;
         rt.offsetMin = Vector2.zero;
         rt.offsetMax = Vector2.zero;
-        GetOrAddImage(gameObject).color = new Color(0.07f, 0.10f, 0.14f, 0.97f);
+        GameUiThemeRuntime.StylePanel(gameObject, GameUiThemeRuntime.Current.shopBackground, true);
 
         // Back button — top-left
         GameObject backBtn = CreateButton("BackBtn", transform, "Back",
@@ -503,16 +571,8 @@ public class ShopPanelController : MonoBehaviour
     {
         GameObject obj = CreateUIObj("Tab_" + label, parent);
         Image img = obj.AddComponent<Image>();
-        img.color = color;
         Button btn = obj.AddComponent<Button>();
-        btn.targetGraphic = img;
-        ColorBlock cb = btn.colors;
-        cb.normalColor      = color;
-        cb.highlightedColor = color * 1.12f;
-        cb.pressedColor     = color * 0.88f;
-        cb.selectedColor    = color;
-        cb.disabledColor    = new Color(color.r * 0.7f, color.g * 0.7f, color.b * 0.7f, 1f);
-        btn.colors = cb;
+        GameUiThemeRuntime.StyleButton(btn, img, color);
 
         GameObject labelObj = CreateUIObj("Label", obj.transform);
         RectTransform lr = labelObj.AddComponent<RectTransform>();
@@ -524,7 +584,7 @@ public class ShopPanelController : MonoBehaviour
         tmp.text = label;
         tmp.fontSize = 24f;
         tmp.fontStyle = FontStyles.Bold;
-        tmp.color = Color.white;
+        tmp.color = GameUiThemeRuntime.Current.text;
         tmp.alignment = TextAlignmentOptions.Center;
         tmp.font = TMP_Settings.defaultFontAsset;
         tmp.raycastTarget = false;
@@ -544,7 +604,7 @@ public class ShopPanelController : MonoBehaviour
         scrollRT.sizeDelta = Vector2.zero;
         scrollRT.anchoredPosition = Vector2.zero;
 
-        GetOrAddImage(scrollRoot).color = new Color(0.11f, 0.14f, 0.19f, 0.92f);
+        GameUiThemeRuntime.StyleSurface(scrollRoot);
 
         ScrollRect scroll = scrollRoot.AddComponent<ScrollRect>();
         scroll.horizontal        = false;
@@ -749,15 +809,8 @@ public class ShopPanelController : MonoBehaviour
         rt.anchoredPosition = anchoredPos;
 
         Image img = GetOrAddImage(obj);
-        img.color = color;
         Button btn = obj.AddComponent<Button>();
-        btn.targetGraphic = img;
-        ColorBlock cb = btn.colors;
-        cb.normalColor      = color;
-        cb.highlightedColor = color * 1.10f;
-        cb.pressedColor     = color * 0.90f;
-        cb.selectedColor    = color;
-        btn.colors = cb;
+        GameUiThemeRuntime.StyleButton(btn, img, color);
 
         GameObject labelObj = CreateUIObj("Label", obj.transform);
         RectTransform lr = labelObj.AddComponent<RectTransform>();
@@ -769,7 +822,7 @@ public class ShopPanelController : MonoBehaviour
         tmp.text = label;
         tmp.fontSize = 24f;
         tmp.fontStyle = FontStyles.Bold;
-        tmp.color = Color.white;
+        tmp.color = GameUiThemeRuntime.Current.text;
         tmp.alignment = TextAlignmentOptions.Center;
         tmp.font = TMP_Settings.defaultFontAsset;
         tmp.raycastTarget = false;

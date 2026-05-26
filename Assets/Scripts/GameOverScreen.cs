@@ -6,21 +6,41 @@ using UnityEngine.UI;
 
 public class GameOverScreen : MonoBehaviour
 {
+    private const int MeleeKillCoins = 1;
+    private const int RangedKillCoins = 2;
+    private const int GiantKillCoins = 10;
+    private TextMeshProUGUI _xpLabel;
+    private Image _xpFillImage;
+
     private void Awake()
     {
-        GameStatsTracker.OnPlayerDied += Show;
+        GameStatsTracker.OnPlayerDied += ShowGameOver;
+        GameStatsTracker.OnMatchFinished += ShowGameFinished;
+        GameStatsTracker.OnPlayerStatsSynced += HandlePlayerStatsSynced;
     }
 
     private void OnDestroy()
     {
-        GameStatsTracker.OnPlayerDied -= Show;
+        GameStatsTracker.OnPlayerDied -= ShowGameOver;
+        GameStatsTracker.OnMatchFinished -= ShowGameFinished;
+        GameStatsTracker.OnPlayerStatsSynced -= HandlePlayerStatsSynced;
     }
 
-    private void Show(int meleeKills, int rangedKills, int seconds)
+    private void ShowGameOver(int meleeKills, int rangedKills, int giantKills, int seconds)
     {
-        int coins = meleeKills + rangedKills * 2;
+        Show(meleeKills, rangedKills, giantKills, seconds, false);
+    }
 
-        GameObject canvasObj = new GameObject("GameOverCanvas");
+    private void ShowGameFinished(int meleeKills, int rangedKills, int giantKills, int seconds)
+    {
+        Show(meleeKills, rangedKills, giantKills, seconds, true);
+    }
+
+    private void Show(int meleeKills, int rangedKills, int giantKills, int seconds, bool finished)
+    {
+        int coins = meleeKills * MeleeKillCoins + rangedKills * RangedKillCoins + giantKills * GiantKillCoins;
+
+        GameObject canvasObj = new GameObject(finished ? "GameFinishedCanvas" : "GameOverCanvas");
         DontDestroyOnLoad(canvasObj);
 
         Canvas canvas = canvasObj.AddComponent<Canvas>();
@@ -40,8 +60,7 @@ public class GameOverScreen : MonoBehaviour
         GameObject panel = new GameObject("Panel");
         panel.transform.SetParent(canvasObj.transform, false);
 
-        Image panelImg = panel.AddComponent<Image>();
-        panelImg.color = new Color(0.08f, 0.10f, 0.14f, 0.97f);
+        GameUiThemeRuntime.StylePanel(panel, GameUiThemeRuntime.Current.resultBackground, true);
 
         RectTransform panelRect = panel.GetComponent<RectTransform>();
         panelRect.anchorMin = new Vector2(0.5f, 0.5f);
@@ -63,14 +82,31 @@ public class GameOverScreen : MonoBehaviour
         fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
         fitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
 
-        AddLabel(panel.transform, "GAME OVER", 44, FontStyles.Bold, new Color(1f, 0.28f, 0.28f, 1f));
+        AddLabel(
+            panel.transform,
+            finished ? "GAME FINISHED" : "GAME OVER",
+            44,
+            FontStyles.Bold,
+            finished ? new Color(0.5f, 1f, 0.72f, 1f) : new Color(1f, 0.28f, 0.28f, 1f));
         AddSpacer(panel.transform, 6f);
 
         string timeStr = string.Format("{0}:{1:00}", seconds / 60, seconds % 60);
-        AddLabel(panel.transform, $"Time Survived:  {timeStr}", 24, FontStyles.Normal, new Color(0.9f, 0.92f, 1f, 1f));
+        AddLabel(panel.transform, $"{(finished ? "Run Time" : "Time Survived")}:  {timeStr}", 24, FontStyles.Normal, new Color(0.9f, 0.92f, 1f, 1f));
         AddLabel(panel.transform, $"Melee Enemies Killed:  {meleeKills}", 22, FontStyles.Normal, new Color(1f, 0.65f, 0.35f, 1f));
         AddLabel(panel.transform, $"Ranged Enemies Killed:  {rangedKills}", 22, FontStyles.Normal, new Color(0.4f, 0.82f, 1f, 1f));
-        AddLabel(panel.transform, $"Total Kills:  {meleeKills + rangedKills}", 22, FontStyles.Bold, new Color(0.95f, 0.95f, 1f, 1f));
+        AddLabel(panel.transform, $"Giants Killed:  {giantKills}", 22, FontStyles.Normal, new Color(0.78f, 0.55f, 1f, 1f));
+        AddLabel(panel.transform, $"Total Kills:  {meleeKills + rangedKills + giantKills}", 22, FontStyles.Bold, new Color(0.95f, 0.95f, 1f, 1f));
+
+        AddSpacer(panel.transform, 4f);
+
+        _xpLabel = AddLabel(
+            panel.transform,
+            "",
+            20,
+            FontStyles.Bold,
+            new Color(0.54f, 0.78f, 1f, 1f));
+        AddXpProgressBar(panel.transform);
+        UpdateXpProgress(GameStatsTracker.GetCurrentPlayerStats());
 
         AddSpacer(panel.transform, 4f);
 
@@ -94,15 +130,22 @@ public class GameOverScreen : MonoBehaviour
 
         AddButton(panel.transform, "Play Again", new Color(0.14f, 0.42f, 0.22f, 1f), () =>
         {
+            Time.timeScale = 1f;
             Destroy(canvasObj);
             SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
         });
 
         AddButton(panel.transform, "Main Menu", new Color(0.18f, 0.22f, 0.35f, 1f), () =>
         {
+            Time.timeScale = 1f;
             Destroy(canvasObj);
             SceneManager.LoadScene("Menu");
         });
+    }
+
+    private void HandlePlayerStatsSynced(PlayerStatsData stats)
+    {
+        UpdateXpProgress(stats);
     }
 
     private IEnumerator AwardCoins(int coins, TextMeshProUGUI label)
@@ -165,6 +208,45 @@ public class GameOverScreen : MonoBehaviour
         obj.AddComponent<LayoutElement>().preferredHeight = height;
     }
 
+    private void AddXpProgressBar(Transform parent)
+    {
+        GameObject bar = new GameObject("XpProgressBar");
+        bar.transform.SetParent(parent, false);
+        bar.AddComponent<LayoutElement>().preferredHeight = 18f;
+
+        Image bg = bar.AddComponent<Image>();
+        bg.color = GameUiThemeRuntime.Current.surface;
+        GameUiThemeRuntime.ApplyBorder(bar);
+
+        GameObject fill = new GameObject("Fill");
+        fill.transform.SetParent(bar.transform, false);
+        RectTransform fillRect = fill.AddComponent<RectTransform>();
+        fillRect.anchorMin = Vector2.zero;
+        fillRect.anchorMax = new Vector2(0f, 1f);
+        fillRect.offsetMin = Vector2.zero;
+        fillRect.offsetMax = Vector2.zero;
+
+        _xpFillImage = fill.AddComponent<Image>();
+        _xpFillImage.color = new Color(0.38f, 0.72f, 1f, 1f);
+    }
+
+    private void UpdateXpProgress(PlayerStatsData stats)
+    {
+        if (stats == null || _xpLabel == null)
+            return;
+
+        int currentXp = GameStatsTracker.GetXpIntoCurrentLevel(stats);
+        int neededXp = Mathf.Max(1, GameStatsTracker.GetXpNeededForNextLevel(stats));
+        _xpLabel.text = $"XP Earned:  {GameStatsTracker.LastRunXpEarned}    Level {stats.level}:  {currentXp}/{neededXp}";
+
+        if (_xpFillImage != null)
+        {
+            RectTransform fillRect = _xpFillImage.rectTransform;
+            fillRect.anchorMax = new Vector2(Mathf.Clamp01((float)currentXp / neededXp), 1f);
+            fillRect.offsetMax = Vector2.zero;
+        }
+    }
+
     private void AddButton(Transform parent, string label, Color color, UnityEngine.Events.UnityAction onClick)
     {
         GameObject obj = new GameObject("Button_" + label);
@@ -172,16 +254,8 @@ public class GameOverScreen : MonoBehaviour
         obj.AddComponent<LayoutElement>().preferredHeight = 52f;
 
         Image img = obj.AddComponent<Image>();
-        img.color = color;
-
         Button btn = obj.AddComponent<Button>();
-        btn.targetGraphic = img;
-        ColorBlock cb = btn.colors;
-        cb.normalColor = color;
-        cb.highlightedColor = color * 1.18f;
-        cb.pressedColor = color * 0.82f;
-        cb.selectedColor = color;
-        btn.colors = cb;
+        GameUiThemeRuntime.StyleButton(btn, img, color);
         btn.onClick.AddListener(onClick);
 
         GameObject labelObj = new GameObject("Label");
@@ -196,7 +270,7 @@ public class GameOverScreen : MonoBehaviour
         tmp.text = label;
         tmp.fontSize = 22f;
         tmp.fontStyle = FontStyles.Bold;
-        tmp.color = Color.white;
+        tmp.color = GameUiThemeRuntime.Current.text;
         tmp.alignment = TextAlignmentOptions.Center;
         tmp.font = TMP_Settings.defaultFontAsset;
     }

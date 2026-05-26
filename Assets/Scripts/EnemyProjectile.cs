@@ -57,7 +57,10 @@ public class EnemyProjectile : MonoBehaviour
 
     private void OnTriggerEnter2D(Collider2D other)
     {
-        if (other.GetComponent<PlayerController>() == null)
+        bool hitPlayer = other.GetComponent<PlayerController>() != null;
+        bool hitWall = other.GetComponent<TemporaryWall>() != null;
+        bool hitAllyTarget = other.GetComponent<PlayerDecoy>() != null || other.GetComponent<PlayerMinion>() != null;
+        if (!hitPlayer && !hitWall && !hitAllyTarget)
         {
             return;
         }

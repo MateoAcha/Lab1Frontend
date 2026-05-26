@@ -240,6 +240,20 @@ public class GiantEnemyController : MonoBehaviour
             return;
         }
 
+        TemporaryWall wall = other.GetComponent<TemporaryWall>();
+        if (wall != null)
+        {
+            wall.Hit(touchDamage);
+            nextTouchDamageAt = Time.time + 0.8f;
+            return;
+        }
+
+        if (TryDamageAllyTarget(other))
+        {
+            nextTouchDamageAt = Time.time + 0.8f;
+            return;
+        }
+
         if (other.GetComponent<PlayerController>() == null)
         {
             return;
@@ -253,5 +267,22 @@ public class GiantEnemyController : MonoBehaviour
 
         health.Hit(touchDamage);
         nextTouchDamageAt = Time.time + 0.8f;
+    }
+
+    private bool TryDamageAllyTarget(Collider2D other)
+    {
+        if (other.GetComponent<PlayerDecoy>() == null && other.GetComponent<PlayerMinion>() == null)
+        {
+            return false;
+        }
+
+        Health health = other.GetComponent<Health>();
+        if (health == null)
+        {
+            return false;
+        }
+
+        health.Hit(touchDamage);
+        return true;
     }
 }

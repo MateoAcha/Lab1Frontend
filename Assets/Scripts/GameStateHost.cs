@@ -57,7 +57,7 @@ public class GameStateHost : MonoBehaviour
                 _sawRunActive = true;
 
             yield return Send(JsonUtility.ToJson(BuildState()));
-            yield return new WaitForSeconds(SyncInterval);
+            yield return new WaitForSecondsRealtime(SyncInterval);
         }
     }
 
@@ -125,15 +125,25 @@ public class GameStateHost : MonoBehaviour
         bool ended = _sawRunActive && !GameStatsTracker.IsRunActive;
         int meleeKills = ended ? GameStatsTracker.LastRunMeleeKills : GameStatsTracker.CurrentMeleeKills;
         int rangedKills = ended ? GameStatsTracker.LastRunRangedKills : GameStatsTracker.CurrentRangedKills;
+        int giantKills = ended ? GameStatsTracker.LastRunGiantKills : GameStatsTracker.CurrentGiantKills;
         int seconds = ended ? GameStatsTracker.LastRunTimeSeconds : GameStatsTracker.CurrentRunTimeSeconds;
 
         return new OnlineMatchStateMessage
         {
             tick = ++_tick,
             matchEnded = ended,
+            matchEnding = MatchExit.IsEnding,
+            matchFinished = ended && GameStatsTracker.LastRunWasFinished,
+            pausedByHost = PauseMenu.IsPaused,
             meleeKills = meleeKills,
             rangedKills = rangedKills,
+            giantKills = giantKills,
             elapsedSeconds = seconds,
+            mapIndex = GameMapSelection.SelectedMapIndex,
+            exitActive = MatchExit.HasExit,
+            exitX = MatchExit.Position.x,
+            exitY = MatchExit.Position.y,
+            exits = MatchExit.GetActiveStates(),
             players = BuildPlayers(),
             enemies = BuildEnemies(),
             projectiles = BuildProjectiles()
