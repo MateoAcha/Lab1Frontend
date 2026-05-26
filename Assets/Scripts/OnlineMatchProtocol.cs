@@ -24,6 +24,14 @@ public class OnlineMatchInputMessage
     public bool consumableIsSpeedBoost;
     public float speedBoostDuration = 3f;
     public float speedBoostMultiplier = 2f;
+    public string swordSpearActiveSkillId = "";
+    public int swordSpearActiveSkillLevel;
+    public string swordSpearPassiveSkillId = "";
+    public int swordSpearPassiveSkillLevel;
+    public string rangedActiveSkillId = "";
+    public int rangedActiveSkillLevel;
+    public string rangedPassiveSkillId = "";
+    public int rangedPassiveSkillLevel;
 }
 
 [Serializable]

@@ -62,12 +62,12 @@ public class GameBootstrap : MonoBehaviour
         bool isHost        = MultiplayerState.IsHost;
         int onlineRoom     = MultiplayerState.OnlineRoomNumber;
         MultiplayerState.Reset();
-        MultiplayerState.SetMultiplayer(isMultiplayer);
+        MultiplayerState.SetMultiplayer(isMultiplayer || isOnline);
         if (isOnline) { MultiplayerState.SetOnline(true); MultiplayerState.SetHost(isHost); MultiplayerState.SetOnlineRoomNumber(onlineRoom); }
         ApplySelectedMapDefinition(false);
         SetupCamera();
         SetupPlayer(0, new Vector3(-1f, 0f, 0f));
-        if (MultiplayerState.IsMultiplayer)
+        if (MultiplayerState.IsMultiplayer && !isOnline)
             SetupPlayer(1, new Vector3(1f, 0f, 0f));
         if (isOnline)
         {
@@ -416,15 +416,22 @@ public class GameBootstrap : MonoBehaviour
         GameObject rocksRoot = GameObject.Find("RuntimeRocks");
         if (rocksRoot != null)
         {
-            Material obstacleMaterial = ResolveObstacleMaterial();
-            SpriteRenderer[] renderers = rocksRoot.GetComponentsInChildren<SpriteRenderer>();
-            for (int i = 0; i < renderers.Length; i++)
-            {
-                renderers[i].sprite = ResolveRockSprite();
-                renderers[i].sharedMaterial = obstacleMaterial;
-                renderers[i].color = obstacleMaterial != null ? Color.white : rockColor;
-            }
+            rocksRoot.name = "RuntimeRocks_Old";
+            rocksRoot.SetActive(false);
+            Destroy(rocksRoot);
+            SetupRocks();
         }
+
+        GameObject exitsRoot = GameObject.Find("RuntimeExits");
+        if (exitsRoot != null)
+        {
+            exitsRoot.name = "RuntimeExits_Old";
+            exitsRoot.SetActive(false);
+            Destroy(exitsRoot);
+            SetupExits();
+        }
+
+        SetupSpawner();
     }
 
     private GameMapDefinition GetSelectedMapDefinition()

@@ -219,6 +219,14 @@ public class CameraFollow : MonoBehaviour
     private Transform GetP2()
     {
         Transform p1t = PlayerController.main != null ? PlayerController.main.transform : null;
+        if (MultiplayerState.IsOnline && !MultiplayerState.IsHost &&
+            RemotePlayerGhost.Instance != null &&
+            OnlinePlayerSync.Instance != null &&
+            OnlinePlayerSync.Instance.HasRemotePlayer)
+        {
+            return RemotePlayerGhost.Instance.transform;
+        }
+
         return MultiplayerState.GetOtherPlayer(p1t);
     }
 }

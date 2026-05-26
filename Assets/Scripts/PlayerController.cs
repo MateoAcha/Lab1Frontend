@@ -132,6 +132,14 @@ public class PlayerController : MonoBehaviour
     private bool _networkConsumableIsSpeedBoost;
     private float _networkSpeedBoostDuration = 3f;
     private float _networkSpeedBoostMultiplier = 2f;
+    private string _networkSwordSpearActiveSkillId = "";
+    private int _networkSwordSpearActiveSkillLevel;
+    private string _networkSwordSpearPassiveSkillId = "";
+    private int _networkSwordSpearPassiveSkillLevel;
+    private string _networkRangedActiveSkillId = "";
+    private int _networkRangedActiveSkillLevel;
+    private string _networkRangedPassiveSkillId = "";
+    private int _networkRangedPassiveSkillLevel;
     private Coroutine _quickBurstRoutine;
     private float _stealthUntil;
     private float _normalAlpha = 1f;
@@ -347,7 +355,15 @@ public class PlayerController : MonoBehaviour
         float consumableCooldown,
         bool consumableIsSpeedBoost,
         float speedBoostDuration,
-        float speedBoostMultiplier)
+        float speedBoostMultiplier,
+        string swordSpearActiveSkillId = "",
+        int swordSpearActiveSkillLevel = 0,
+        string swordSpearPassiveSkillId = "",
+        int swordSpearPassiveSkillLevel = 0,
+        string rangedActiveSkillId = "",
+        int rangedActiveSkillLevel = 0,
+        string rangedPassiveSkillId = "",
+        int rangedPassiveSkillLevel = 0)
     {
         _hasNetworkLoadout = true;
         _networkWeaponDamage = Mathf.Max(1, weaponDamage);
@@ -362,6 +378,14 @@ public class PlayerController : MonoBehaviour
         _networkConsumableIsSpeedBoost = consumableIsSpeedBoost;
         _networkSpeedBoostDuration = Mathf.Max(0f, speedBoostDuration);
         _networkSpeedBoostMultiplier = Mathf.Max(1f, speedBoostMultiplier);
+        _networkSwordSpearActiveSkillId = NormalizeNetworkSkillId(swordSpearActiveSkillId);
+        _networkSwordSpearActiveSkillLevel = ClampNetworkSkillLevel(swordSpearActiveSkillLevel);
+        _networkSwordSpearPassiveSkillId = NormalizeNetworkSkillId(swordSpearPassiveSkillId);
+        _networkSwordSpearPassiveSkillLevel = ClampNetworkSkillLevel(swordSpearPassiveSkillLevel);
+        _networkRangedActiveSkillId = NormalizeNetworkSkillId(rangedActiveSkillId);
+        _networkRangedActiveSkillLevel = ClampNetworkSkillLevel(rangedActiveSkillLevel);
+        _networkRangedPassiveSkillId = NormalizeNetworkSkillId(rangedPassiveSkillId);
+        _networkRangedPassiveSkillLevel = ClampNetworkSkillLevel(rangedPassiveSkillLevel);
 
         Health health = GetComponent<Health>();
         if (health != null && maxHp > 0f)
@@ -370,6 +394,16 @@ public class PlayerController : MonoBehaviour
             health.maxHp = maxHp;
             health.hp = wasFull ? health.maxHp : Mathf.Min(health.hp, health.maxHp);
         }
+    }
+
+    private static string NormalizeNetworkSkillId(string skillId)
+    {
+        return string.IsNullOrWhiteSpace(skillId) ? "" : skillId;
+    }
+
+    private static int ClampNetworkSkillLevel(int level)
+    {
+        return Mathf.Clamp(level, 0, PlayerSkillLoadout.MaxSkillLevel);
     }
 
     private Vector2 ReadMove()
@@ -1281,7 +1315,9 @@ public class PlayerController : MonoBehaviour
     {
         if (_hasNetworkLoadout)
         {
-            return "";
+            return slotKind == SkillSlotKind.Active
+                ? _networkSwordSpearActiveSkillId
+                : _networkSwordSpearPassiveSkillId;
         }
 
         PlayerSkillDefinition skill = PlayerSkillLoadout.GetEquipped(SkillWeaponBranch.SwordSpear, slotKind);
@@ -1292,7 +1328,9 @@ public class PlayerController : MonoBehaviour
     {
         if (_hasNetworkLoadout)
         {
-            return "";
+            return slotKind == SkillSlotKind.Active
+                ? _networkRangedActiveSkillId
+                : _networkRangedPassiveSkillId;
         }
 
         PlayerSkillDefinition skill = PlayerSkillLoadout.GetEquipped(SkillWeaponBranch.Ranged, slotKind);
@@ -1303,6 +1341,21 @@ public class PlayerController : MonoBehaviour
     {
         if (_hasNetworkLoadout || string.IsNullOrWhiteSpace(skillId))
         {
+            if (!_hasNetworkLoadout || string.IsNullOrWhiteSpace(skillId))
+            {
+                return 0;
+            }
+
+            if (string.Equals(skillId, _networkSwordSpearActiveSkillId, System.StringComparison.Ordinal))
+            {
+                return _networkSwordSpearActiveSkillLevel;
+            }
+
+            if (string.Equals(skillId, _networkSwordSpearPassiveSkillId, System.StringComparison.Ordinal))
+            {
+                return _networkSwordSpearPassiveSkillLevel;
+            }
+
             return 0;
         }
 
@@ -1311,12 +1364,26 @@ public class PlayerController : MonoBehaviour
 
     private int GetCurrentBurstSkillLevel()
     {
+        WeaponKind weaponKind = GetWeaponKind();
         if (_hasNetworkLoadout)
         {
+            if (weaponKind == WeaponKind.Ranged)
+            {
+                return _networkRangedPassiveSkillId == "ranged_passive_1"
+                    ? _networkRangedPassiveSkillLevel
+                    : 0;
+            }
+
+            if (IsSwordSpearWeapon(weaponKind))
+            {
+                return _networkSwordSpearPassiveSkillId == "swordspear_passive_1"
+                    ? _networkSwordSpearPassiveSkillLevel
+                    : 0;
+            }
+
             return 0;
         }
 
-        WeaponKind weaponKind = GetWeaponKind();
         if (weaponKind == WeaponKind.Ranged)
         {
             return GetEquippedRangedSkillId(SkillSlotKind.Passive) == "ranged_passive_1"
@@ -1338,6 +1405,21 @@ public class PlayerController : MonoBehaviour
     {
         if (_hasNetworkLoadout || string.IsNullOrWhiteSpace(skillId))
         {
+            if (!_hasNetworkLoadout || string.IsNullOrWhiteSpace(skillId))
+            {
+                return 0;
+            }
+
+            if (string.Equals(skillId, _networkRangedActiveSkillId, System.StringComparison.Ordinal))
+            {
+                return _networkRangedActiveSkillLevel;
+            }
+
+            if (string.Equals(skillId, _networkRangedPassiveSkillId, System.StringComparison.Ordinal))
+            {
+                return _networkRangedPassiveSkillLevel;
+            }
+
             return 0;
         }
 

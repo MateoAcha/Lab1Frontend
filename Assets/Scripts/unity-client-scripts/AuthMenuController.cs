@@ -2953,7 +2953,7 @@ public class AuthMenuController : MonoBehaviour
         MultiplayerState.SetOnline(true);
         MultiplayerState.SetHost(_isHostSession);
         MultiplayerState.SetOnlineRoomNumber(_currentLobbyRoomNumber);
-        _launchMultiplayer = false;
+        _launchMultiplayer = true;
         StartCoroutine(FetchLoadoutThenPlay());
     }
 

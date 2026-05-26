@@ -99,7 +99,15 @@ public class GameStateHost : MonoBehaviour
             input.consumableCooldown,
             input.consumableIsSpeedBoost,
             input.speedBoostDuration,
-            input.speedBoostMultiplier);
+            input.speedBoostMultiplier,
+            input.swordSpearActiveSkillId,
+            input.swordSpearActiveSkillLevel,
+            input.swordSpearPassiveSkillId,
+            input.swordSpearPassiveSkillLevel,
+            input.rangedActiveSkillId,
+            input.rangedActiveSkillLevel,
+            input.rangedPassiveSkillId,
+            input.rangedPassiveSkillLevel);
 
         bool attackDown = input.attackSeq > 0 && input.attackSeq != _lastAttackSeq;
         bool chargeDown = input.chargeSeq > 0 && input.chargeSeq != _lastChargeSeq;

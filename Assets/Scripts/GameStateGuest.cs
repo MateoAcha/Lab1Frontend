@@ -101,7 +101,7 @@ public class GameStateGuest : MonoBehaviour
         Vector2 move = player != null && player.enabled ? player.LastMoveInput : Vector2.zero;
         Vector2 aim = player != null ? player.GetAimDirectionForNetwork() : Vector2.down;
 
-        return new OnlineMatchInputMessage
+        OnlineMatchInputMessage input = new OnlineMatchInputMessage
         {
             moveX = move.x,
             moveY = move.y,
@@ -124,6 +124,45 @@ public class GameStateGuest : MonoBehaviour
             speedBoostDuration = Mathf.Max(0f, PlayerLoadout.SpeedBoostDuration),
             speedBoostMultiplier = Mathf.Max(1f, PlayerLoadout.SpeedBoostMultiplier)
         };
+
+        FillSkillInput(input, SkillWeaponBranch.SwordSpear, SkillSlotKind.Active);
+        FillSkillInput(input, SkillWeaponBranch.SwordSpear, SkillSlotKind.Passive);
+        FillSkillInput(input, SkillWeaponBranch.Ranged, SkillSlotKind.Active);
+        FillSkillInput(input, SkillWeaponBranch.Ranged, SkillSlotKind.Passive);
+        return input;
+    }
+
+    private static void FillSkillInput(OnlineMatchInputMessage input, SkillWeaponBranch branch, SkillSlotKind slotKind)
+    {
+        if (input == null)
+        {
+            return;
+        }
+
+        PlayerSkillDefinition skill = PlayerSkillLoadout.GetEquipped(branch, slotKind);
+        string skillId = skill != null ? skill.id : "";
+        int level = skill != null ? PlayerSkillLoadout.GetSkillLevel(skill.id) : 0;
+
+        if (branch == SkillWeaponBranch.SwordSpear && slotKind == SkillSlotKind.Active)
+        {
+            input.swordSpearActiveSkillId = skillId;
+            input.swordSpearActiveSkillLevel = level;
+        }
+        else if (branch == SkillWeaponBranch.SwordSpear && slotKind == SkillSlotKind.Passive)
+        {
+            input.swordSpearPassiveSkillId = skillId;
+            input.swordSpearPassiveSkillLevel = level;
+        }
+        else if (branch == SkillWeaponBranch.Ranged && slotKind == SkillSlotKind.Active)
+        {
+            input.rangedActiveSkillId = skillId;
+            input.rangedActiveSkillLevel = level;
+        }
+        else if (branch == SkillWeaponBranch.Ranged && slotKind == SkillSlotKind.Passive)
+        {
+            input.rangedPassiveSkillId = skillId;
+            input.rangedPassiveSkillLevel = level;
+        }
     }
 
     private bool ShouldSendInput(OnlineMatchInputMessage input)
@@ -146,6 +185,14 @@ public class GameStateGuest : MonoBehaviour
         if (!string.Equals(input.weaponColor, _lastSentInput.weaponColor, StringComparison.Ordinal)) return true;
         if (input.skinId != _lastSentInput.skinId) return true;
         if (!string.Equals(input.skinColor, _lastSentInput.skinColor, StringComparison.Ordinal)) return true;
+        if (!string.Equals(input.swordSpearActiveSkillId, _lastSentInput.swordSpearActiveSkillId, StringComparison.Ordinal)) return true;
+        if (input.swordSpearActiveSkillLevel != _lastSentInput.swordSpearActiveSkillLevel) return true;
+        if (!string.Equals(input.swordSpearPassiveSkillId, _lastSentInput.swordSpearPassiveSkillId, StringComparison.Ordinal)) return true;
+        if (input.swordSpearPassiveSkillLevel != _lastSentInput.swordSpearPassiveSkillLevel) return true;
+        if (!string.Equals(input.rangedActiveSkillId, _lastSentInput.rangedActiveSkillId, StringComparison.Ordinal)) return true;
+        if (input.rangedActiveSkillLevel != _lastSentInput.rangedActiveSkillLevel) return true;
+        if (!string.Equals(input.rangedPassiveSkillId, _lastSentInput.rangedPassiveSkillId, StringComparison.Ordinal)) return true;
+        if (input.rangedPassiveSkillLevel != _lastSentInput.rangedPassiveSkillLevel) return true;
 
         return false;
     }
