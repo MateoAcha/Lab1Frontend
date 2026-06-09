@@ -472,13 +472,26 @@ public class GameStateGuest : MonoBehaviour
     private OnlineEntityReplica SpawnEnemyReplica(OnlineEnemyState enemy)
     {
         bool isRanged = enemy.type == 1;
-        bool isGiant = enemy.type == 2;
+        bool isGiant  = enemy.type == 2;
+        bool isMelee  = !isRanged && !isGiant;
+
         GameObject go = new GameObject(isGiant ? "EnemyReplicaGiant" : isRanged ? "EnemyReplicaRanged" : "EnemyReplicaMelee");
-        go.transform.position = new Vector3(enemy.x, enemy.y, 0f);
+        go.transform.position   = new Vector3(enemy.x, enemy.y, 0f);
         go.transform.localScale = new Vector3(Mathf.Max(0.2f, enemy.size), Mathf.Max(0.2f, enemy.size), 1f);
 
-        SpriteRenderer sr = go.AddComponent<SpriteRenderer>();
-        sr.sprite = SimpleSprite.Square;
+        // Melee enemies use a child sprite so MeleeEnemyAnimator.spriteScale
+        // can resize visuals without affecting the hitbox.
+        GameObject srTarget = go;
+        if (isMelee)
+        {
+            srTarget = new GameObject("Sprite");
+            srTarget.transform.SetParent(go.transform);
+            srTarget.transform.localPosition = Vector3.zero;
+            srTarget.transform.localScale    = Vector3.one;
+        }
+
+        SpriteRenderer sr = srTarget.AddComponent<SpriteRenderer>();
+        sr.sprite       = SimpleSprite.Square;
         sr.sortingOrder = 5;
         if (isGiant)
         {
@@ -492,13 +505,16 @@ public class GameStateGuest : MonoBehaviour
         }
         else
         {
-            sr.color = new Color(0.25f, 1f, 0.25f, 1f);
-            if (_meleeMat != null) { sr.sharedMaterial = _meleeMat; sr.color = Color.white; }
+            sr.color = Color.white;
+            if (_meleeMat != null) sr.sharedMaterial = _meleeMat;
         }
 
-        Health health = go.AddComponent<Health>();
-        health.maxHp = Mathf.Max(0.1f, enemy.maxHp);
-        health.hp = Mathf.Clamp(enemy.hp, 0.01f, health.maxHp);
+        Health health  = go.AddComponent<Health>();
+        health.maxHp   = Mathf.Max(0.1f, enemy.maxHp);
+        health.hp      = Mathf.Clamp(enemy.hp, 0.01f, health.maxHp);
+
+        if (isMelee)
+            srTarget.AddComponent<MeleeEnemyAnimator>();
 
         OnlineEntityReplica replica = go.AddComponent<OnlineEntityReplica>();
         replica.SnapTo(go.transform.position);

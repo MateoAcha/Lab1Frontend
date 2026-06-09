@@ -255,20 +255,23 @@ public class EnemySpawner : MonoBehaviour
         enemy.transform.position = point;
         enemy.transform.localScale = new Vector3(meleeEnemySize, meleeEnemySize, 1f);
 
-        SpriteRenderer renderer = enemy.AddComponent<SpriteRenderer>();
-        renderer.sprite = SimpleSprite.Square;
-        renderer.color = meleeEnemyColor;
+        GameObject spriteObj = new GameObject("Sprite");
+        spriteObj.transform.SetParent(enemy.transform);
+        spriteObj.transform.localPosition = Vector3.zero;
+        spriteObj.transform.localScale    = Vector3.one;
+
+        SpriteRenderer renderer = spriteObj.AddComponent<SpriteRenderer>();
+        renderer.sprite       = SimpleSprite.Square;
+        renderer.color        = Color.white;
         renderer.sortingOrder = 5;
         if (meleeEnemyMaterial != null)
-        {
             renderer.sharedMaterial = meleeEnemyMaterial;
-            renderer.color = Color.white;
-        }
 
         Health health = enemy.AddComponent<Health>();
         health.hp = 2;
 
         enemy.AddComponent<EnemyController>();
+        spriteObj.AddComponent<MeleeEnemyAnimator>();
     }
 
     private void SpawnRanged(Vector2 point)

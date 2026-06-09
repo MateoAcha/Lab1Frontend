@@ -146,12 +146,21 @@ public class GameBootstrap : MonoBehaviour
         player.transform.position = spawnOffset;
         player.transform.localScale = new Vector3(playerSize, playerSize, 1f);
 
-        SpriteRenderer renderer = player.AddComponent<SpriteRenderer>();
+        // Child "Sprite" holds the SpriteRenderer so its scale can be adjusted
+        // independently from the parent's BoxCollider2D (hitbox).
+        GameObject spriteObj = new GameObject("Sprite");
+        spriteObj.transform.SetParent(player.transform);
+        spriteObj.transform.localPosition = Vector3.zero;
+        spriteObj.transform.localRotation = Quaternion.identity;
+        spriteObj.transform.localScale    = Vector3.one;
+
+        SpriteRenderer renderer = spriteObj.AddComponent<SpriteRenderer>();
         renderer.sortingOrder = 6;
 
         if (index == 0)
         {
             PlayerSkinVisuals.ApplyEquipped(renderer, playerMaterial);
+            spriteObj.AddComponent<PlayerAnimator>(); // walk/idle animation; adjust spriteScale to resize visuals
         }
         else
         {

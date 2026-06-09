@@ -2949,7 +2949,6 @@ public class AuthMenuController : MonoBehaviour
     private void PlayOnlineGame()
     {
         if (_lobbyPollRoutine != null) { StopCoroutine(_lobbyPollRoutine); _lobbyPollRoutine = null; }
-        if (_currentLobbyRoomNumber > 0) StartCoroutine(_apiClient.LobbyLeave(_currentLobbyRoomNumber));
         MultiplayerState.SetOnline(true);
         MultiplayerState.SetHost(_isHostSession);
         MultiplayerState.SetOnlineRoomNumber(_currentLobbyRoomNumber);

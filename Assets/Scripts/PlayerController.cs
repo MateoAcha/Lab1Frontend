@@ -225,7 +225,7 @@ public class PlayerController : MonoBehaviour
             gameObject.AddComponent<ConsumableUI>();
         }
 
-        _playerRenderer = GetComponent<SpriteRenderer>();
+        _playerRenderer = GetComponentInChildren<SpriteRenderer>();
         if (_playerRenderer != null)
         {
             _normalAlpha = _playerRenderer.color.a;
@@ -1472,7 +1472,7 @@ public class PlayerController : MonoBehaviour
     {
         if (_playerRenderer == null)
         {
-            _playerRenderer = GetComponent<SpriteRenderer>();
+            _playerRenderer = GetComponentInChildren<SpriteRenderer>();
             if (_playerRenderer != null)
             {
                 _normalAlpha = Mathf.Max(_normalAlpha, _playerRenderer.color.a);
@@ -1539,7 +1539,7 @@ public class PlayerController : MonoBehaviour
 
     private void ApplyNetworkSkin()
     {
-        SpriteRenderer renderer = GetComponent<SpriteRenderer>();
+        SpriteRenderer renderer = GetComponentInChildren<SpriteRenderer>();
         if (renderer == null) return;
 
         PlayerSkinVisuals.Apply(renderer, _networkSkinId, _networkSkinColor, renderer.sharedMaterial);
