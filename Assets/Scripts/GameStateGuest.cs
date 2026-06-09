@@ -479,10 +479,10 @@ public class GameStateGuest : MonoBehaviour
         go.transform.position   = new Vector3(enemy.x, enemy.y, 0f);
         go.transform.localScale = new Vector3(Mathf.Max(0.2f, enemy.size), Mathf.Max(0.2f, enemy.size), 1f);
 
-        // Melee enemies use a child sprite so MeleeEnemyAnimator.spriteScale
-        // can resize visuals without affecting the hitbox.
+        // Animated enemies use a child sprite so spriteScale adjusts
+        // visual size without affecting the parent's hitbox.
         GameObject srTarget = go;
-        if (isMelee)
+        if (isMelee || isRanged)
         {
             srTarget = new GameObject("Sprite");
             srTarget.transform.SetParent(go.transform);
@@ -515,6 +515,8 @@ public class GameStateGuest : MonoBehaviour
 
         if (isMelee)
             srTarget.AddComponent<MeleeEnemyAnimator>();
+        else if (isRanged)
+            srTarget.AddComponent<RangedEnemyAnimator>();
 
         OnlineEntityReplica replica = go.AddComponent<OnlineEntityReplica>();
         replica.SnapTo(go.transform.position);
