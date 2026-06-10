@@ -17,6 +17,9 @@ public class GiantEnemyController : MonoBehaviour
     public float recoilSpeed = 7f;
     public float recoilTime = 0.08f;
 
+    public bool IsAttacking     => attacking;
+    public Vector2 FacingDirection => look;
+
     private Rigidbody2D body;
     private Transform player;
     private Vector2 look = Vector2.down;

@@ -325,22 +325,25 @@ public class EnemySpawner : MonoBehaviour
         enemy.transform.position = point;
         enemy.transform.localScale = new Vector3(giantEnemySize, giantEnemySize, 1f);
 
-        SpriteRenderer renderer = enemy.AddComponent<SpriteRenderer>();
-        renderer.sprite = SimpleSprite.Square;
-        renderer.color = giantEnemyColor;
+        GameObject spriteObj = new GameObject("Sprite");
+        spriteObj.transform.SetParent(enemy.transform);
+        spriteObj.transform.localPosition = Vector3.zero;
+        spriteObj.transform.localScale    = Vector3.one;
+
+        SpriteRenderer renderer = spriteObj.AddComponent<SpriteRenderer>();
+        renderer.sprite       = SimpleSprite.Square;
+        renderer.color        = Color.white;
         renderer.sortingOrder = 5;
         if (giantEnemyMaterial != null)
-        {
             renderer.sharedMaterial = giantEnemyMaterial;
-            renderer.color = Color.white;
-        }
 
         Health health = enemy.AddComponent<Health>();
         health.hp = Mathf.Max(1f, giantEnemyHealth);
 
         GiantEnemyController giant = enemy.AddComponent<GiantEnemyController>();
-        giant.maxHealth = Mathf.Max(1f, giantEnemyHealth);
+        giant.maxHealth   = Mathf.Max(1f, giantEnemyHealth);
         giant.attackRange = Mathf.Max(0.1f, giantEnemyAttackRange);
+        spriteObj.AddComponent<GiantEnemyAnimator>();
     }
 
     private bool IsRockCollider(Collider2D col)

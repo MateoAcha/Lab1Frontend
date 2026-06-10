@@ -482,16 +482,12 @@ public class GameStateGuest : MonoBehaviour
         go.transform.position   = new Vector3(enemy.x, enemy.y, 0f);
         go.transform.localScale = new Vector3(Mathf.Max(0.2f, enemy.size), Mathf.Max(0.2f, enemy.size), 1f);
 
-        // Animated enemies use a child sprite so spriteScale adjusts
+        // All animated enemy types use a child sprite so spriteScale adjusts
         // visual size without affecting the parent's hitbox.
-        GameObject srTarget = go;
-        if (isMelee || isRanged)
-        {
-            srTarget = new GameObject("Sprite");
-            srTarget.transform.SetParent(go.transform);
-            srTarget.transform.localPosition = Vector3.zero;
-            srTarget.transform.localScale    = Vector3.one;
-        }
+        GameObject srTarget = new GameObject("Sprite");
+        srTarget.transform.SetParent(go.transform);
+        srTarget.transform.localPosition = Vector3.zero;
+        srTarget.transform.localScale    = Vector3.one;
 
         SpriteRenderer sr = srTarget.AddComponent<SpriteRenderer>();
         sr.sprite       = SimpleSprite.Square;
@@ -520,6 +516,8 @@ public class GameStateGuest : MonoBehaviour
             srTarget.AddComponent<MeleeEnemyAnimator>();
         else if (isRanged)
             srTarget.AddComponent<RangedEnemyAnimator>();
+        else if (isGiant)
+            srTarget.AddComponent<GiantEnemyAnimator>();
 
         OnlineEntityReplica replica = go.AddComponent<OnlineEntityReplica>();
         replica.SnapTo(go.transform.position);
