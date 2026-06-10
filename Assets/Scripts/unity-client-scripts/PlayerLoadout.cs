@@ -30,6 +30,7 @@ public static class PlayerLoadout
     public static InventoryItemData EquippedConsumable { get; private set; }
     public static int EquippedSkinId { get; private set; } = 0;
     public static string EquippedSkinName { get; private set; } = "";
+    public static int EquippedWeaponItemId => EquippedWeapon != null ? EquippedWeapon.itemId : 0;
 
     public static void ApplySkin(SkinData[] skins)
     {

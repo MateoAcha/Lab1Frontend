@@ -13,10 +13,11 @@ public class OnlineMatchInputMessage
     public int burstSeq;
     public int consumableSeq;
     public int weaponDamage = 1;
+    public int weaponItemId;
     public string weaponType = "Spear";
     public string weaponColor = "#FFFFFF";
     public int skinId;
-    public string skinColor = "#4DBFFF";
+    public string skinColor = "#FFFFFF";
     public float maxHp = 10f;
     public int consumableQuantity;
     public float consumableHealAmount;
@@ -78,7 +79,8 @@ public class OnlinePlayerState
     public float maxHp;
     public bool alive;
     public int skinId;
-    public string skinColor = "#4DBFFF";
+    public string skinColor = "#FFFFFF";
+    public int attackSeq;
 }
 
 [Serializable]

@@ -107,7 +107,8 @@ public class GameStateHost : MonoBehaviour
             input.rangedActiveSkillId,
             input.rangedActiveSkillLevel,
             input.rangedPassiveSkillId,
-            input.rangedPassiveSkillLevel);
+            input.rangedPassiveSkillLevel,
+            input.weaponItemId);
 
         bool attackDown = input.attackSeq > 0 && input.attackSeq != _lastAttackSeq;
         bool chargeDown = input.chargeSeq > 0 && input.chargeSeq != _lastChargeSeq;
@@ -189,7 +190,8 @@ public class GameStateHost : MonoBehaviour
             maxHp = health != null ? Mathf.Max(health.maxHp, health.hp) : 0f,
             alive = alive,
             skinId = GetPlayerSkinId(id, player),
-            skinColor = GetPlayerSkinColor(id, player)
+            skinColor = GetPlayerSkinColor(id, player),
+            attackSeq = GetPlayerAttackSequence(id, player)
         };
     }
 
@@ -204,7 +206,14 @@ public class GameStateHost : MonoBehaviour
     {
         if (id == 0)
             return PlayerSkinVisuals.GetEquippedSkinColorHex();
-        return player != null ? player.NetworkSkinColor : "#4DBFFF";
+        return player != null ? player.NetworkSkinColor : "#FFFFFF";
+    }
+
+    private int GetPlayerAttackSequence(int id, PlayerController player)
+    {
+        if (id == 1)
+            return _lastAttackSeq;
+        return player != null ? player.NetworkAttackSequence : 0;
     }
 
     private OnlineEnemyState[] BuildEnemies()

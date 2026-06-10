@@ -19,7 +19,31 @@ public class PlayerController : MonoBehaviour
     [Header("Weapon Types")]
     public float swordRangeMultiplier = 0.7f;
     public float swordWidthMultiplier = 1.8f;
-    public float swordArcDegrees = 110f;
+    public float swordArcDegrees = 90f;
+    public float swordSwingDurationMultiplier = 1.5f;
+    [Header("Sword Visual")]
+    public Sprite swordSwingSprite;
+    public Texture2D swordSwingTexture;
+    public Vector2 swordSwingVisualOffset = Vector2.zero;
+    public Vector2 swordSwingVisualScale = Vector2.one;
+    public float swordSwingVisualRotationOffset;
+    [Header("Carried Sword Visual")]
+    public Vector2 carriedSwordVisualOffset = new Vector2(-0.18f, 0.18f);
+    public Vector2 carriedSwordVisualScale = Vector2.one;
+    public float carriedSwordVisualRotationOffset = -35f;
+    public int carriedSwordSortingOrderOffset = -1;
+    [Header("Spear Visual")]
+    public Sprite spearSprite;
+    public Texture2D spearTexture;
+    public Vector2 spearVisualOffset = Vector2.zero;
+    public Vector2 spearVisualScale = Vector2.one;
+    public float spearVisualRotationOffset;
+    public float spearThrustDistance = 0.35f;
+    [Header("Carried Spear Visual")]
+    public Vector2 carriedSpearVisualOffset = new Vector2(-0.18f, 0.12f);
+    public Vector2 carriedSpearVisualScale = Vector2.one;
+    public float carriedSpearVisualRotationOffset = -35f;
+    public int carriedSpearSortingOrderOffset = 1;
     public float rangedProjectileSpeed = 12f;
     public float rangedProjectileLife = 2.2f;
     public float rangedProjectileSize = 0.35f;
@@ -122,10 +146,11 @@ public class PlayerController : MonoBehaviour
     private bool _externalConsumableDown;
     private bool _hasNetworkLoadout;
     private int _networkWeaponDamage = 1;
+    private int _networkWeaponItemId;
     private WeaponKind _networkWeaponKind = WeaponKind.Spear;
     private Color _networkWeaponColor = Color.white;
     private int _networkSkinId;
-    private string _networkSkinColor = "#4DBFFF";
+    private string _networkSkinColor = "#FFFFFF";
     private int _networkConsumableQuantity;
     private float _networkConsumableHealAmount;
     private float _networkConsumableCooldown;
@@ -144,6 +169,22 @@ public class PlayerController : MonoBehaviour
     private float _stealthUntil;
     private float _normalAlpha = 1f;
     private SpriteRenderer _playerRenderer;
+    private SpriteRenderer _carriedSwordRenderer;
+    private Transform _carriedSwordTransform;
+    private Sprite _appliedCarriedSwordSprite;
+    private bool _carriedSwordFacingLeft;
+    private float _hideCarriedSwordUntil;
+    private SpriteRenderer _carriedSpearRenderer;
+    private Transform _carriedSpearTransform;
+    private Sprite _appliedCarriedSpearSprite;
+    private bool _carriedSpearFacingLeft;
+    private float _hideCarriedSpearUntil;
+    private Texture2D _cachedSwordSwingTexture;
+    private Sprite _cachedSwordSwingTextureSprite;
+    private Texture2D _cachedSpearTexture;
+    private Sprite _cachedSpearTextureSprite;
+    private static Texture2D _chargeHitboxGlowTexture;
+    private static Sprite _chargeHitboxGlowSprite;
 
     public float ConsumableCooldownRemaining => Mathf.Max(0f, nextConsumableReady - Time.time);
     public Vector2 LastMoveInput { get; private set; }
@@ -299,6 +340,8 @@ public class PlayerController : MonoBehaviour
         }
 
         UpdateStealthVisual();
+        UpdateCarriedSwordVisual();
+        UpdateCarriedSpearVisual();
     }
 
     public void SetExternalInputEnabled(bool enabled)
@@ -363,14 +406,16 @@ public class PlayerController : MonoBehaviour
         string rangedActiveSkillId = "",
         int rangedActiveSkillLevel = 0,
         string rangedPassiveSkillId = "",
-        int rangedPassiveSkillLevel = 0)
+        int rangedPassiveSkillLevel = 0,
+        int weaponItemId = 0)
     {
         _hasNetworkLoadout = true;
         _networkWeaponDamage = Mathf.Max(1, weaponDamage);
+        _networkWeaponItemId = Mathf.Max(0, weaponItemId);
         _networkWeaponKind = PlayerLoadout.ParseWeaponKind(weaponType);
         _networkWeaponColor = PlayerLoadout.ParseWeaponColor(weaponColor, Color.white);
         _networkSkinId = Mathf.Max(0, skinId);
-        _networkSkinColor = string.IsNullOrWhiteSpace(skinColor) ? "#4DBFFF" : skinColor;
+        _networkSkinColor = string.IsNullOrWhiteSpace(skinColor) ? "#FFFFFF" : skinColor;
         ApplyNetworkSkin();
         _networkConsumableQuantity = Mathf.Max(0, consumableQuantity);
         _networkConsumableHealAmount = Mathf.Max(0f, consumableHealAmount);
@@ -892,7 +937,7 @@ public class PlayerController : MonoBehaviour
         SpriteRenderer decoyRenderer = decoy.AddComponent<SpriteRenderer>();
         SpriteRenderer sourceRenderer = GetPlayerRenderer();
         decoyRenderer.sprite = sourceRenderer != null ? sourceRenderer.sprite : SimpleSprite.Square;
-        Color decoyColor = sourceRenderer != null ? sourceRenderer.color : PlayerLoadout.GetSkinColor();
+        Color decoyColor = sourceRenderer != null ? sourceRenderer.color : Color.white;
         decoyColor.a = _normalAlpha;
         decoyRenderer.color = decoyColor;
         decoyRenderer.sortingOrder = sourceRenderer != null ? sourceRenderer.sortingOrder - 1 : 4;
@@ -1026,10 +1071,44 @@ public class PlayerController : MonoBehaviour
         float angle = Mathf.Atan2(aim.y, aim.x) * Mathf.Rad2Deg;
         weapon.transform.rotation = Quaternion.Euler(0f, 0f, angle);
 
-        SpriteRenderer renderer = weapon.AddComponent<SpriteRenderer>();
-        renderer.sprite = SimpleSprite.Square;
-        renderer.color = GetAttackColor(0.95f);
-        renderer.sortingOrder = 12;
+        if (boomerang)
+        {
+            SwordSwingVisualSettings visualSettings = ResolveSwordSwingVisualSettings();
+            if (visualSettings.sprite != null)
+            {
+                CreateSwordWeaponVisual(weapon.transform, visualSettings, 12, true);
+            }
+            else
+            {
+                SpriteRenderer renderer = weapon.AddComponent<SpriteRenderer>();
+                renderer.sprite = SimpleSprite.Square;
+                renderer.color = GetAttackColor(0.95f);
+                renderer.sortingOrder = 12;
+            }
+
+            _hideCarriedSwordUntil = Mathf.Max(
+                _hideCarriedSwordUntil,
+                Time.time + Mathf.Max(0.05f, weaponThrowLife * rangeMultiplier));
+        }
+        else
+        {
+            SpearVisualSettings visualSettings = ResolveSpearVisualSettings();
+            if (visualSettings.sprite != null)
+            {
+                CreateWeaponVisual(weapon.transform, visualSettings, 12, true);
+            }
+            else
+            {
+                SpriteRenderer renderer = weapon.AddComponent<SpriteRenderer>();
+                renderer.sprite = SimpleSprite.Square;
+                renderer.color = GetAttackColor(0.95f);
+                renderer.sortingOrder = 12;
+            }
+
+            _hideCarriedSpearUntil = Mathf.Max(
+                _hideCarriedSpearUntil,
+                Time.time + Mathf.Max(0.05f, weaponThrowLife * rangeMultiplier));
+        }
 
         BoxCollider2D box = weapon.AddComponent<BoxCollider2D>();
         box.isTrigger = true;
@@ -1183,6 +1262,7 @@ public class PlayerController : MonoBehaviour
         if (direction.sqrMagnitude < 0.001f)
             direction = Vector2.down;
         direction.Normalize();
+        TriggerAttackVisual(lifeOverride);
 
         WeaponKind weaponKind = GetWeaponKind();
         if (weaponKind == WeaponKind.Sword)
@@ -1206,6 +1286,10 @@ public class PlayerController : MonoBehaviour
         float usedRange = range * usedScale;
         float usedLength = length * usedScale;
         float usedWidth = width * usedScale;
+        SpearVisualSettings visualSettings = ResolveSpearVisualSettings();
+        float usedLife = lifeOverride > 0f ? lifeOverride : time;
+        bool chargedStab = rangeMultiplier > 1.01f && lifeOverride > 0f;
+        _hideCarriedSpearUntil = Mathf.Max(_hideCarriedSpearUntil, Time.time + usedLife);
 
         GameObject slash = new GameObject("PlayerSlash");
         slash.transform.position = transform.position + (Vector3)direction * usedRange;
@@ -1213,10 +1297,27 @@ public class PlayerController : MonoBehaviour
         float angle = Mathf.Atan2(direction.y, direction.x) * Mathf.Rad2Deg;
         slash.transform.rotation = Quaternion.Euler(0f, 0f, angle);
 
-        SpriteRenderer renderer = slash.AddComponent<SpriteRenderer>();
-        renderer.sprite = SimpleSprite.Square;
-        renderer.color = GetAttackColor(0.35f);
-        renderer.sortingOrder = 10;
+        Sprite spearAttackSprite = visualSettings.sprite;
+        if (spearAttackSprite != null)
+        {
+            GameObject visual = chargedStab
+                ? CreateSpearChargeVisual(direction, visualSettings, usedLife, usedLength, usedWidth)
+                : CreateWeaponVisual(slash.transform, visualSettings, 10, true);
+            if (visual != null)
+            {
+                SpearThrustVisual thrust = visual.AddComponent<SpearThrustVisual>();
+                thrust.baseLocalPosition = visual.transform.localPosition;
+                thrust.thrustDistance = visualSettings.thrustDistance / Mathf.Max(usedLength, 0.001f);
+                thrust.duration = usedLife;
+            }
+        }
+        else
+        {
+            SpriteRenderer renderer = slash.AddComponent<SpriteRenderer>();
+            renderer.sprite = SimpleSprite.Square;
+            renderer.color = GetAttackColor(0.35f);
+            renderer.sortingOrder = 10;
+        }
 
         BoxCollider2D box = slash.AddComponent<BoxCollider2D>();
         box.isTrigger = true;
@@ -1227,7 +1328,7 @@ public class PlayerController : MonoBehaviour
 
         HitBox hit = slash.AddComponent<HitBox>();
         hit.hitsPlayer = false;
-        hit.life = lifeOverride > 0f ? lifeOverride : time;
+        hit.life = usedLife;
         hit.damage = Mathf.Max(1, Mathf.RoundToInt(GetWeaponDamage() * Mathf.Max(1f, damageMultiplier)));
         hit.ownerPlayerIndex = playerIndex;
         hit.visualColor = GetAttackColor(0.35f);
@@ -1239,16 +1340,34 @@ public class PlayerController : MonoBehaviour
         float usedRange = range * swordRangeMultiplier * usedScale;
         float usedLength = length * 0.75f * usedScale;
         float usedWidth = width * swordWidthMultiplier * usedScale;
-        float usedLife = lifeOverride > 0f ? lifeOverride : Mathf.Max(time, 0.16f);
+        SwordSwingVisualSettings visualSettings = ResolveSwordSwingVisualSettings();
+        float usedLife = (lifeOverride > 0f ? lifeOverride : Mathf.Max(time, 0.16f))
+            * Mathf.Max(0.01f, visualSettings.durationMultiplier);
+        _hideCarriedSwordUntil = Mathf.Max(_hideCarriedSwordUntil, Time.time + usedLife);
 
         GameObject slash = new GameObject("PlayerSwordSwing");
         slash.transform.position = transform.position + (Vector3)direction * usedRange;
         slash.transform.localScale = new Vector3(usedLength, usedWidth, 1f);
 
-        SpriteRenderer renderer = slash.AddComponent<SpriteRenderer>();
-        renderer.sprite = SimpleSprite.Square;
-        renderer.color = GetAttackColor(0.42f);
-        renderer.sortingOrder = 10;
+        Sprite swordSprite = visualSettings.sprite;
+        bool chargedSwing = rangeMultiplier > 1.01f;
+        if (chargedSwing)
+            CreateChargeHitboxVisual(slash.transform, 9);
+
+        if (swordSprite != null)
+        {
+            SwordSwingVisualSettings usedVisualSettings = chargedSwing
+                ? GetChargeSwordVisualSettings(visualSettings, usedRange)
+                : visualSettings;
+            CreateSwordWeaponVisual(slash.transform, usedVisualSettings, 10, true);
+        }
+        else
+        {
+            SpriteRenderer renderer = slash.AddComponent<SpriteRenderer>();
+            renderer.sprite = SimpleSprite.Square;
+            renderer.color = GetAttackColor(0.42f);
+            renderer.sortingOrder = 10;
+        }
 
         BoxCollider2D box = slash.AddComponent<BoxCollider2D>();
         box.isTrigger = true;
@@ -1495,6 +1614,154 @@ public class PlayerController : MonoBehaviour
         renderer.color = color;
     }
 
+    private void UpdateCarriedSwordVisual()
+    {
+        SwordSwingVisualSettings visualSettings = ResolveSwordSwingVisualSettings();
+        Sprite sprite = visualSettings.sprite;
+        bool visible = GetWeaponKind() == WeaponKind.Sword
+            && sprite != null
+            && Time.time >= _hideCarriedSwordUntil;
+
+        if (!visible)
+        {
+            if (_carriedSwordRenderer != null)
+                _carriedSwordRenderer.enabled = false;
+            return;
+        }
+
+        EnsureCarriedSwordVisual();
+        if (_carriedSwordRenderer == null || _carriedSwordTransform == null)
+            return;
+
+        if (_appliedCarriedSwordSprite != sprite)
+        {
+            _carriedSwordRenderer.sprite = sprite;
+            _appliedCarriedSwordSprite = sprite;
+        }
+
+        _carriedSwordRenderer.enabled = true;
+        UpdateCarriedSwordFacing();
+        _carriedSwordRenderer.flipX = _carriedSwordFacingLeft;
+        SpriteRenderer playerRenderer = GetPlayerRenderer();
+        _carriedSwordRenderer.sortingOrder = playerRenderer != null
+            ? playerRenderer.sortingOrder + visualSettings.carriedSortingOrderOffset
+            : 5;
+        float facingSign = _carriedSwordFacingLeft ? -1f : 1f;
+        _carriedSwordTransform.localPosition = new Vector3(
+            visualSettings.carriedOffset.x * facingSign,
+            visualSettings.carriedOffset.y,
+            0f);
+        _carriedSwordTransform.localRotation = Quaternion.Euler(
+            0f,
+            0f,
+            visualSettings.carriedRotationOffset * facingSign);
+        _carriedSwordTransform.localScale = new Vector3(
+            Mathf.Approximately(visualSettings.carriedScale.x, 0f) ? 1f : visualSettings.carriedScale.x,
+            Mathf.Approximately(visualSettings.carriedScale.y, 0f) ? 1f : visualSettings.carriedScale.y,
+            1f);
+    }
+
+    private void UpdateCarriedSwordFacing()
+    {
+        float x = LastMoveInput.x;
+        if (x < -0.001f)
+            _carriedSwordFacingLeft = true;
+        else if (x > 0.001f)
+            _carriedSwordFacingLeft = false;
+    }
+
+    private void EnsureCarriedSwordVisual()
+    {
+        if (_carriedSwordRenderer != null && _carriedSwordTransform != null)
+            return;
+
+        Transform existing = transform.Find("CarriedSwordVisual");
+        GameObject visual = existing != null ? existing.gameObject : new GameObject("CarriedSwordVisual");
+        visual.transform.SetParent(transform, false);
+        _carriedSwordTransform = visual.transform;
+        _carriedSwordRenderer = visual.GetComponent<SpriteRenderer>();
+        if (_carriedSwordRenderer == null)
+            _carriedSwordRenderer = visual.AddComponent<SpriteRenderer>();
+        _carriedSwordRenderer.color = Color.white;
+    }
+
+    private void UpdateCarriedSpearVisual()
+    {
+        SpearVisualSettings visualSettings = ResolveSpearVisualSettings();
+        Sprite sprite = visualSettings.sprite;
+        bool visible = GetWeaponKind() == WeaponKind.Spear
+            && sprite != null
+            && Time.time >= _hideCarriedSpearUntil;
+
+        if (!visible)
+        {
+            if (_carriedSpearRenderer != null)
+                _carriedSpearRenderer.enabled = false;
+            return;
+        }
+
+        EnsureCarriedSpearVisual();
+        if (_carriedSpearRenderer == null || _carriedSpearTransform == null)
+            return;
+
+        if (_appliedCarriedSpearSprite != sprite)
+        {
+            _carriedSpearRenderer.sprite = sprite;
+            _appliedCarriedSpearSprite = sprite;
+        }
+
+        _carriedSpearRenderer.enabled = true;
+        UpdateCarriedSpearFacing();
+        _carriedSpearRenderer.flipX = _carriedSpearFacingLeft;
+        SpriteRenderer playerRenderer = GetPlayerRenderer();
+        _carriedSpearRenderer.sortingOrder = playerRenderer != null
+            ? playerRenderer.sortingOrder + Mathf.Max(1, visualSettings.carriedSortingOrderOffset)
+            : 5;
+        float facingSign = _carriedSpearFacingLeft ? -1f : 1f;
+        _carriedSpearTransform.localPosition = new Vector3(
+            visualSettings.carriedOffset.x * facingSign,
+            visualSettings.carriedOffset.y,
+            0f);
+        _carriedSpearTransform.localRotation = Quaternion.Euler(
+            0f,
+            0f,
+            visualSettings.carriedRotationOffset * facingSign);
+        _carriedSpearTransform.localScale = new Vector3(
+            Mathf.Approximately(visualSettings.carriedScale.x, 0f) ? 1f : visualSettings.carriedScale.x,
+            Mathf.Approximately(visualSettings.carriedScale.y, 0f) ? 1f : visualSettings.carriedScale.y,
+            1f);
+    }
+
+    private void UpdateCarriedSpearFacing()
+    {
+        float x = LastMoveInput.x;
+        if (x < -0.001f)
+            _carriedSpearFacingLeft = true;
+        else if (x > 0.001f)
+            _carriedSpearFacingLeft = false;
+    }
+
+    private void EnsureCarriedSpearVisual()
+    {
+        if (_carriedSpearRenderer != null && _carriedSpearTransform != null)
+            return;
+
+        Transform existing = transform.Find("CarriedSpearVisual");
+        GameObject visual = existing != null ? existing.gameObject : new GameObject("CarriedSpearVisual");
+        visual.transform.SetParent(transform, false);
+        _carriedSpearTransform = visual.transform;
+        _carriedSpearRenderer = visual.GetComponent<SpriteRenderer>();
+        if (_carriedSpearRenderer == null)
+            _carriedSpearRenderer = visual.AddComponent<SpriteRenderer>();
+        _carriedSpearRenderer.color = Color.white;
+    }
+
+    public void OnThrownSwordEnded()
+    {
+        _hideCarriedSwordUntil = Mathf.Min(_hideCarriedSwordUntil, Time.time);
+        UpdateCarriedSwordVisual();
+    }
+
     private Vector2 GetCurrentAim()
     {
         Vector2 aim = ReadMouseAimDirection();
@@ -1530,6 +1797,331 @@ public class PlayerController : MonoBehaviour
             1f);
     }
 
+    private Sprite ResolveSwordSwingSprite()
+    {
+        if (swordSwingSprite != null)
+            return swordSwingSprite;
+
+        if (swordSwingTexture == null)
+            return null;
+
+        if (_cachedSwordSwingTextureSprite == null || _cachedSwordSwingTexture != swordSwingTexture)
+        {
+            _cachedSwordSwingTexture = swordSwingTexture;
+            _cachedSwordSwingTextureSprite = Sprite.Create(
+                swordSwingTexture,
+                new Rect(0f, 0f, swordSwingTexture.width, swordSwingTexture.height),
+                new Vector2(0.5f, 0.5f),
+                Mathf.Max(1, swordSwingTexture.width));
+        }
+
+        return _cachedSwordSwingTextureSprite;
+    }
+
+    private Sprite ResolveSpearSprite()
+    {
+        if (spearSprite != null)
+            return spearSprite;
+
+        if (spearTexture == null)
+            return null;
+
+        if (_cachedSpearTextureSprite == null || _cachedSpearTexture != spearTexture)
+        {
+            _cachedSpearTexture = spearTexture;
+            _cachedSpearTextureSprite = Sprite.Create(
+                spearTexture,
+                new Rect(0f, 0f, spearTexture.width, spearTexture.height),
+                new Vector2(0.5f, 0.5f),
+                Mathf.Max(1, spearTexture.width));
+        }
+
+        return _cachedSpearTextureSprite;
+    }
+
+    private GameObject CreateSwordWeaponVisual(
+        Transform parent,
+        SwordSwingVisualSettings visualSettings,
+        int sortingOrder,
+        bool compensateParentScale)
+    {
+        return CreateWeaponVisual(
+            parent,
+            visualSettings.sprite,
+            visualSettings.offset,
+            visualSettings.scale,
+            visualSettings.rotationOffset,
+            sortingOrder,
+            compensateParentScale);
+    }
+
+    private GameObject CreateWeaponVisual(
+        Transform parent,
+        SpearVisualSettings visualSettings,
+        int sortingOrder,
+        bool compensateParentScale)
+    {
+        return CreateWeaponVisual(
+            parent,
+            visualSettings.sprite,
+            visualSettings.offset,
+            visualSettings.scale,
+            visualSettings.rotationOffset,
+            sortingOrder,
+            compensateParentScale);
+    }
+
+    private GameObject CreateSpearChargeVisual(
+        Vector2 direction,
+        SpearVisualSettings visualSettings,
+        float usedLife,
+        float usedLength,
+        float usedWidth)
+    {
+        if (visualSettings.sprite == null)
+            return null;
+
+        if (direction.sqrMagnitude < 0.001f)
+            direction = Vector2.down;
+        direction.Normalize();
+
+        GameObject root = new GameObject("SpearChargeVisual");
+        root.transform.position = transform.position;
+        root.transform.rotation = Quaternion.Euler(0f, 0f, Mathf.Atan2(direction.y, direction.x) * Mathf.Rad2Deg);
+        root.transform.localScale = new Vector3(usedLength, usedWidth, 1f);
+
+        GameObject visual = CreateWeaponVisual(root.transform, visualSettings, 10, true);
+        StartCoroutine(FollowSpearChargeVisual(root.transform, direction, usedLife));
+        Destroy(root, Mathf.Max(0.01f, usedLife));
+        return visual;
+    }
+
+    private IEnumerator FollowSpearChargeVisual(Transform root, Vector2 direction, float duration)
+    {
+        float endAt = Time.time + Mathf.Max(0.01f, duration);
+        Quaternion rotation = Quaternion.Euler(0f, 0f, Mathf.Atan2(direction.y, direction.x) * Mathf.Rad2Deg);
+        while (root != null && Time.time < endAt)
+        {
+            root.position = transform.position;
+            root.rotation = rotation;
+            yield return null;
+        }
+    }
+
+    private GameObject CreateWeaponVisual(
+        Transform parent,
+        Sprite sprite,
+        Vector2 offset,
+        Vector2 scale,
+        float rotationOffset,
+        int sortingOrder,
+        bool compensateParentScale)
+    {
+        if (parent == null || sprite == null)
+            return null;
+
+        GameObject visual = new GameObject("WeaponVisual");
+        visual.transform.SetParent(parent, false);
+
+        Vector3 parentScale = parent.localScale;
+        float parentScaleX = Mathf.Approximately(parentScale.x, 0f) ? 1f : parentScale.x;
+        float parentScaleY = Mathf.Approximately(parentScale.y, 0f) ? 1f : parentScale.y;
+        float visualScaleX = Mathf.Approximately(scale.x, 0f) ? 1f : scale.x;
+        float visualScaleY = Mathf.Approximately(scale.y, 0f) ? 1f : scale.y;
+
+        visual.transform.localPosition = compensateParentScale
+            ? new Vector3(offset.x / parentScaleX, offset.y / parentScaleY, 0f)
+            : new Vector3(offset.x, offset.y, 0f);
+        visual.transform.localRotation = Quaternion.Euler(0f, 0f, rotationOffset);
+        visual.transform.localScale = compensateParentScale
+            ? new Vector3(visualScaleX / parentScaleX, visualScaleY / parentScaleY, 1f)
+            : new Vector3(visualScaleX, visualScaleY, 1f);
+
+        SpriteRenderer visualRenderer = visual.AddComponent<SpriteRenderer>();
+        visualRenderer.sprite = sprite;
+        visualRenderer.color = Color.white;
+        visualRenderer.sortingOrder = sortingOrder;
+        return visual;
+    }
+
+    private SwordSwingVisualSettings GetChargeSwordVisualSettings(SwordSwingVisualSettings visualSettings, float usedRange)
+    {
+        float normalRange = range * swordRangeMultiplier;
+        float extraRange = Mathf.Max(0f, usedRange - normalRange);
+        visualSettings.offset = new Vector2(
+            visualSettings.offset.x - extraRange,
+            visualSettings.offset.y);
+        return visualSettings;
+    }
+
+    private void CreateChargeHitboxVisual(Transform parent, int sortingOrder)
+    {
+        if (parent == null)
+            return;
+
+        CreateChargeGlowPiece(parent, "ChargeFaintLight", Vector2.zero, Vector2.one, new Color(0.55f, 0.90f, 1f, 0.18f), sortingOrder);
+        CreateChargeGlowPiece(parent, "ChargeSoftCenter", Vector2.zero, new Vector2(0.72f, 0.48f), new Color(0.85f, 1f, 1f, 0.10f), sortingOrder + 1);
+    }
+
+    private void CreateChargeGlowPiece(
+        Transform parent,
+        string name,
+        Vector2 position,
+        Vector2 scale,
+        Color color,
+        int sortingOrder)
+    {
+        GameObject piece = new GameObject(name);
+        piece.transform.SetParent(parent, false);
+        piece.transform.localPosition = new Vector3(position.x, position.y, 0f);
+        piece.transform.localRotation = Quaternion.identity;
+        piece.transform.localScale = new Vector3(scale.x, scale.y, 1f);
+        SpriteRenderer renderer = piece.AddComponent<SpriteRenderer>();
+        renderer.sprite = ResolveChargeHitboxGlowSprite();
+        renderer.color = color;
+        renderer.sortingOrder = sortingOrder;
+    }
+
+    private static Sprite ResolveChargeHitboxGlowSprite()
+    {
+        if (_chargeHitboxGlowSprite != null)
+            return _chargeHitboxGlowSprite;
+
+        const int size = 64;
+        _chargeHitboxGlowTexture = new Texture2D(size, size, TextureFormat.RGBA32, false);
+        _chargeHitboxGlowTexture.name = "GeneratedChargeHitboxGlow";
+        _chargeHitboxGlowTexture.filterMode = FilterMode.Bilinear;
+        _chargeHitboxGlowTexture.wrapMode = TextureWrapMode.Clamp;
+
+        Color[] pixels = new Color[size * size];
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                float u = ((float)x + 0.5f) / size;
+                float v = ((float)y + 0.5f) / size;
+                float dx = Mathf.Abs(u - 0.5f) * 2f;
+                float dy = Mathf.Abs(v - 0.5f) * 2f;
+                float edgeDistance = Mathf.Max(dx, dy);
+                float alpha = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(1f - edgeDistance));
+                alpha *= alpha;
+                pixels[y * size + x] = new Color(1f, 1f, 1f, alpha);
+            }
+        }
+
+        _chargeHitboxGlowTexture.SetPixels(pixels);
+        _chargeHitboxGlowTexture.Apply();
+        _chargeHitboxGlowSprite = Sprite.Create(
+            _chargeHitboxGlowTexture,
+            new Rect(0f, 0f, size, size),
+            new Vector2(0.5f, 0.5f),
+            size);
+        return _chargeHitboxGlowSprite;
+    }
+
+    private SwordSwingVisualSettings ResolveSwordSwingVisualSettings()
+    {
+        if (WeaponVisualDatabase.TryGetSwordVisualGlobal(GetWeaponItemId(), out WeaponVisualEntry visual))
+        {
+            Sprite sprite = visual.ResolveSwordSwingSprite();
+            if (sprite != null)
+            {
+                return new SwordSwingVisualSettings
+                {
+                    sprite = sprite,
+                    offset = visual.swordSwingVisualOffset,
+                    scale = visual.swordSwingVisualScale,
+                    rotationOffset = visual.swordSwingVisualRotationOffset,
+                    durationMultiplier = visual.swordSwingDurationMultiplier,
+                    carriedOffset = visual.carriedSwordVisualOffset,
+                    carriedScale = visual.carriedSwordVisualScale,
+                    carriedRotationOffset = visual.carriedSwordVisualRotationOffset,
+                    carriedSortingOrderOffset = visual.carriedSwordSortingOrderOffset
+                };
+            }
+        }
+
+        return new SwordSwingVisualSettings
+        {
+            sprite = ResolveSwordSwingSprite(),
+            offset = swordSwingVisualOffset,
+            scale = swordSwingVisualScale,
+            rotationOffset = swordSwingVisualRotationOffset,
+            durationMultiplier = swordSwingDurationMultiplier,
+            carriedOffset = carriedSwordVisualOffset,
+            carriedScale = carriedSwordVisualScale,
+            carriedRotationOffset = carriedSwordVisualRotationOffset,
+            carriedSortingOrderOffset = carriedSwordSortingOrderOffset
+        };
+    }
+
+    private SpearVisualSettings ResolveSpearVisualSettings()
+    {
+        if (WeaponVisualDatabase.TryGetSpearVisualGlobal(GetWeaponItemId(), out WeaponVisualEntry visual))
+        {
+            Sprite sprite = visual.ResolveSpearSprite();
+            if (sprite != null)
+            {
+                return new SpearVisualSettings
+                {
+                    sprite = sprite,
+                    offset = visual.spearVisualOffset,
+                    scale = visual.spearVisualScale,
+                    rotationOffset = visual.spearVisualRotationOffset,
+                    thrustDistance = visual.spearThrustDistance,
+                    carriedOffset = visual.carriedSpearVisualOffset,
+                    carriedScale = visual.carriedSpearVisualScale,
+                    carriedRotationOffset = visual.carriedSpearVisualRotationOffset,
+                    carriedSortingOrderOffset = visual.carriedSpearSortingOrderOffset
+                };
+            }
+        }
+
+        return new SpearVisualSettings
+        {
+            sprite = ResolveSpearSprite(),
+            offset = spearVisualOffset,
+            scale = spearVisualScale,
+            rotationOffset = spearVisualRotationOffset,
+            thrustDistance = spearThrustDistance,
+            carriedOffset = carriedSpearVisualOffset,
+            carriedScale = carriedSpearVisualScale,
+            carriedRotationOffset = carriedSpearVisualRotationOffset,
+            carriedSortingOrderOffset = carriedSpearSortingOrderOffset
+        };
+    }
+
+    private int GetWeaponItemId()
+    {
+        return _hasNetworkLoadout ? _networkWeaponItemId : PlayerLoadout.EquippedWeaponItemId;
+    }
+
+    private struct SwordSwingVisualSettings
+    {
+        public Sprite sprite;
+        public Vector2 offset;
+        public Vector2 scale;
+        public float rotationOffset;
+        public float durationMultiplier;
+        public Vector2 carriedOffset;
+        public Vector2 carriedScale;
+        public float carriedRotationOffset;
+        public int carriedSortingOrderOffset;
+    }
+
+    private struct SpearVisualSettings
+    {
+        public Sprite sprite;
+        public Vector2 offset;
+        public Vector2 scale;
+        public float rotationOffset;
+        public float thrustDistance;
+        public Vector2 carriedOffset;
+        public Vector2 carriedScale;
+        public float carriedRotationOffset;
+        public int carriedSortingOrderOffset;
+    }
+
     private Color GetAttackColor(float alpha)
     {
         Color color = _hasNetworkLoadout ? _networkWeaponColor : PlayerLoadout.WeaponColor;
@@ -1543,6 +2135,23 @@ public class PlayerController : MonoBehaviour
         if (renderer == null) return;
 
         PlayerSkinVisuals.Apply(renderer, _networkSkinId, _networkSkinColor, renderer.sharedMaterial);
+        PlayerAnimator animator = renderer.GetComponent<PlayerAnimator>();
+        if (animator != null)
+            animator.RefreshSkin();
+    }
+
+    private void TriggerAttackVisual(float lifeOverride)
+    {
+        SpriteRenderer renderer = GetPlayerRenderer();
+        if (renderer == null)
+            return;
+
+        PlayerAnimator animator = renderer.GetComponent<PlayerAnimator>();
+        if (animator == null)
+            return;
+
+        float visualDuration = lifeOverride > 0f ? lifeOverride : time;
+        animator.TriggerAttack(Mathf.Clamp(visualDuration, 0.08f, 0.18f));
     }
 
     private float GetSpeedBoostMultiplier()

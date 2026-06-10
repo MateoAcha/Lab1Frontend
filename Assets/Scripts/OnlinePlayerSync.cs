@@ -6,7 +6,8 @@ public class OnlinePlayerSync : MonoBehaviour
     public Vector3 RemotePlayerPosition { get; private set; }
     public Vector3 RemotePlayerVelocity { get; private set; }
     public int RemoteSkinId { get; private set; }
-    public string RemoteSkinColor { get; private set; } = "#4DBFFF";
+    public string RemoteSkinColor { get; private set; } = "#FFFFFF";
+    public int RemoteAttackSequence { get; private set; }
     public float RemoteHp { get; private set; } = 10f;
     public float RemoteMaxHp { get; private set; } = 10f;
     public bool HasRemotePlayer { get; private set; }
@@ -26,12 +27,13 @@ public class OnlinePlayerSync : MonoBehaviour
         SetRemoteState(pos, velocity, skinId, skinColor, RemoteHp, RemoteMaxHp);
     }
 
-    public void SetRemoteState(Vector3 pos, Vector3 velocity, int skinId, string skinColor, float hp, float maxHp)
+    public void SetRemoteState(Vector3 pos, Vector3 velocity, int skinId, string skinColor, float hp, float maxHp, int attackSequence = 0)
     {
         RemotePlayerPosition = pos;
         RemotePlayerVelocity = velocity;
         RemoteSkinId = Mathf.Max(0, skinId);
-        RemoteSkinColor = string.IsNullOrWhiteSpace(skinColor) ? "#4DBFFF" : skinColor;
+        RemoteSkinColor = string.IsNullOrWhiteSpace(skinColor) ? "#FFFFFF" : skinColor;
+        RemoteAttackSequence = Mathf.Max(0, attackSequence);
         RemoteMaxHp = Mathf.Max(0.01f, maxHp);
         RemoteHp = Mathf.Clamp(hp, 0f, RemoteMaxHp);
         HasRemotePlayer = true;

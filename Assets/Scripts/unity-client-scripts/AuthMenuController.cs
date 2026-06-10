@@ -59,6 +59,9 @@ public class AuthMenuController : MonoBehaviour
     [Header("Skin Visuals")]
     public SkinVisualDatabase skinVisualDatabase;
 
+    [Header("Weapon Visuals")]
+    public WeaponVisualDatabase weaponVisualDatabase;
+
     [Header("Play")]
     public GameObject gamePrefab;
     public Transform gameParent;
@@ -181,6 +184,8 @@ public class AuthMenuController : MonoBehaviour
     private void Start()
     {
         GameUiThemeRuntime.SetTheme(uiTheme);
+        SkinVisualDatabase.Register(skinVisualDatabase);
+        WeaponVisualDatabase.Register(weaponVisualDatabase);
         _lastOnlineServerUrl = PlayerPrefs.GetString(LastOnlineServerPrefsKey, "");
         AuthSession.LoadFromPrefs(apiBaseUrl);
         ApplyServerUrl(string.IsNullOrWhiteSpace(AuthSession.CurrentServerUrl)

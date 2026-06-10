@@ -8,6 +8,10 @@ public class RemotePlayerGhost : MonoBehaviour
     private Health _health;
     private int _appliedSkinId = -1;
     private string _appliedSkinColor = "";
+    private int _appliedAttackSequence;
+
+    public int CurrentSkinId => OnlinePlayerSync.Instance != null ? OnlinePlayerSync.Instance.RemoteSkinId : 0;
+    public Vector3 CurrentVelocity => OnlinePlayerSync.Instance != null ? OnlinePlayerSync.Instance.RemotePlayerVelocity : Vector3.zero;
 
     private void Awake()
     {
@@ -35,6 +39,7 @@ public class RemotePlayerGhost : MonoBehaviour
         if (!visible) return;
 
         ApplyRemoteSkinIfChanged();
+        ApplyRemoteAttackIfChanged();
         ApplyRemoteHealth();
 
         Vector3 target = OnlinePlayerSync.Instance.RemotePlayerPosition
@@ -56,8 +61,26 @@ public class RemotePlayerGhost : MonoBehaviour
             return;
 
         PlayerSkinVisuals.Apply(_sr, skinId, skinColor, _sr.sharedMaterial);
+        PlayerAnimator animator = _sr.GetComponent<PlayerAnimator>();
+        if (animator != null)
+            animator.RefreshSkin();
         _appliedSkinId = skinId;
         _appliedSkinColor = skinColor;
+    }
+
+    private void ApplyRemoteAttackIfChanged()
+    {
+        if (_sr == null || OnlinePlayerSync.Instance == null)
+            return;
+
+        int attackSequence = OnlinePlayerSync.Instance.RemoteAttackSequence;
+        if (attackSequence <= 0 || attackSequence == _appliedAttackSequence)
+            return;
+
+        PlayerAnimator animator = _sr.GetComponent<PlayerAnimator>();
+        if (animator != null)
+            animator.TriggerAttack(0.14f);
+        _appliedAttackSequence = attackSequence;
     }
 
     private void ApplyRemoteHealth()

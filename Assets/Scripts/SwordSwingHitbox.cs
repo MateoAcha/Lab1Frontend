@@ -28,7 +28,11 @@ public class SwordSwingHitbox : MonoBehaviour
     private void UpdatePose(float progress)
     {
         float baseAngle = Mathf.Atan2(direction.y, direction.x) * Mathf.Rad2Deg;
-        float swingOffset = Mathf.Lerp(-arcDegrees * 0.5f, arcDegrees * 0.5f, progress);
+        float halfArc = arcDegrees * 0.5f;
+        bool facingRight = direction.x >= 0f;
+        float swingOffset = facingRight
+            ? Mathf.Lerp(halfArc, -halfArc, progress)
+            : Mathf.Lerp(-halfArc, halfArc, progress);
         float angle = baseAngle + swingOffset;
         Vector2 swungDirection = Quaternion.Euler(0f, 0f, swingOffset) * direction;
         Vector3 origin = owner != null ? owner.position : transform.position;

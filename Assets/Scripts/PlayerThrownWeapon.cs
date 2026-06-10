@@ -17,6 +17,7 @@ public class PlayerThrownWeapon : MonoBehaviour
     private Vector2 _origin;
     private float _dieAt;
     private bool _returning;
+    private bool _notifiedBoomerangEnded;
     private readonly HashSet<int> _hitIds = new HashSet<int>();
 
     private void Start()
@@ -36,6 +37,7 @@ public class PlayerThrownWeapon : MonoBehaviour
         float dt = Time.deltaTime;
         if (Time.time >= _dieAt)
         {
+            NotifyBoomerangEnded();
             Destroy(gameObject);
             return;
         }
@@ -69,6 +71,7 @@ public class PlayerThrownWeapon : MonoBehaviour
         {
             if (owner == null)
             {
+                NotifyBoomerangEnded();
                 Destroy(gameObject);
                 return;
             }
@@ -76,6 +79,7 @@ public class PlayerThrownWeapon : MonoBehaviour
             Vector2 toOwner = (Vector2)owner.position - position;
             if (toOwner.magnitude <= 0.45f)
             {
+                NotifyBoomerangEnded();
                 Destroy(gameObject);
                 return;
             }
@@ -86,6 +90,25 @@ public class PlayerThrownWeapon : MonoBehaviour
         float usedSpeed = _returning ? Mathf.Max(0.1f, returnSpeed) : Mathf.Max(0.1f, speed);
         transform.position += (Vector3)(moveDirection * (usedSpeed * dt));
         transform.Rotate(0f, 0f, 860f * dt);
+    }
+
+    private void OnDestroy()
+    {
+        NotifyBoomerangEnded();
+    }
+
+    private void NotifyBoomerangEnded()
+    {
+        if (!boomerang || _notifiedBoomerangEnded)
+            return;
+
+        _notifiedBoomerangEnded = true;
+        if (owner == null)
+            return;
+
+        PlayerController controller = owner.GetComponent<PlayerController>();
+        if (controller != null)
+            controller.OnThrownSwordEnded();
     }
 
     private void OnTriggerEnter2D(Collider2D other)

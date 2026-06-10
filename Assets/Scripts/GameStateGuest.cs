@@ -112,6 +112,7 @@ public class GameStateGuest : MonoBehaviour
             burstSeq = player != null ? player.NetworkBurstSequence : 0,
             consumableSeq = player != null ? player.NetworkConsumableSequence : 0,
             weaponDamage = Mathf.Max(1, PlayerLoadout.WeaponDamage),
+            weaponItemId = PlayerLoadout.EquippedWeaponItemId,
             weaponType = PlayerLoadout.CurrentWeaponKind.ToString(),
             weaponColor = PlayerLoadout.WeaponColorHex,
             skinId = PlayerLoadout.EquippedSkinId,
@@ -181,6 +182,7 @@ public class GameStateGuest : MonoBehaviour
         if (input.chargeSeq != _lastSentInput.chargeSeq) return true;
         if (input.burstSeq != _lastSentInput.burstSeq) return true;
         if (input.consumableSeq != _lastSentInput.consumableSeq) return true;
+        if (input.weaponItemId != _lastSentInput.weaponItemId) return true;
         if (!string.Equals(input.weaponType, _lastSentInput.weaponType, StringComparison.Ordinal)) return true;
         if (!string.Equals(input.weaponColor, _lastSentInput.weaponColor, StringComparison.Ordinal)) return true;
         if (input.skinId != _lastSentInput.skinId) return true;
@@ -341,7 +343,8 @@ public class GameStateGuest : MonoBehaviour
             state.skinId,
             state.skinColor,
             state.hp,
-            state.maxHp);
+            state.maxHp,
+            state.attackSeq);
     }
 
     private void ApplyLocalGuestPlayer(OnlinePlayerState state, bool matchEnded)

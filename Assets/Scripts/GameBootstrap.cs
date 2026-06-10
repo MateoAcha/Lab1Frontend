@@ -34,6 +34,31 @@ public class GameBootstrap : MonoBehaviour
     public Material rangedEnemyMaterial;
     public Material enemyProjectileMaterial;
     public SkinVisualDatabase skinVisualDatabase;
+    public WeaponVisualDatabase weaponVisualDatabase;
+    [Header("Sword Visual")]
+    public Sprite swordSwingSprite;
+    public Texture2D swordSwingTexture;
+    public Vector2 swordSwingVisualOffset = Vector2.zero;
+    public Vector2 swordSwingVisualScale = Vector2.one;
+    public float swordSwingVisualRotationOffset;
+    public float swordSwingDurationMultiplier = 1.5f;
+    [Header("Carried Sword Visual")]
+    public Vector2 carriedSwordVisualOffset = new Vector2(-0.18f, 0.18f);
+    public Vector2 carriedSwordVisualScale = Vector2.one;
+    public float carriedSwordVisualRotationOffset = -35f;
+    public int carriedSwordSortingOrderOffset = -1;
+    [Header("Spear Visual")]
+    public Sprite spearSprite;
+    public Texture2D spearTexture;
+    public Vector2 spearVisualOffset = Vector2.zero;
+    public Vector2 spearVisualScale = Vector2.one;
+    public float spearVisualRotationOffset;
+    public float spearThrustDistance = 0.35f;
+    [Header("Carried Spear Visual")]
+    public Vector2 carriedSpearVisualOffset = new Vector2(-0.18f, 0.12f);
+    public Vector2 carriedSpearVisualScale = Vector2.one;
+    public float carriedSpearVisualRotationOffset = -35f;
+    public int carriedSpearSortingOrderOffset = 1;
     [Header("Rocks")]
     public Sprite rockSprite;
     public Material rockMaterial;
@@ -64,6 +89,8 @@ public class GameBootstrap : MonoBehaviour
         MultiplayerState.Reset();
         MultiplayerState.SetMultiplayer(isMultiplayer || isOnline);
         if (isOnline) { MultiplayerState.SetOnline(true); MultiplayerState.SetHost(isHost); MultiplayerState.SetOnlineRoomNumber(onlineRoom); }
+        SkinVisualDatabase.Register(skinVisualDatabase);
+        WeaponVisualDatabase.Register(weaponVisualDatabase);
         ApplySelectedMapDefinition(false);
         SetupCamera();
         SetupPlayer(0, new Vector3(-1f, 0f, 0f));
@@ -129,6 +156,7 @@ public class GameBootstrap : MonoBehaviour
         SpriteRenderer sr = ghost.AddComponent<SpriteRenderer>();
         PlayerSkinVisuals.Apply(sr, 0, "", playerMaterial);
         sr.sortingOrder = 5;
+        ghost.AddComponent<PlayerAnimator>();
 
         Health health = ghost.AddComponent<Health>();
         health.hp = 10f;
@@ -160,18 +188,16 @@ public class GameBootstrap : MonoBehaviour
         if (index == 0)
         {
             PlayerSkinVisuals.ApplyEquipped(renderer, playerMaterial);
-            spriteObj.AddComponent<PlayerAnimator>(); // walk/idle animation; adjust spriteScale to resize visuals
         }
         else
         {
-            renderer.sprite = SimpleSprite.Square;
-            renderer.color = new Color(1f, 0.65f, 0.1f, 1f); // orange for P2
+            PlayerSkinVisuals.Apply(renderer, 0, playerMaterial);
             if (playerMaterial != null)
             {
                 renderer.sharedMaterial = playerMaterial;
-                renderer.color = new Color(1f, 0.65f, 0.1f, 1f);
             }
         }
+        spriteObj.AddComponent<PlayerAnimator>(); // walk/idle animation; adjust spriteScale to resize visuals
 
         Health health = player.AddComponent<Health>();
         health.hp = index == 0 ? PlayerLoadout.MaxHP : 10f;
@@ -179,9 +205,37 @@ public class GameBootstrap : MonoBehaviour
         PlayerController pc = player.AddComponent<PlayerController>();
         pc.playerIndex = index;
         pc.SetExternalInputEnabled(externalInput);
+        ApplySwordVisualSettings(pc);
 
         player.AddComponent<PlayerPointer>();
         return pc;
+    }
+
+    private void ApplySwordVisualSettings(PlayerController player)
+    {
+        if (player == null)
+            return;
+
+        player.swordSwingSprite = swordSwingSprite;
+        player.swordSwingTexture = swordSwingTexture;
+        player.swordSwingVisualOffset = swordSwingVisualOffset;
+        player.swordSwingVisualScale = swordSwingVisualScale;
+        player.swordSwingVisualRotationOffset = swordSwingVisualRotationOffset;
+        player.swordSwingDurationMultiplier = swordSwingDurationMultiplier;
+        player.carriedSwordVisualOffset = carriedSwordVisualOffset;
+        player.carriedSwordVisualScale = carriedSwordVisualScale;
+        player.carriedSwordVisualRotationOffset = carriedSwordVisualRotationOffset;
+        player.carriedSwordSortingOrderOffset = carriedSwordSortingOrderOffset;
+        player.spearSprite = spearSprite;
+        player.spearTexture = spearTexture;
+        player.spearVisualOffset = spearVisualOffset;
+        player.spearVisualScale = spearVisualScale;
+        player.spearVisualRotationOffset = spearVisualRotationOffset;
+        player.spearThrustDistance = spearThrustDistance;
+        player.carriedSpearVisualOffset = carriedSpearVisualOffset;
+        player.carriedSpearVisualScale = carriedSpearVisualScale;
+        player.carriedSpearVisualRotationOffset = carriedSpearVisualRotationOffset;
+        player.carriedSpearSortingOrderOffset = carriedSpearSortingOrderOffset;
     }
 
     private void SetupGameOverScreen()

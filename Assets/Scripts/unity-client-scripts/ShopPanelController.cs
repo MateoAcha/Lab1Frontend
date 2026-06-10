@@ -741,7 +741,9 @@ public class ShopPanelController : MonoBehaviour
         }
         else
         {
-            bodyImage.color = PlayerLoadout.GetSkinColor(skinId);
+            bodyImage.sprite = SimpleSprite.Square;
+            bodyImage.color = Color.white;
+            bodyImage.preserveAspect = false;
         }
     }
 
@@ -754,7 +756,11 @@ public class ShopPanelController : MonoBehaviour
         if (_skinVisualDatabase != null && _skinVisualDatabase.TryGetSprite(skinId, out sprite))
             return true;
 
-        return SkinVisualDatabase.TryGetSpriteGlobal(skinId, out sprite);
+        if (SkinVisualDatabase.TryGetSpriteGlobal(skinId, out sprite))
+            return true;
+
+        sprite = SkinVisualDatabase.GetSpriteSetOrDefault(skinId).PreviewOrFirstSprite;
+        return sprite != null;
     }
 
     private static bool IsWeaponItem(ShopItemData item)

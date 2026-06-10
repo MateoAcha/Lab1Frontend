@@ -4,39 +4,30 @@ public static class PlayerSkinVisuals
 {
     public static string GetEquippedSkinColorHex()
     {
-        return ToHex(PlayerLoadout.GetSkinColor());
+        return "#FFFFFF";
     }
 
     public static void ApplyEquipped(SpriteRenderer renderer, Material material = null, float alpha = 1f)
     {
-        Apply(renderer, PlayerLoadout.EquippedSkinId, GetEquippedSkinColorHex(), material, alpha);
+        Apply(renderer, PlayerLoadout.EquippedSkinId, material, alpha);
     }
 
-    public static void Apply(SpriteRenderer renderer, int skinId, string skinColorHex, Material material = null, float alpha = 1f)
+    public static void Apply(SpriteRenderer renderer, int skinId, Material material = null, float alpha = 1f)
     {
         if (renderer == null) return;
 
-        if (skinId > 0 && SkinVisualDatabase.TryGetSpriteGlobal(skinId, out Sprite skinSprite))
-        {
-            renderer.sprite = skinSprite;
-            renderer.color = WithAlpha(Color.white, alpha);
-        }
-        else
-        {
-            renderer.sprite = SimpleSprite.Square;
-            Color fallback = skinId > 0
-                ? PlayerLoadout.GetSkinColor(skinId)
-                : new Color(0.3f, 0.75f, 1f, 1f);
-            renderer.color = WithAlpha(PlayerLoadout.ParseWeaponColor(skinColorHex, fallback), alpha);
-        }
+        SkinSpriteSet spriteSet = SkinVisualDatabase.GetSpriteSetOrDefault(skinId);
+        Sprite sprite = spriteSet.PreviewOrFirstSprite;
+        renderer.sprite = sprite != null ? sprite : SimpleSprite.Square;
+        renderer.color = WithAlpha(Color.white, alpha);
 
         if (material != null)
             renderer.sharedMaterial = material;
     }
 
-    private static string ToHex(Color color)
+    public static void Apply(SpriteRenderer renderer, int skinId, string skinColorHex, Material material = null, float alpha = 1f)
     {
-        return "#" + ColorUtility.ToHtmlStringRGB(color);
+        Apply(renderer, skinId, material, alpha);
     }
 
     private static Color WithAlpha(Color color, float alpha)
