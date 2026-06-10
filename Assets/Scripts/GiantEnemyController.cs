@@ -151,7 +151,7 @@ public class GiantEnemyController : MonoBehaviour
 
         SpriteRenderer renderer = smash.AddComponent<SpriteRenderer>();
         renderer.sprite = SimpleSprite.Square;
-        renderer.color = new Color(0.55f, 0.5f, 0.45f, 0.75f);
+        renderer.color = Color.white;
         renderer.sortingOrder = 8;
 
         BoxCollider2D box = smash.AddComponent<BoxCollider2D>();
@@ -165,6 +165,8 @@ public class GiantEnemyController : MonoBehaviour
         hit.hitsPlayer = true;
         hit.damage = Mathf.Max(1, smashDamage);
         hit.life = Mathf.Max(0.01f, smashLife);
+
+        smash.AddComponent<GiantShockwaveAnimator>();
     }
 
     private void IgnoreRockCollisions()
