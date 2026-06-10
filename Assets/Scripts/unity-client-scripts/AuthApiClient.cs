@@ -164,6 +164,49 @@ public class AuthApiClient
         yield return GetJson($"/users/{userId}", onSuccess, onError, requiresAuth: false);
     }
 
+    public IEnumerator ValidateCurrentSession(int userId, Action<AuthUserData> onSuccess, Action<long, string> onError)
+    {
+        if (string.IsNullOrWhiteSpace(AuthSession.AccessToken))
+        {
+            onError?.Invoke(401, "Missing access token. Please log in again.");
+            yield break;
+        }
+
+        var request = UnityWebRequest.Get(_baseUrl + $"/users/{userId}");
+        request.SetRequestHeader("Authorization", $"Bearer {AuthSession.AccessToken}");
+
+        Debug.Log($"[AuthApi] Validating stored session for userId={userId}");
+        yield return request.SendWebRequest();
+        Debug.Log($"[AuthApi] Session validation response {(long)request.responseCode} for userId={userId}");
+
+        if (request.result != UnityWebRequest.Result.Success
+            || request.responseCode < 200
+            || request.responseCode >= 300)
+        {
+            onError?.Invoke(request.responseCode, FormatError(request));
+            yield break;
+        }
+
+        AuthUserData userData;
+        try
+        {
+            userData = JsonUtility.FromJson<AuthUserData>(request.downloadHandler.text);
+        }
+        catch
+        {
+            onError?.Invoke(request.responseCode, "Unexpected session validation response.");
+            yield break;
+        }
+
+        if (userData == null)
+        {
+            onError?.Invoke(request.responseCode, "Empty session validation response.");
+            yield break;
+        }
+
+        onSuccess?.Invoke(userData);
+    }
+
     public IEnumerator GetDailyCoinsStatus(Action<DailyCoinsStatusData> onSuccess, Action<string> onError)
     {
         var request = UnityWebRequest.Get(_baseUrl + "/users/me/daily-coins");

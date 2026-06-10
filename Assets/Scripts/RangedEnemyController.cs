@@ -19,6 +19,7 @@ public class RangedEnemyController : MonoBehaviour
     public float avoidTurnAngle = 50f;
 
     public float LastShotTime { get; private set; }
+    public Vector2 FacingDirection => look;
 
     private Rigidbody2D body;
     private Transform player;

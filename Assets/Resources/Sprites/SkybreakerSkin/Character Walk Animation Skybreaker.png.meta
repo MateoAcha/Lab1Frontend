@@ -1,10 +1,16 @@
 fileFormatVersion: 2
-guid: 8b92d3cadfb3e40679c52566b8fa8e3e
+guid: 8f37e3c40b21b4659b33e6802536db1e
 TextureImporter:
   internalIDToNameTable:
   - first:
-      213: 4701778010454498531
-    second: scrap_0
+      213: 8225869718356770911
+    second: Character Walk Animation Skybreaker_0
+  - first:
+      213: -7291398701967062579
+    second: Character Walk Animation Skybreaker_1
+  - first:
+      213: 57772184421531606
+    second: Character Walk Animation Skybreaker_2
   externalObjects: {}
   serializedVersion: 13
   mipmaps:
@@ -113,13 +119,13 @@ TextureImporter:
     serializedVersion: 2
     sprites:
     - serializedVersion: 2
-      name: scrap_0
+      name: Character Walk Animation Skybreaker_0
       rect:
         serializedVersion: 2
         x: 0
-        y: 0
-        width: 348
-        height: 243
+        y: 31
+        width: 32
+        height: 33
       alignment: 0
       pivot: {x: 0, y: 0}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -128,8 +134,52 @@ TextureImporter:
       physicsShape: []
       tessellationDetail: -1
       bones: []
-      spriteID: 3ec12ed7032104140800000000000000
-      internalID: 4701778010454498531
+      spriteID: f504c432de8282270800000000000000
+      internalID: 8225869718356770911
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Character Walk Animation Skybreaker_1
+      rect:
+        serializedVersion: 2
+        x: 0
+        y: 0
+        width: 32
+        height: 33
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: dc94285138fbfca90800000000000000
+      internalID: -7291398701967062579
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: Character Walk Animation Skybreaker_2
+      rect:
+        serializedVersion: 2
+        x: 32
+        y: 0
+        width: 32
+        height: 64
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: -1
+      bones: []
+      spriteID: 6dff752ee7f3dc000800000000000000
+      internalID: 57772184421531606
       vertices: []
       indices: 
       edges: []
@@ -148,7 +198,9 @@ TextureImporter:
     spriteCustomMetadata:
       entries: []
     nameFileIdTable:
-      scrap_0: 4701778010454498531
+      Character Walk Animation Skybreaker_0: 8225869718356770911
+      Character Walk Animation Skybreaker_1: -7291398701967062579
+      Character Walk Animation Skybreaker_2: 57772184421531606
   mipmapLimitGroupName: 
   pSDRemoveMatte: 0
   userData: 

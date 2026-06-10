@@ -18,6 +18,7 @@ public class ShopPanelController : MonoBehaviour
     private ShopItemData[] _shopItems;
     private Coroutine _loadRoutine;
     private SkinVisualDatabase _skinVisualDatabase;
+    private WeaponVisualDatabase _weaponVisualDatabase;
     private readonly HashSet<int> _claimedChallenges = new HashSet<int>();
 
     private TextMeshProUGUI _coinsText;
@@ -173,7 +174,7 @@ public class ShopPanelController : MonoBehaviour
 
         // Name + quantity badge
         string qty = item.purchaseQuantity > 1 ? $"  ×{item.purchaseQuantity}" : "";
-        MakeStoreTitleRow(row.transform, item, $"{item.itemName}{qty}", 46f);
+        MakeStoreTitleRow(row.transform, item, $"{item.itemName}{qty}", 64f);
 
         // Type • Rarity
         MakeLabel(row.transform, $"{item.itemType}  •  {item.rarity}", 22, FontStyles.Normal,
@@ -678,9 +679,9 @@ public class ShopPanelController : MonoBehaviour
         layout.childForceExpandHeight = true;
 
         if (IsSkinItem(item))
-            CreateSkinPreview(row.transform, item.skinId, new Vector2(34f, 34f));
+            CreateSkinPreview(row.transform, item.skinId, new Vector2(58f, 58f));
         else if (IsWeaponItem(item))
-            CreateWeaponSwatch(row.transform, ResolveWeaponColor(item), new Vector2(24f, 24f));
+            CreateWeaponPreview(row.transform, item, new Vector2(58f, 58f));
 
         GameObject label = CreateUIObj("Label", row.transform);
         LayoutElement labelLayout = label.AddComponent<LayoutElement>();
@@ -700,22 +701,25 @@ public class ShopPanelController : MonoBehaviour
         tmp.raycastTarget = false;
     }
 
-    private void CreateWeaponSwatch(Transform parent, Color color, Vector2 size)
+    private void CreateWeaponPreview(Transform parent, ShopItemData item, Vector2 size)
     {
-        GameObject border = CreateUIObj("WeaponColor", parent);
+        GameObject border = CreateUIObj("WeaponPreview", parent);
         LayoutElement borderLayout = border.AddComponent<LayoutElement>();
         borderLayout.preferredWidth = size.x;
         borderLayout.preferredHeight = size.y;
         Image borderImage = GetOrAddImage(border);
-        borderImage.color = new Color(0.93f, 0.96f, 1f, 0.85f);
+        borderImage.color = new Color(0.88f, 0.94f, 1f, 0.22f);
 
-        GameObject fill = CreateUIObj("Fill", border.transform);
-        RectTransform fillRect = GetOrAddRT(fill);
-        fillRect.anchorMin = Vector2.zero;
-        fillRect.anchorMax = Vector2.one;
-        fillRect.offsetMin = new Vector2(3f, 3f);
-        fillRect.offsetMax = new Vector2(-3f, -3f);
-        GetOrAddImage(fill).color = color;
+        GameObject visual = CreateUIObj("WeaponSprite", border.transform);
+        RectTransform visualRect = GetOrAddRT(visual);
+        visualRect.anchorMin = Vector2.zero;
+        visualRect.anchorMax = Vector2.one;
+        visualRect.offsetMin = new Vector2(2f, 2f);
+        visualRect.offsetMax = new Vector2(-2f, -2f);
+        Image image = GetOrAddImage(visual);
+        image.sprite = ResolveWeaponPreviewSprite(item);
+        image.color = ResolveWeaponPreviewColor(item);
+        image.preserveAspect = true;
     }
 
     private void CreateSkinPreview(Transform parent, int skinId, Vector2 size)
@@ -730,8 +734,8 @@ public class ShopPanelController : MonoBehaviour
         RectTransform bodyRect = GetOrAddRT(body);
         bodyRect.anchorMin = Vector2.zero;
         bodyRect.anchorMax = Vector2.one;
-        bodyRect.offsetMin = new Vector2(4f, 4f);
-        bodyRect.offsetMax = new Vector2(-4f, -4f);
+        bodyRect.offsetMin = new Vector2(1f, 1f);
+        bodyRect.offsetMax = new Vector2(-1f, -1f);
         Image bodyImage = GetOrAddImage(body);
         if (TryGetSkinSprite(skinId, out Sprite sprite))
         {
@@ -766,6 +770,95 @@ public class ShopPanelController : MonoBehaviour
     private static bool IsWeaponItem(ShopItemData item)
     {
         return item != null && string.Equals(item.itemType, "Weapon", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private Sprite ResolveWeaponPreviewSprite(ShopItemData item)
+    {
+        WeaponKind kind = ResolveWeaponKind(item);
+        if (kind == WeaponKind.Ranged)
+            return SimpleSprite.Circle;
+
+        if (_weaponVisualDatabase == null)
+            _weaponVisualDatabase = FindObjectOfType<WeaponVisualDatabase>();
+
+        WeaponVisualEntry visual;
+        if (kind == WeaponKind.Sword)
+        {
+            if (_weaponVisualDatabase != null && _weaponVisualDatabase.TryGetSwordVisual(item.itemId, out visual))
+            {
+                Sprite sprite = visual.ResolveSwordSwingSprite();
+                if (sprite != null)
+                    return sprite;
+            }
+
+            if (WeaponVisualDatabase.TryGetSwordVisualGlobal(item.itemId, out visual))
+            {
+                Sprite sprite = visual.ResolveSwordSwingSprite();
+                if (sprite != null)
+                    return sprite;
+            }
+        }
+        else
+        {
+            if (_weaponVisualDatabase != null && _weaponVisualDatabase.TryGetSpearVisual(item.itemId, out visual))
+            {
+                Sprite sprite = visual.ResolveSpearSprite();
+                if (sprite != null)
+                    return sprite;
+            }
+
+            if (WeaponVisualDatabase.TryGetSpearVisualGlobal(item.itemId, out visual))
+            {
+                Sprite sprite = visual.ResolveSpearSprite();
+                if (sprite != null)
+                    return sprite;
+            }
+        }
+
+        return SimpleSprite.Square;
+    }
+
+    private Color ResolveWeaponPreviewColor(ShopItemData item)
+    {
+        return ResolveWeaponKind(item) == WeaponKind.Ranged
+            ? ResolveWeaponColor(item)
+            : Color.white;
+    }
+
+    private static WeaponKind ResolveWeaponKind(ShopItemData item)
+    {
+        if (item == null)
+            return WeaponKind.Spear;
+
+        string explicitType = FirstNonEmpty(
+            item.weaponType,
+            item.weapon_type,
+            item.weaponSubtype,
+            item.weapon_subtype,
+            item.weaponClass,
+            item.weapon_class);
+        if (!string.IsNullOrWhiteSpace(explicitType))
+            return PlayerLoadout.ParseWeaponKind(explicitType);
+
+        string searchable = string.Join(" ",
+            item.itemName,
+            item.description,
+            item.detailSummary);
+        return PlayerLoadout.ParseWeaponKind(searchable);
+    }
+
+    private static string FirstNonEmpty(params string[] values)
+    {
+        if (values == null)
+            return "";
+
+        for (int i = 0; i < values.Length; i++)
+        {
+            if (!string.IsNullOrWhiteSpace(values[i]))
+                return values[i];
+        }
+
+        return "";
     }
 
     private static bool IsSkinItem(ShopItemData item)

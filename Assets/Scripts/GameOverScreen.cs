@@ -128,13 +128,6 @@ public class GameOverScreen : MonoBehaviour
 
         AddSpacer(panel.transform, 8f);
 
-        AddButton(panel.transform, "Play Again", new Color(0.14f, 0.42f, 0.22f, 1f), () =>
-        {
-            Time.timeScale = 1f;
-            Destroy(canvasObj);
-            SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
-        });
-
         AddButton(panel.transform, "Main Menu", new Color(0.18f, 0.22f, 0.35f, 1f), () =>
         {
             Time.timeScale = 1f;

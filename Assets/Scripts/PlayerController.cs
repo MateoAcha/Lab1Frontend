@@ -47,6 +47,10 @@ public class PlayerController : MonoBehaviour
     public float rangedProjectileSpeed = 12f;
     public float rangedProjectileLife = 2.2f;
     public float rangedProjectileSize = 0.35f;
+    [Header("Carried Ranged Orb Visual")]
+    public Vector2 carriedRangedOrbOffset = new Vector2(0.18f, 0.08f);
+    public Vector2 carriedRangedOrbScale = Vector2.one;
+    public int carriedRangedOrbSortingOrderOffset = 1;
     [Header("Ranged Powers (E)")]
     public float bombShotProjectileSize = 1.25f;
     public float bombShotSpeedMultiplier = 0.75f;
@@ -124,6 +128,12 @@ public class PlayerController : MonoBehaviour
     public float minionSpeed = 4.2f;
     public int minionTouchDamage = 1;
     public float minionTouchCooldown = 0.45f;
+    [Header("Minion Visual")]
+    public Sprite[] minionMoveSprites;
+    public Texture2D minionMoveTexture;
+    public string minionMoveResource = "Sprites/Minion";
+    public float minionSpriteScale = 1f;
+    public float minionMoveFps = 4f;
 
     private Rigidbody2D body;
     private Vector2 look = Vector2.down;
@@ -183,6 +193,10 @@ public class PlayerController : MonoBehaviour
     private Sprite _cachedSwordSwingTextureSprite;
     private Texture2D _cachedSpearTexture;
     private Sprite _cachedSpearTextureSprite;
+    private SpriteRenderer _carriedRangedOrbRenderer;
+    private Transform _carriedRangedOrbTransform;
+    private bool _carriedRangedOrbFacingLeft;
+    private float _hideCarriedRangedOrbUntil;
     private static Texture2D _chargeHitboxGlowTexture;
     private static Sprite _chargeHitboxGlowSprite;
 
@@ -342,6 +356,7 @@ public class PlayerController : MonoBehaviour
         UpdateStealthVisual();
         UpdateCarriedSwordVisual();
         UpdateCarriedSpearVisual();
+        UpdateCarriedRangedOrbVisual();
     }
 
     public void SetExternalInputEnabled(bool enabled)
@@ -784,6 +799,7 @@ public class PlayerController : MonoBehaviour
         for (int i = 0; i < shotCount; i++)
         {
             Vector2 usedAim = i == 0 ? aim : GetCurrentAim();
+            HideCarriedRangedOrbForAttackCooldown();
             SpawnRangedAbilityProjectile(
                 "QuickBurstShot",
                 usedAim,
@@ -808,6 +824,7 @@ public class PlayerController : MonoBehaviour
         int level = GetRangedSkillLevel("ranged_active_3");
         float damageMultiplier = 1f + level * Mathf.Max(0f, snipeShotLevelDamageBonus);
         nextChargeReady = Time.time + Mathf.Max(0f, chargeCooldown);
+        HideCarriedRangedOrbForAttackCooldown();
         SpawnRangedAbilityProjectile(
             "SnipeShot",
             aim,
@@ -842,7 +859,7 @@ public class PlayerController : MonoBehaviour
         projectile.transform.rotation = Quaternion.Euler(0f, 0f, angle);
 
         SpriteRenderer renderer = projectile.AddComponent<SpriteRenderer>();
-        renderer.sprite = SimpleSprite.Square;
+        renderer.sprite = explosive ? SimpleSprite.Square : SimpleSprite.Circle;
         renderer.color = explosive
             ? new Color(1f, 0.72f, 0.18f, 1f)
             : GetAttackColor(1f);
@@ -993,10 +1010,22 @@ public class PlayerController : MonoBehaviour
         float minionScale = Mathf.Max(0.1f, minionSizeMultiplier);
         minion.transform.localScale = transform.localScale * minionScale;
 
-        SpriteRenderer renderer = minion.AddComponent<SpriteRenderer>();
+        GameObject spriteObj = new GameObject("Sprite");
+        spriteObj.transform.SetParent(minion.transform);
+        spriteObj.transform.localPosition = Vector3.zero;
+        spriteObj.transform.localScale = Vector3.one;
+
+        SpriteRenderer renderer = spriteObj.AddComponent<SpriteRenderer>();
         renderer.sprite = SimpleSprite.Circle;
         renderer.color = new Color(1f, 0.88f, 0.12f, 1f);
         renderer.sortingOrder = 6;
+
+        PlayerMinionAnimator animator = spriteObj.AddComponent<PlayerMinionAnimator>();
+        animator.moveSprites = minionMoveSprites;
+        animator.moveSheet = minionMoveTexture;
+        animator.resourceSheetName = minionMoveResource;
+        animator.fps = Mathf.Max(0.01f, minionMoveFps);
+        animator.spriteScale = Mathf.Max(0.01f, minionSpriteScale);
 
         CircleCollider2D circle = minion.AddComponent<CircleCollider2D>();
         circle.radius = 0.5f;
@@ -1400,7 +1429,7 @@ public class PlayerController : MonoBehaviour
         projectile.transform.rotation = Quaternion.Euler(0f, 0f, angle);
 
         SpriteRenderer renderer = projectile.AddComponent<SpriteRenderer>();
-        renderer.sprite = SimpleSprite.Square;
+        renderer.sprite = SimpleSprite.Circle;
         renderer.color = GetAttackColor(1f);
         renderer.sortingOrder = 10;
 
@@ -1418,6 +1447,7 @@ public class PlayerController : MonoBehaviour
         playerProjectile.damage = Mathf.Max(1, Mathf.RoundToInt(GetWeaponDamage() * Mathf.Max(1f, damageMultiplier)));
         playerProjectile.ownerPlayerIndex = playerIndex;
         playerProjectile.projectileColor = GetAttackColor(1f);
+        HideCarriedRangedOrbUntil(Time.time + Mathf.Max(0f, cooldown));
     }
 
     private int GetWeaponDamage()
@@ -1754,6 +1784,78 @@ public class PlayerController : MonoBehaviour
         if (_carriedSpearRenderer == null)
             _carriedSpearRenderer = visual.AddComponent<SpriteRenderer>();
         _carriedSpearRenderer.color = Color.white;
+    }
+
+    private void UpdateCarriedRangedOrbVisual()
+    {
+        bool visible = GetWeaponKind() == WeaponKind.Ranged
+            && Time.time >= _hideCarriedRangedOrbUntil;
+
+        if (!visible)
+        {
+            if (_carriedRangedOrbRenderer != null)
+                _carriedRangedOrbRenderer.enabled = false;
+            return;
+        }
+
+        EnsureCarriedRangedOrbVisual();
+        if (_carriedRangedOrbRenderer == null || _carriedRangedOrbTransform == null)
+            return;
+
+        _carriedRangedOrbRenderer.enabled = true;
+        UpdateCarriedRangedOrbFacing();
+        SpriteRenderer playerRenderer = GetPlayerRenderer();
+        _carriedRangedOrbRenderer.sortingOrder = playerRenderer != null
+            ? playerRenderer.sortingOrder + carriedRangedOrbSortingOrderOffset
+            : 7;
+        _carriedRangedOrbRenderer.color = GetAttackColor(0.95f);
+
+        float facingSign = _carriedRangedOrbFacingLeft ? -1f : 1f;
+        _carriedRangedOrbTransform.localPosition = new Vector3(
+            carriedRangedOrbOffset.x * facingSign,
+            carriedRangedOrbOffset.y,
+            0f);
+        _carriedRangedOrbTransform.localRotation = Quaternion.identity;
+        _carriedRangedOrbTransform.localScale = new Vector3(
+            Mathf.Max(0.01f, rangedProjectileSize) * (Mathf.Approximately(carriedRangedOrbScale.x, 0f) ? 1f : carriedRangedOrbScale.x),
+            Mathf.Max(0.01f, rangedProjectileSize) * (Mathf.Approximately(carriedRangedOrbScale.y, 0f) ? 1f : carriedRangedOrbScale.y),
+            1f);
+    }
+
+    private void UpdateCarriedRangedOrbFacing()
+    {
+        float x = LastMoveInput.x;
+        if (x < -0.001f)
+            _carriedRangedOrbFacingLeft = true;
+        else if (x > 0.001f)
+            _carriedRangedOrbFacingLeft = false;
+    }
+
+    private void EnsureCarriedRangedOrbVisual()
+    {
+        if (_carriedRangedOrbRenderer != null && _carriedRangedOrbTransform != null)
+            return;
+
+        Transform existing = transform.Find("CarriedRangedOrbVisual");
+        GameObject visual = existing != null ? existing.gameObject : new GameObject("CarriedRangedOrbVisual");
+        visual.transform.SetParent(transform, false);
+        _carriedRangedOrbTransform = visual.transform;
+        _carriedRangedOrbRenderer = visual.GetComponent<SpriteRenderer>();
+        if (_carriedRangedOrbRenderer == null)
+            _carriedRangedOrbRenderer = visual.AddComponent<SpriteRenderer>();
+        _carriedRangedOrbRenderer.sprite = SimpleSprite.Circle;
+    }
+
+    private void HideCarriedRangedOrbUntil(float showAt)
+    {
+        _hideCarriedRangedOrbUntil = Mathf.Max(_hideCarriedRangedOrbUntil, showAt);
+        if (_carriedRangedOrbRenderer != null)
+            _carriedRangedOrbRenderer.enabled = false;
+    }
+
+    private void HideCarriedRangedOrbForAttackCooldown()
+    {
+        HideCarriedRangedOrbUntil(Time.time + Mathf.Max(0f, cooldown));
     }
 
     public void OnThrownSwordEnded()

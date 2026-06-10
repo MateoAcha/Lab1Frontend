@@ -170,6 +170,8 @@ public class AuthMenuController : MonoBehaviour
     private Action<int> _pendingMapSelection;
     private bool _launchMultiplayer;
     private bool _mainMenuButtonsBuilt;
+    private bool _sessionValidationInProgress;
+    private string _sessionValidationMessage = "";
 
     private enum LoginReturn { MainMenu, OnlineLobby, OnlineRoomList }
     private enum ServerAddressMode { JoinSession, AuthServer }
@@ -191,6 +193,12 @@ public class AuthMenuController : MonoBehaviour
         ApplyServerUrl(string.IsNullOrWhiteSpace(AuthSession.CurrentServerUrl)
             ? apiBaseUrl
             : AuthSession.CurrentServerUrl);
+        bool validateRestoredSession = AuthSession.IsLoggedIn;
+        if (validateRestoredSession)
+        {
+            _sessionValidationInProgress = true;
+            _sessionValidationMessage = "Checking saved session...";
+        }
 
         if (loginPasswordInput != null)
         {
@@ -207,9 +215,14 @@ public class AuthMenuController : MonoBehaviour
         EnsureProfileUI();
         EnsureMultiplayerPanel();
 
+        if (validateRestoredSession)
+        {
+            StartCoroutine(ValidateRestoredSession());
+        }
+
         if (MultiplayerState.ConsumeReturnToOnlineMenu())
         {
-            if (AuthSession.IsLoggedIn && !IsUsingLocalServer())
+            if (CanUseAuthenticatedSession() && !IsUsingLocalServer())
                 ShowRoomList();
             else
                 OpenMultiplayer();
@@ -415,7 +428,13 @@ public class AuthMenuController : MonoBehaviour
 
     public void OpenRegister()
     {
-        if (AuthSession.IsLoggedIn)
+        if (_sessionValidationInProgress)
+        {
+            ShowError("Still checking your saved login. Please try again in a moment.");
+            return;
+        }
+
+        if (CanUseAuthenticatedSession())
         {
             ShowError("You are already logged in. Please log out first.");
             return;
@@ -429,7 +448,13 @@ public class AuthMenuController : MonoBehaviour
 
     public void OpenLogin()
     {
-        if (AuthSession.IsLoggedIn)
+        if (_sessionValidationInProgress)
+        {
+            ShowError("Still checking your saved login. Please try again in a moment.");
+            return;
+        }
+
+        if (CanUseAuthenticatedSession())
         {
             ShowError("You are already logged in. Please log out first.");
             return;
@@ -451,7 +476,13 @@ public class AuthMenuController : MonoBehaviour
 
     public void OpenProfile()
     {
-        if (!AuthSession.IsLoggedIn)
+        if (_sessionValidationInProgress)
+        {
+            ShowError("Still checking your saved login. Please try again in a moment.");
+            return;
+        }
+
+        if (!CanUseAuthenticatedSession())
         {
             Debug.Log("[AuthUI] Open Profile clicked while logged out. Redirecting to Login panel.");
             _loginReturn = LoginReturn.MainMenu;
@@ -473,7 +504,13 @@ public class AuthMenuController : MonoBehaviour
 
     public void OpenStats()
     {
-        if (!AuthSession.IsLoggedIn)
+        if (_sessionValidationInProgress)
+        {
+            ShowError("Still checking your saved login. Please try again in a moment.");
+            return;
+        }
+
+        if (!CanUseAuthenticatedSession())
         {
             ShowError("Please log in first to open stats.");
             return;
@@ -491,7 +528,13 @@ public class AuthMenuController : MonoBehaviour
 
     public void OpenInventory()
     {
-        if (!AuthSession.IsLoggedIn)
+        if (_sessionValidationInProgress)
+        {
+            ShowError("Still checking your saved login. Please try again in a moment.");
+            return;
+        }
+
+        if (!CanUseAuthenticatedSession())
         {
             ShowError("Please log in first to open inventory.");
             return;
@@ -513,7 +556,13 @@ public class AuthMenuController : MonoBehaviour
 
     public void OpenStore()
     {
-        if (!AuthSession.IsLoggedIn)
+        if (_sessionValidationInProgress)
+        {
+            ShowError("Still checking your saved login. Please try again in a moment.");
+            return;
+        }
+
+        if (!CanUseAuthenticatedSession())
         {
             ShowError("Please log in first to open the store.");
             return;
@@ -535,7 +584,13 @@ public class AuthMenuController : MonoBehaviour
 
     public void OpenSkillTree()
     {
-        if (!AuthSession.IsLoggedIn)
+        if (_sessionValidationInProgress)
+        {
+            ShowError("Still checking your saved login. Please try again in a moment.");
+            return;
+        }
+
+        if (!CanUseAuthenticatedSession())
         {
             ShowError("Please log in first to open the skill tree.");
             return;
@@ -569,6 +624,12 @@ public class AuthMenuController : MonoBehaviour
 
     public void OpenMultiplayer()
     {
+        if (_sessionValidationInProgress)
+        {
+            ShowError("Still checking your saved login. Please try again in a moment.");
+            return;
+        }
+
         EnsureMultiplayerPanel();
         RefreshCreateSessionButtonState();
         ShowOnly(_multiplayerPanel);
@@ -576,7 +637,13 @@ public class AuthMenuController : MonoBehaviour
 
     public void OpenCreateSession()
     {
-        if (!IsUsingLocalServer() || !AuthSession.IsLoggedIn)
+        if (_sessionValidationInProgress)
+        {
+            ShowError("Still checking your saved login. Please try again in a moment.");
+            return;
+        }
+
+        if (!IsUsingLocalServer() || !CanUseAuthenticatedSession())
         {
             ShowError("Create Session requires a logged-in Local DB session. Use Local DB to log in, or Join Session to connect to a host.");
             return;
@@ -591,7 +658,13 @@ public class AuthMenuController : MonoBehaviour
 
     public void OpenJoinSession()
     {
-        if (AuthSession.IsLoggedIn && !IsUsingLocalServer())
+        if (_sessionValidationInProgress)
+        {
+            ShowError("Still checking your saved login. Please try again in a moment.");
+            return;
+        }
+
+        if (CanUseAuthenticatedSession() && !IsUsingLocalServer())
         {
             _isHostSession = false;
             _loginReturn = LoginReturn.OnlineRoomList;
@@ -604,6 +677,12 @@ public class AuthMenuController : MonoBehaviour
 
     public void SubmitJoinSession()
     {
+        if (_sessionValidationInProgress)
+        {
+            ShowError("Still checking your saved login. Please try again in a moment.");
+            return;
+        }
+
         string url = _joinServerUrlInput != null ? _joinServerUrlInput.text.Trim() : "";
         if (string.IsNullOrWhiteSpace(url))
         {
@@ -623,7 +702,7 @@ public class AuthMenuController : MonoBehaviour
         {
             RefreshSessionUI();
 
-            if (AuthSession.IsLoggedIn)
+            if (CanUseAuthenticatedSession())
             {
                 if (_loginReturn == LoginReturn.OnlineLobby)
                     StartCoroutine(FetchLoadoutAndShowOnlineLobby());
@@ -654,7 +733,13 @@ public class AuthMenuController : MonoBehaviour
 
     private void ContinueToLobbyOrLogin()
     {
-        if (AuthSession.IsLoggedIn)
+        if (_sessionValidationInProgress)
+        {
+            ShowError("Still checking your saved login. Please try again in a moment.");
+            return;
+        }
+
+        if (CanUseAuthenticatedSession())
         {
             if (_loginReturn == LoginReturn.OnlineRoomList)
                 ShowRoomList();
@@ -744,10 +829,74 @@ public class AuthMenuController : MonoBehaviour
 
     private IEnumerator FetchLoadoutThenPlay(bool waitForLoadout = true)
     {
-        if (waitForLoadout && AuthSession.IsLoggedIn)
+        if (_sessionValidationInProgress)
+        {
+            ShowError("Still checking your saved login. Please try again in a moment.");
+            yield break;
+        }
+
+        if (waitForLoadout && CanUseAuthenticatedSession())
             yield return FetchLoadoutSilently(AuthSession.UserId);
 
         LaunchGame();
+    }
+
+    private bool CanUseAuthenticatedSession()
+    {
+        return AuthSession.IsLoggedIn && !_sessionValidationInProgress;
+    }
+
+    private IEnumerator ValidateRestoredSession()
+    {
+        int userId = AuthSession.UserId;
+        bool success = false;
+        long statusCode = 0;
+        string error = "";
+        AuthUserData user = null;
+
+        yield return _apiClient.ValidateCurrentSession(
+            userId,
+            onSuccess: data =>
+            {
+                success = true;
+                user = data;
+            },
+            onError: (code, message) =>
+            {
+                statusCode = code;
+                error = message;
+            });
+
+        _sessionValidationInProgress = false;
+
+        if (success)
+        {
+            if (user != null)
+                AuthSession.UpdateProfile(user);
+
+            _sessionValidationMessage = "";
+            Debug.Log($"[AuthUI] Restored session validated for userId={userId}.");
+            RefreshSessionUI();
+            StartCoroutine(FetchLoadoutSilently(AuthSession.UserId));
+            yield break;
+        }
+
+        Debug.LogWarning($"[AuthUI] Restored session validation failed. status={statusCode}, error={error}");
+        AuthSession.Logout();
+        PlayerLoadout.Apply(null, null, null);
+        PlayerSkillLoadout.ApplyServerState(null);
+        _sessionValidationMessage = "";
+        RefreshSessionUI();
+        ShowOnly(mainMenuPanel);
+
+        if (statusCode == 401 || statusCode == 403)
+        {
+            if (errorPanel != null)
+                errorPanel.SetActive(false);
+            yield break;
+        }
+
+        ShowError("Could not verify your saved login. Please log in again.");
     }
 
     private void LaunchGame()
@@ -787,7 +936,13 @@ public class AuthMenuController : MonoBehaviour
 
     public void SubmitRegister()
     {
-        if (AuthSession.IsLoggedIn)
+        if (_sessionValidationInProgress)
+        {
+            ShowError("Still checking your saved login. Please try again in a moment.");
+            return;
+        }
+
+        if (CanUseAuthenticatedSession())
         {
             ShowError("You are already logged in. Please log out first.");
             return;
@@ -837,7 +992,13 @@ public class AuthMenuController : MonoBehaviour
 
     public void SubmitLogin()
     {
-        if (AuthSession.IsLoggedIn)
+        if (_sessionValidationInProgress)
+        {
+            ShowError("Still checking your saved login. Please try again in a moment.");
+            return;
+        }
+
+        if (CanUseAuthenticatedSession())
         {
             ShowError("You are already logged in. Please log out first.");
             return;
@@ -868,7 +1029,13 @@ public class AuthMenuController : MonoBehaviour
 
     public void SubmitGoogleLogin()
     {
-        if (AuthSession.IsLoggedIn)
+        if (_sessionValidationInProgress)
+        {
+            ShowError("Still checking your saved login. Please try again in a moment.");
+            return;
+        }
+
+        if (CanUseAuthenticatedSession())
         {
             ShowError("You are already logged in. Please log out first.");
             return;
@@ -1477,7 +1644,7 @@ public class AuthMenuController : MonoBehaviour
 
     private void RefreshSessionUI()
     {
-        bool loggedIn = AuthSession.IsLoggedIn;
+        bool loggedIn = CanUseAuthenticatedSession();
 
         if (sessionText != null)
         {
@@ -1485,13 +1652,16 @@ public class AuthMenuController : MonoBehaviour
                 ? "Local DB"
                 : $"Online DB: {GetCompactServerUrl(_currentServerUrl)}";
 
-            sessionText.text = loggedIn
-                ? $"Logged in as {AuthSession.Username}  ·  {serverLabel}"
-                : $"Not logged in  ·  {serverLabel}";
+            if (_sessionValidationInProgress)
+                sessionText.text = $"{_sessionValidationMessage}  ·  {serverLabel}";
+            else
+                sessionText.text = loggedIn
+                    ? $"Logged in as {AuthSession.Username}  ·  {serverLabel}"
+                    : $"Not logged in  ·  {serverLabel}";
         }
 
-        if (registerButton != null) registerButton.SetActive(!loggedIn);
-        if (loginButton != null && loginButton != profileButton) loginButton.SetActive(!loggedIn);
+        if (registerButton != null) registerButton.SetActive(!loggedIn && !_sessionValidationInProgress);
+        if (loginButton != null && loginButton != profileButton) loginButton.SetActive(!loggedIn && !_sessionValidationInProgress);
         if (profileButton != null) profileButton.SetActive(true);
         if (logoutButton != null) logoutButton.SetActive(loggedIn);
         RefreshInventoryButtonState(loggedIn);
@@ -1523,7 +1693,7 @@ public class AuthMenuController : MonoBehaviour
             return;
         }
 
-        bool loggedIn = AuthSession.IsLoggedIn;
+        bool loggedIn = CanUseAuthenticatedSession();
         dailyCoinsButton.gameObject.SetActive(loggedIn);
         if (dailyCoinsTimerText != null)
         {
@@ -1577,7 +1747,7 @@ public class AuthMenuController : MonoBehaviour
 
     private void RequestDailyCoinsStatus()
     {
-        if (_dailyCoinsStatusRoutine != null || _apiClient == null || !AuthSession.IsLoggedIn)
+        if (_dailyCoinsStatusRoutine != null || _apiClient == null || !CanUseAuthenticatedSession())
         {
             return;
         }
@@ -1607,7 +1777,7 @@ public class AuthMenuController : MonoBehaviour
 
     private void ClaimDailyCoins()
     {
-        if (_dailyCoinsClaimInFlight || !AuthSession.IsLoggedIn || _apiClient == null)
+        if (_dailyCoinsClaimInFlight || !CanUseAuthenticatedSession() || _apiClient == null)
         {
             return;
         }
@@ -1653,7 +1823,7 @@ public class AuthMenuController : MonoBehaviour
 
     private void ApplyDailyCoinsStatusVisual()
     {
-        if (dailyCoinsButton == null || _dailyCoinsStatus == null || !AuthSession.IsLoggedIn)
+        if (dailyCoinsButton == null || _dailyCoinsStatus == null || !CanUseAuthenticatedSession())
         {
             return;
         }
@@ -1680,7 +1850,7 @@ public class AuthMenuController : MonoBehaviour
 
     private void UpdateDailyCoinsCountdown()
     {
-        if (!AuthSession.IsLoggedIn || _dailyCoinsStatus == null || dailyCoinsTimerText == null)
+        if (!CanUseAuthenticatedSession() || _dailyCoinsStatus == null || dailyCoinsTimerText == null)
         {
             return;
         }
@@ -2136,7 +2306,7 @@ public class AuthMenuController : MonoBehaviour
         EnsureInventoryUI();
         EnsureShopUI();
 
-        bool loggedIn = AuthSession.IsLoggedIn;
+        bool loggedIn = CanUseAuthenticatedSession();
         RefreshSkillTreeButtonState(loggedIn);
         RefreshStatsCardState(loggedIn);
         RefreshInventoryButtonState(loggedIn);
@@ -2300,7 +2470,7 @@ public class AuthMenuController : MonoBehaviour
                 OpenSkillTree);
         }
 
-        RefreshSkillTreeButtonState(AuthSession.IsLoggedIn);
+        RefreshSkillTreeButtonState(CanUseAuthenticatedSession());
     }
 
     private (Button btn, Image img, TextMeshProUGUI label) StyleProfileWideButton(
@@ -2570,7 +2740,7 @@ public class AuthMenuController : MonoBehaviour
             baseColor, GameUiThemeRuntime.Current.Hover(baseColor), GameUiThemeRuntime.Current.Pressed(baseColor),
             OpenInventory);
 
-        RefreshInventoryButtonState(AuthSession.IsLoggedIn);
+        RefreshInventoryButtonState(CanUseAuthenticatedSession());
     }
 
     private void EnsureInventoryPanel()
@@ -2614,7 +2784,7 @@ public class AuthMenuController : MonoBehaviour
             baseColor, GameUiThemeRuntime.Current.Hover(baseColor), GameUiThemeRuntime.Current.Pressed(baseColor),
             OpenStore);
 
-        RefreshShopButtonState(AuthSession.IsLoggedIn);
+        RefreshShopButtonState(CanUseAuthenticatedSession());
     }
 
     private (Button btn, Image img, TextMeshProUGUI label) CreateCardButton(
@@ -2804,6 +2974,12 @@ public class AuthMenuController : MonoBehaviour
 
     private IEnumerator FetchLoadoutAndShowOnlineLobby()
     {
+        if (_sessionValidationInProgress)
+        {
+            ShowError("Still checking your saved login. Please try again in a moment.");
+            yield break;
+        }
+
         if (_isHostSession && _currentLobbyRoomNumber <= 0)
         {
             bool created = false;
@@ -2830,7 +3006,7 @@ public class AuthMenuController : MonoBehaviour
             yield break;
         }
 
-        if (AuthSession.IsLoggedIn)
+        if (CanUseAuthenticatedSession())
             yield return FetchLoadoutSilently(AuthSession.UserId);
 
         ShowOnlineLobby();
@@ -3032,7 +3208,7 @@ public class AuthMenuController : MonoBehaviour
 
     private IEnumerator RunAuthProofChecks()
     {
-        if (!AuthSession.IsLoggedIn)
+        if (!CanUseAuthenticatedSession())
         {
             SetAuthProof("Auth proof unavailable: no active session.");
             yield break;
@@ -4129,7 +4305,7 @@ public class AuthMenuController : MonoBehaviour
     private void RefreshCreateSessionButtonState()
     {
         if (_createSessionButton == null) return;
-        bool canCreate = AuthSession.IsLoggedIn && IsUsingLocalServer();
+        bool canCreate = CanUseAuthenticatedSession() && IsUsingLocalServer();
         _createSessionButton.interactable = canCreate;
         if (_createSessionTitleText != null)
             _createSessionTitleText.color = canCreate ? GameUiThemeRuntime.Current.text : GameUiThemeRuntime.Current.MutedText(0.6f);

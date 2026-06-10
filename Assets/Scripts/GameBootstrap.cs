@@ -59,6 +59,16 @@ public class GameBootstrap : MonoBehaviour
     public Vector2 carriedSpearVisualScale = Vector2.one;
     public float carriedSpearVisualRotationOffset = -35f;
     public int carriedSpearSortingOrderOffset = 1;
+    [Header("Carried Ranged Orb Visual")]
+    public Vector2 carriedRangedOrbOffset = new Vector2(0.18f, 0.08f);
+    public Vector2 carriedRangedOrbScale = Vector2.one;
+    public int carriedRangedOrbSortingOrderOffset = 1;
+    [Header("Minion Visual")]
+    public Sprite[] minionMoveSprites;
+    public Texture2D minionMoveTexture;
+    public string minionMoveResource = "Sprites/Minion";
+    public float minionSpriteScale = 1f;
+    public float minionMoveFps = 4f;
     [Header("Rocks")]
     public Sprite rockSprite;
     public Material rockMaterial;
@@ -74,6 +84,8 @@ public class GameBootstrap : MonoBehaviour
     public float borderSpacing = 1.4f;
 
     private Sprite generatedRockSprite;
+    private Sprite generatedMapRockSprite;
+    private Texture2D generatedMapRockTexture;
     private Sprite generatedExitSprite;
     private Sprite generatedFloorSprite;
     private Material activeFloorMaterial;
@@ -236,6 +248,14 @@ public class GameBootstrap : MonoBehaviour
         player.carriedSpearVisualScale = carriedSpearVisualScale;
         player.carriedSpearVisualRotationOffset = carriedSpearVisualRotationOffset;
         player.carriedSpearSortingOrderOffset = carriedSpearSortingOrderOffset;
+        player.carriedRangedOrbOffset = carriedRangedOrbOffset;
+        player.carriedRangedOrbScale = carriedRangedOrbScale;
+        player.carriedRangedOrbSortingOrderOffset = carriedRangedOrbSortingOrderOffset;
+        player.minionMoveSprites = minionMoveSprites;
+        player.minionMoveTexture = minionMoveTexture;
+        player.minionMoveResource = minionMoveResource;
+        player.minionSpriteScale = minionSpriteScale;
+        player.minionMoveFps = minionMoveFps;
     }
 
     private void SetupGameOverScreen()
@@ -459,6 +479,8 @@ public class GameBootstrap : MonoBehaviour
         appliedMapIndex = selectedIndex;
         floorTexture = selectedMap.floorTexture;
         generatedFloorSprite = null;
+        generatedMapRockSprite = null;
+        generatedMapRockTexture = null;
         floorColor = selectedMap.floorColor;
         rockColor = selectedMap.obstacleColor;
         activeFloorMaterial = selectedMap.floorMaterial != null ? selectedMap.floorMaterial : ResolveDefaultFloorMaterial();
@@ -733,6 +755,34 @@ public class GameBootstrap : MonoBehaviour
 
     public Sprite ResolveRockSprite()
     {
+        GameMapDefinition selectedMap = GetSelectedMapDefinition();
+        if (selectedMap != null)
+        {
+            if (selectedMap.obstacleSprite != null)
+            {
+                return selectedMap.obstacleSprite;
+            }
+
+            if (selectedMap.obstacleTexture != null &&
+                selectedMap.obstacleTexture.width > 0 &&
+                selectedMap.obstacleTexture.height > 0)
+            {
+                if (generatedMapRockSprite == null || generatedMapRockTexture != selectedMap.obstacleTexture)
+                {
+                    generatedMapRockTexture = selectedMap.obstacleTexture;
+                    generatedMapRockSprite = Sprite.Create(
+                        selectedMap.obstacleTexture,
+                        new Rect(0f, 0f, selectedMap.obstacleTexture.width, selectedMap.obstacleTexture.height),
+                        new Vector2(0.5f, 0.5f),
+                        selectedMap.obstacleTexture.width,
+                        0,
+                        SpriteMeshType.Tight);
+                }
+
+                return generatedMapRockSprite;
+            }
+        }
+
         if (rockSprite != null)
         {
             return rockSprite;

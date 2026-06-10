@@ -51,6 +51,14 @@ public class GameBootstrapEditor : Editor
     private SerializedProperty carriedSpearVisualScale;
     private SerializedProperty carriedSpearVisualRotationOffset;
     private SerializedProperty carriedSpearSortingOrderOffset;
+    private SerializedProperty carriedRangedOrbOffset;
+    private SerializedProperty carriedRangedOrbScale;
+    private SerializedProperty carriedRangedOrbSortingOrderOffset;
+    private SerializedProperty minionMoveSprites;
+    private SerializedProperty minionMoveTexture;
+    private SerializedProperty minionMoveResource;
+    private SerializedProperty minionSpriteScale;
+    private SerializedProperty minionMoveFps;
 
     private SerializedProperty rockSprite;
     private SerializedProperty rockMaterial;
@@ -74,6 +82,8 @@ public class GameBootstrapEditor : Editor
     private bool showCarriedSwordVisual = true;
     private bool showSpearVisual = true;
     private bool showCarriedSpearVisual = true;
+    private bool showCarriedRangedOrbVisual = true;
+    private bool showMinionVisual = true;
     private bool showRocks = true;
 
     private void OnEnable()
@@ -124,6 +134,14 @@ public class GameBootstrapEditor : Editor
         carriedSpearVisualScale = serializedObject.FindProperty("carriedSpearVisualScale");
         carriedSpearVisualRotationOffset = serializedObject.FindProperty("carriedSpearVisualRotationOffset");
         carriedSpearSortingOrderOffset = serializedObject.FindProperty("carriedSpearSortingOrderOffset");
+        carriedRangedOrbOffset = serializedObject.FindProperty("carriedRangedOrbOffset");
+        carriedRangedOrbScale = serializedObject.FindProperty("carriedRangedOrbScale");
+        carriedRangedOrbSortingOrderOffset = serializedObject.FindProperty("carriedRangedOrbSortingOrderOffset");
+        minionMoveSprites = serializedObject.FindProperty("minionMoveSprites");
+        minionMoveTexture = serializedObject.FindProperty("minionMoveTexture");
+        minionMoveResource = serializedObject.FindProperty("minionMoveResource");
+        minionSpriteScale = serializedObject.FindProperty("minionSpriteScale");
+        minionMoveFps = serializedObject.FindProperty("minionMoveFps");
 
         rockSprite = serializedObject.FindProperty("rockSprite");
         rockMaterial = serializedObject.FindProperty("rockMaterial");
@@ -254,6 +272,28 @@ public class GameBootstrapEditor : Editor
             EditorGUILayout.PropertyField(carriedSpearVisualScale, new GUIContent("Visual Scale X/Y"));
             EditorGUILayout.PropertyField(carriedSpearVisualRotationOffset, new GUIContent("Visual Rotation Offset Degrees"));
             EditorGUILayout.PropertyField(carriedSpearSortingOrderOffset, new GUIContent("Sorting Order Offset"));
+            EditorGUI.indentLevel--;
+        }
+
+        showCarriedRangedOrbVisual = EditorGUILayout.Foldout(showCarriedRangedOrbVisual, "Carried Ranged Orb Visual", true);
+        if (showCarriedRangedOrbVisual)
+        {
+            EditorGUI.indentLevel++;
+            EditorGUILayout.PropertyField(carriedRangedOrbOffset, new GUIContent("Visual Offset"));
+            EditorGUILayout.PropertyField(carriedRangedOrbScale, new GUIContent("Visual Scale X/Y"));
+            EditorGUILayout.PropertyField(carriedRangedOrbSortingOrderOffset, new GUIContent("Sorting Order Offset"));
+            EditorGUI.indentLevel--;
+        }
+
+        showMinionVisual = EditorGUILayout.Foldout(showMinionVisual, "Minion Visual", true);
+        if (showMinionVisual)
+        {
+            EditorGUI.indentLevel++;
+            EditorGUILayout.PropertyField(minionMoveSprites, new GUIContent("Move Sprites"), true);
+            EditorGUILayout.PropertyField(minionMoveTexture, new GUIContent("Move Sheet Texture"));
+            EditorGUILayout.PropertyField(minionMoveResource, new GUIContent("Resource Sheet Name"));
+            EditorGUILayout.PropertyField(minionSpriteScale, new GUIContent("Sprite Scale"));
+            EditorGUILayout.PropertyField(minionMoveFps, new GUIContent("Move FPS"));
             EditorGUI.indentLevel--;
         }
 

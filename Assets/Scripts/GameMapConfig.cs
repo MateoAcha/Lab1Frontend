@@ -34,6 +34,8 @@ public class GameMapDefinition
     public string mapName = "Map";
     public Material floorMaterial;
     public Material obstacleMaterial;
+    public Sprite obstacleSprite;
+    public Texture2D obstacleTexture;
     public MapMaterialDefinition materialDrop = new MapMaterialDefinition();
     [HideInInspector]
     public Texture2D floorTexture;

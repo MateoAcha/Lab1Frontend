@@ -4,13 +4,14 @@ using UnityEngine;
 // spriteScale adjusts visual size independently of the parent's hitbox.
 public class RangedEnemyAnimator : MonoBehaviour
 {
-    public float spriteScale      = 1f;
+    public float spriteScale      = 1.2f;
     public float shootPoseDuration = 0.35f; // seconds the shoot pose is held after firing
 
     private const int   MoveFrameCount = 4;
     private const int   FrameW         = 32;
     private const int   FrameH         = 32;
     private const float MoveFps        = 3f;
+    private const float FacingDeadZone = 0.001f;
 
     private Sprite[]              _moveFrames;
     private Sprite                _shootFrame;
@@ -18,11 +19,15 @@ public class RangedEnemyAnimator : MonoBehaviour
     private RangedEnemyController _controller;
     private int                   _moveFrame;
     private float                 _nextAt;
+    private bool                  _facingLeft = true;
+    private Vector3               _lastRootPosition;
+    private bool                  _hasLastRootPosition;
 
     private void Start()
     {
         _sr         = GetComponent<SpriteRenderer>();
         _controller = GetComponentInParent<RangedEnemyController>();
+        TrackRootPosition();
 
         _moveFrames = LoadSheet("Sprites/RangedEnemyMoving", MoveFrameCount);
         Sprite[] shoot = LoadSheet("Sprites/RangedEnemyShooting", 1);
@@ -37,6 +42,7 @@ public class RangedEnemyAnimator : MonoBehaviour
     {
         ApplyScale();
         if (_sr == null) return;
+        UpdateFacing();
 
         bool shooting = _controller != null
             && Time.time - _controller.LastShotTime < shootPoseDuration;
@@ -52,6 +58,40 @@ public class RangedEnemyAnimator : MonoBehaviour
         _moveFrame = (_moveFrame + 1) % _moveFrames.Length;
         _sr.sprite = _moveFrames[_moveFrame];
         _nextAt    = Time.time + 1f / MoveFps;
+    }
+
+    private void UpdateFacing()
+    {
+        float x = 0f;
+
+        if (_controller != null)
+        {
+            x = _controller.FacingDirection.x;
+        }
+        else
+        {
+            Transform root = transform.parent != null ? transform.parent : transform;
+            Vector3 current = root.position;
+            if (_hasLastRootPosition)
+                x = current.x - _lastRootPosition.x;
+            _lastRootPosition = current;
+            _hasLastRootPosition = true;
+        }
+
+        if (x < -FacingDeadZone)
+            _facingLeft = true;
+        else if (x > FacingDeadZone)
+            _facingLeft = false;
+
+        // The ranged enemy art faces left by default, so flip only when facing right.
+        _sr.flipX = !_facingLeft;
+    }
+
+    private void TrackRootPosition()
+    {
+        Transform root = transform.parent != null ? transform.parent : transform;
+        _lastRootPosition = root.position;
+        _hasLastRootPosition = true;
     }
 
     private void ApplyScale()
