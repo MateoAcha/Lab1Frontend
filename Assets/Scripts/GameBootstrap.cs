@@ -68,7 +68,7 @@ public class GameBootstrap : MonoBehaviour
     public Texture2D minionMoveTexture;
     public string minionMoveResource = "Sprites/Minion";
     public float minionSpriteScale = 1f;
-    public float minionMoveFps = 4f;
+    public float minionMoveFps = 8f;
     [Header("Rocks")]
     public Sprite rockSprite;
     public Material rockMaterial;

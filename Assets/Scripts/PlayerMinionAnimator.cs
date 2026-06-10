@@ -10,7 +10,7 @@ public class PlayerMinionAnimator : MonoBehaviour
     public int frameWidth = 32;
     public int frameHeight = 32;
     public int frameCount = 2;
-    public float fps = 4f;
+    public float fps = 8f;
     public float spriteScale = 1f;
 
     private Sprite[] _frames;

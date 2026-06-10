@@ -133,7 +133,7 @@ public class PlayerController : MonoBehaviour
     public Texture2D minionMoveTexture;
     public string minionMoveResource = "Sprites/Minion";
     public float minionSpriteScale = 1f;
-    public float minionMoveFps = 4f;
+    public float minionMoveFps = 8f;
 
     private Rigidbody2D body;
     private Vector2 look = Vector2.down;
