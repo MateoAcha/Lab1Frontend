@@ -280,21 +280,24 @@ public class EnemySpawner : MonoBehaviour
         enemy.transform.position = point;
         enemy.transform.localScale = new Vector3(rangedEnemySize, rangedEnemySize, 1f);
 
-        SpriteRenderer renderer = enemy.AddComponent<SpriteRenderer>();
-        renderer.sprite = SimpleSprite.Square;
-        renderer.color = rangedEnemyColor;
+        GameObject spriteObj = new GameObject("Sprite");
+        spriteObj.transform.SetParent(enemy.transform);
+        spriteObj.transform.localPosition = Vector3.zero;
+        spriteObj.transform.localScale    = Vector3.one;
+
+        SpriteRenderer renderer = spriteObj.AddComponent<SpriteRenderer>();
+        renderer.sprite       = SimpleSprite.Square;
+        renderer.color        = Color.white;
         renderer.sortingOrder = 5;
         if (rangedEnemyMaterial != null)
-        {
             renderer.sharedMaterial = rangedEnemyMaterial;
-            renderer.color = Color.white;
-        }
 
         Health health = enemy.AddComponent<Health>();
         health.hp = 2;
 
         RangedEnemyController rangedEnemy = enemy.AddComponent<RangedEnemyController>();
         rangedEnemy.projectileMaterial = enemyProjectileMaterial;
+        spriteObj.AddComponent<RangedEnemyAnimator>();
     }
 
     private void SpawnGiantsAtMinuteMarks()

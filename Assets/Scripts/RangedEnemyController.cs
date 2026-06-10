@@ -18,6 +18,8 @@ public class RangedEnemyController : MonoBehaviour
     public float avoidProbeDistance = 2f;
     public float avoidTurnAngle = 50f;
 
+    public float LastShotTime { get; private set; }
+
     private Rigidbody2D body;
     private Transform player;
     private Vector2 look = Vector2.down;
@@ -114,6 +116,7 @@ public class RangedEnemyController : MonoBehaviour
 
         if (distance <= attackDistance && Time.time >= nextAttack)
         {
+            LastShotTime = Time.time;
             Shoot();
             nextAttack = Time.time + cooldown;
         }
