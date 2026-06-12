@@ -52,6 +52,6 @@ Material:
     - _Color: {r: 1, g: 1, b: 1, a: 1}
     - _OverlayTint: {r: 1, g: 1, b: 1, a: 1}
     - _RendererColor: {r: 1, g: 1, b: 1, a: 1}
-    - _Tint: {r: 0.23584908, g: 0.002710909, b: 0, a: 1}
+    - _Tint: {r: 0.46226418, g: 0.0077044033, b: 0, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

@@ -300,6 +300,7 @@ public class GameStateHost : MonoBehaviour
                 y = projectile.transform.position.y,
                 vx = projectile.direction.x * projectile.speed,
                 vy = projectile.direction.y * projectile.speed,
+                size = Mathf.Max(0.05f, projectile.transform.localScale.x),
                 life = projectile.RemainingLife
             });
         }

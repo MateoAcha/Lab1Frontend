@@ -30,6 +30,11 @@ public class GameBootstrapEditor : Editor
     private SerializedProperty enemyProjectileMaterial;
     private SerializedProperty skinVisualDatabase;
     private SerializedProperty weaponVisualDatabase;
+    private SerializedProperty enemyAttackOrbSprites;
+    private SerializedProperty enemyAttackOrbTexture;
+    private SerializedProperty enemyAttackOrbFrameCount;
+    private SerializedProperty enemyAttackOrbSize;
+    private SerializedProperty enemyAttackOrbFps;
 
     private SerializedProperty swordSwingSprite;
     private SerializedProperty swordSwingTexture;
@@ -78,6 +83,7 @@ public class GameBootstrapEditor : Editor
     private bool showMap = true;
     private bool showExit = true;
     private bool showMaterials = true;
+    private bool showEnemyAttackOrbVisual = true;
     private bool showSwordVisual = true;
     private bool showCarriedSwordVisual = true;
     private bool showSpearVisual = true;
@@ -113,6 +119,11 @@ public class GameBootstrapEditor : Editor
         enemyProjectileMaterial = serializedObject.FindProperty("enemyProjectileMaterial");
         skinVisualDatabase = serializedObject.FindProperty("skinVisualDatabase");
         weaponVisualDatabase = serializedObject.FindProperty("weaponVisualDatabase");
+        enemyAttackOrbSprites = serializedObject.FindProperty("enemyAttackOrbSprites");
+        enemyAttackOrbTexture = serializedObject.FindProperty("enemyAttackOrbTexture");
+        enemyAttackOrbFrameCount = serializedObject.FindProperty("enemyAttackOrbFrameCount");
+        enemyAttackOrbSize = serializedObject.FindProperty("enemyAttackOrbSize");
+        enemyAttackOrbFps = serializedObject.FindProperty("enemyAttackOrbFps");
 
         swordSwingSprite = serializedObject.FindProperty("swordSwingSprite");
         swordSwingTexture = serializedObject.FindProperty("swordSwingTexture");
@@ -224,6 +235,18 @@ public class GameBootstrapEditor : Editor
             EditorGUILayout.PropertyField(enemyProjectileMaterial);
             EditorGUILayout.PropertyField(skinVisualDatabase);
             EditorGUILayout.PropertyField(weaponVisualDatabase);
+            EditorGUI.indentLevel--;
+        }
+
+        showEnemyAttackOrbVisual = EditorGUILayout.Foldout(showEnemyAttackOrbVisual, "Enemy Attack Orb Visual", true);
+        if (showEnemyAttackOrbVisual)
+        {
+            EditorGUI.indentLevel++;
+            EditorGUILayout.PropertyField(enemyAttackOrbSprites, new GUIContent("Orb Sprites"), true);
+            EditorGUILayout.PropertyField(enemyAttackOrbTexture, new GUIContent("Orb Sheet Texture"));
+            EditorGUILayout.PropertyField(enemyAttackOrbFrameCount, new GUIContent("Frame Count"));
+            EditorGUILayout.PropertyField(enemyAttackOrbSize, new GUIContent("Orb Size"));
+            EditorGUILayout.PropertyField(enemyAttackOrbFps, new GUIContent("Animation FPS"));
             EditorGUI.indentLevel--;
         }
 

@@ -13,6 +13,12 @@ public class RangedEnemyController : MonoBehaviour
     public float recoilSpeed = 10f;
     public float recoilTime = 0.1f;
     public Material projectileMaterial;
+    [Header("Projectile Visual")]
+    public Sprite[] projectileSprites;
+    public Texture2D projectileTexture;
+    [Min(1)] public int projectileFrameCount = 3;
+    [Min(0.01f)] public float projectileSize = 0.25f;
+    [Min(0.01f)] public float projectileFps = 10f;
     [Header("Obstacle Avoidance")]
     public float avoidProbeRadius = 0.5f;
     public float avoidProbeDistance = 2f;
@@ -128,16 +134,25 @@ public class RangedEnemyController : MonoBehaviour
         GameAudio.PlayRangedEnemyShot();
         GameObject projectile = new GameObject("EnemyProjectile");
         projectile.transform.position = transform.position + (Vector3)look * 0.7f;
-        projectile.transform.localScale = new Vector3(0.25f, 0.25f, 1f);
+        float visualSize = Mathf.Max(0.01f, projectileSize);
+        projectile.transform.localScale = new Vector3(visualSize, visualSize, 1f);
 
         SpriteRenderer renderer = projectile.AddComponent<SpriteRenderer>();
-        renderer.sprite = SimpleSprite.Square;
-        renderer.color = new Color(1f, 0.55f, 0.15f, 1f);
+        Sprite[] frames = EnemyProjectileAnimator.ResolveFrames(projectileSprites, projectileTexture, projectileFrameCount);
+        bool hasCustomSprite = frames != null && frames.Length > 0 && frames[0] != null;
+        renderer.sprite = hasCustomSprite ? frames[0] : SimpleSprite.Square;
+        renderer.color = hasCustomSprite ? Color.white : new Color(1f, 0.55f, 0.15f, 1f);
         renderer.sortingOrder = 9;
         if (projectileMaterial != null)
         {
             renderer.sharedMaterial = projectileMaterial;
             renderer.color = Color.white;
+        }
+        if (hasCustomSprite && frames.Length > 1)
+        {
+            EnemyProjectileAnimator animator = projectile.AddComponent<EnemyProjectileAnimator>();
+            animator.frames = frames;
+            animator.fps = projectileFps;
         }
 
         BoxCollider2D box = projectile.AddComponent<BoxCollider2D>();

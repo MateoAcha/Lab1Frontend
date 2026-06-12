@@ -19,6 +19,10 @@ public class GameStateGuest : MonoBehaviour
     private Material _meleeMat;
     private Material _rangedMat;
     private Material _projMat;
+    private Sprite[] _enemyAttackOrbSprites;
+    private Texture2D _enemyAttackOrbTexture;
+    private int _enemyAttackOrbFrameCount = 3;
+    private float _enemyAttackOrbFps = 10f;
     private GameWebSocketClient _ws;
     private bool _matchCompleted;
     private bool _hostPaused;
@@ -39,6 +43,10 @@ public class GameStateGuest : MonoBehaviour
             _meleeMat = bootstrap.meleeEnemyMaterial;
             _rangedMat = bootstrap.rangedEnemyMaterial;
             _projMat = bootstrap.enemyProjectileMaterial;
+            _enemyAttackOrbSprites = bootstrap.enemyAttackOrbSprites;
+            _enemyAttackOrbTexture = bootstrap.enemyAttackOrbTexture;
+            _enemyAttackOrbFrameCount = bootstrap.enemyAttackOrbFrameCount;
+            _enemyAttackOrbFps = bootstrap.enemyAttackOrbFps;
         }
 
         BuildHostPauseNotice();
@@ -577,12 +585,24 @@ public class GameStateGuest : MonoBehaviour
         ApplyProjectileReplicaShape(go.transform, projectile);
 
         SpriteRenderer sr = go.AddComponent<SpriteRenderer>();
-        sr.sprite = SimpleSprite.Square;
-        sr.color = projectile.fromPlayer || projectile.isHitbox
-            ? PlayerLoadout.ParseWeaponColor(projectile.color, Color.white)
-            : new Color(1f, 0.55f, 0.15f, 1f);
+        Sprite[] enemyFrames = projectile.fromPlayer || projectile.isHitbox
+            ? null
+            : EnemyProjectileAnimator.ResolveFrames(_enemyAttackOrbSprites, _enemyAttackOrbTexture, _enemyAttackOrbFrameCount);
+        bool hasEnemyOrbSprite = enemyFrames != null && enemyFrames.Length > 0 && enemyFrames[0] != null;
+        sr.sprite = hasEnemyOrbSprite ? enemyFrames[0] : SimpleSprite.Square;
+        sr.color = hasEnemyOrbSprite
+            ? Color.white
+            : (projectile.fromPlayer || projectile.isHitbox
+                ? PlayerLoadout.ParseWeaponColor(projectile.color, Color.white)
+                : new Color(1f, 0.55f, 0.15f, 1f));
         sr.sortingOrder = 9;
         if (!projectile.fromPlayer && _projMat != null) { sr.sharedMaterial = _projMat; sr.color = Color.white; }
+        if (hasEnemyOrbSprite && enemyFrames.Length > 1)
+        {
+            EnemyProjectileAnimator animator = go.AddComponent<EnemyProjectileAnimator>();
+            animator.frames = enemyFrames;
+            animator.fps = _enemyAttackOrbFps;
+        }
 
         OnlineEntityReplica replica = go.AddComponent<OnlineEntityReplica>();
         replica.SnapTo(go.transform.position);
@@ -602,7 +622,7 @@ public class GameStateGuest : MonoBehaviour
             return;
         }
 
-        float size = projectile.fromPlayer && projectile.size > 0f ? projectile.size : 0.25f;
+        float size = projectile.size > 0f ? projectile.size : 0.25f;
         target.localScale = new Vector3(size, size, 1f);
     }
 

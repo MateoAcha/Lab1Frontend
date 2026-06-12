@@ -35,6 +35,12 @@ public class GameBootstrap : MonoBehaviour
     public Material enemyProjectileMaterial;
     public SkinVisualDatabase skinVisualDatabase;
     public WeaponVisualDatabase weaponVisualDatabase;
+    [Header("Enemy Attack Orb Visual")]
+    public Sprite[] enemyAttackOrbSprites;
+    public Texture2D enemyAttackOrbTexture;
+    [Min(1)] public int enemyAttackOrbFrameCount = 3;
+    [Min(0.01f)] public float enemyAttackOrbSize = 0.25f;
+    [Min(0.01f)] public float enemyAttackOrbFps = 10f;
     [Header("Sword Visual")]
     public Sprite swordSwingSprite;
     public Texture2D swordSwingTexture;
@@ -300,6 +306,11 @@ public class GameBootstrap : MonoBehaviour
         enemySpawner.rangedEnemyMaterial = rangedEnemyMaterial;
         enemySpawner.giantEnemyMaterial = giantEnemyMaterial;
         enemySpawner.enemyProjectileMaterial = enemyProjectileMaterial;
+        enemySpawner.enemyAttackOrbSprites = enemyAttackOrbSprites;
+        enemySpawner.enemyAttackOrbTexture = enemyAttackOrbTexture;
+        enemySpawner.enemyAttackOrbFrameCount = enemyAttackOrbFrameCount;
+        enemySpawner.enemyAttackOrbSize = enemyAttackOrbSize;
+        enemySpawner.enemyAttackOrbFps = enemyAttackOrbFps;
     }
 
     private void SetupExits()

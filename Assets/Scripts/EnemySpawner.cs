@@ -20,6 +20,11 @@ public class EnemySpawner : MonoBehaviour
     public Material rangedEnemyMaterial;
     public Material giantEnemyMaterial;
     public Material enemyProjectileMaterial;
+    public Sprite[] enemyAttackOrbSprites;
+    public Texture2D enemyAttackOrbTexture;
+    [Min(1)] public int enemyAttackOrbFrameCount = 3;
+    [Min(0.01f)] public float enemyAttackOrbSize = 0.25f;
+    [Min(0.01f)] public float enemyAttackOrbFps = 10f;
     [SerializeField] private Color meleeEnemyColor = new Color(0.25f, 1f, 0.25f, 1f);
     [SerializeField] private Color rangedEnemyColor = new Color(1f, 0.65f, 0.2f, 1f);
     [SerializeField] private Color giantEnemyColor = new Color(0.45f, 0.2f, 0.75f, 1f);
@@ -297,6 +302,11 @@ public class EnemySpawner : MonoBehaviour
 
         RangedEnemyController rangedEnemy = enemy.AddComponent<RangedEnemyController>();
         rangedEnemy.projectileMaterial = enemyProjectileMaterial;
+        rangedEnemy.projectileSprites = enemyAttackOrbSprites;
+        rangedEnemy.projectileTexture = enemyAttackOrbTexture;
+        rangedEnemy.projectileFrameCount = enemyAttackOrbFrameCount;
+        rangedEnemy.projectileSize = enemyAttackOrbSize;
+        rangedEnemy.projectileFps = enemyAttackOrbFps;
         spriteObj.AddComponent<RangedEnemyAnimator>();
     }
 
