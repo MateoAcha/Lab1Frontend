@@ -125,6 +125,7 @@ public class RangedEnemyController : MonoBehaviour
 
     private void Shoot()
     {
+        GameAudio.PlayRangedEnemyShot();
         GameObject projectile = new GameObject("EnemyProjectile");
         projectile.transform.position = transform.position + (Vector3)look * 0.7f;
         projectile.transform.localScale = new Vector3(0.25f, 0.25f, 1f);

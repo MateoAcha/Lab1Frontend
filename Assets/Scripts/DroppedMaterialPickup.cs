@@ -74,6 +74,7 @@ public class DroppedMaterialPickup : MonoBehaviour
         }
 
         GameStatsTracker.RegisterMaterialCollected(materialDrop);
+        GameAudio.PlayItemPickup();
         Destroy(gameObject);
     }
 
