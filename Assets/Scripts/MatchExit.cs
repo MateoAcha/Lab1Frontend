@@ -172,6 +172,7 @@ public class MatchExit : MonoBehaviour
         }
 
         triggered = true;
+        GameAudio.PlayExitPortal();
         StartCoroutine(ExitRoutine(player, authoritative));
     }
 

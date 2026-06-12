@@ -199,6 +199,7 @@ public static class GameStatsTracker
         SaveStats(stats);
         _runActive = false;
         TrySyncSessionToBackend(meleeKills, rangedKills, giantKills, timePlayedSeconds, finished);
+        TrySyncConsumedConsumablesToBackend();
         if (finished)
         {
             TrySyncCollectedMaterialsToBackend();
@@ -434,6 +435,22 @@ public static class GameStatsTracker
         EnsureRunner().StartCoroutine(PostCollectedMaterials(payload));
     }
 
+    private static void TrySyncConsumedConsumablesToBackend()
+    {
+        if (!PlayerLoadout.TryGetPendingConsumableUsage(out int userInventoryId, out int quantity))
+        {
+            return;
+        }
+
+        if (!AuthSession.IsLoggedIn || string.IsNullOrWhiteSpace(AuthSession.AccessToken))
+        {
+            PlayerLoadout.ClearPendingConsumableUsage();
+            return;
+        }
+
+        EnsureRunner().StartCoroutine(PostConsumedConsumable(userInventoryId, quantity));
+    }
+
     private static StatsSyncRunner EnsureRunner()
     {
         if (_syncRunner != null)
@@ -514,6 +531,37 @@ public static class GameStatsTracker
         Debug.LogWarning($"[MaterialSync] Failed to sync collected materials. code={request.responseCode}, result={request.result}, body={responseText}");
     }
 
+    private static IEnumerator PostConsumedConsumable(int userInventoryId, int quantity)
+    {
+        int safeQuantity = Mathf.Max(1, quantity);
+        string endpoint = $"{_apiBaseUrl}/users/{AuthSession.UserId}/inventory/{userInventoryId}/consume";
+        string json = JsonUtility.ToJson(new ConsumeInventoryItemRequest { quantity = safeQuantity });
+        var request = new UnityWebRequest(endpoint, "POST");
+
+        byte[] bodyRaw = Encoding.UTF8.GetBytes(json);
+        request.uploadHandler = new UploadHandlerRaw(bodyRaw);
+        request.downloadHandler = new DownloadHandlerBuffer();
+        request.SetRequestHeader("Content-Type", "application/json");
+        request.SetRequestHeader("Authorization", $"Bearer {AuthSession.AccessToken}");
+
+        Debug.Log($"[ConsumableSync] POST {endpoint} qty={safeQuantity}");
+        yield return request.SendWebRequest();
+
+        bool success = request.result == UnityWebRequest.Result.Success
+            && request.responseCode >= 200
+            && request.responseCode < 300;
+
+        if (success)
+        {
+            PlayerLoadout.MarkPendingConsumableUsageSynced(userInventoryId, safeQuantity);
+            Debug.Log("[ConsumableSync] Consumed consumable synced successfully.");
+            yield break;
+        }
+
+        string responseText = request.downloadHandler != null ? request.downloadHandler.text : "";
+        Debug.LogWarning($"[ConsumableSync] Failed to sync consumed consumable. code={request.responseCode}, result={request.result}, body={responseText}");
+    }
+
     [Serializable]
     private class PendingMaterialReward
     {
@@ -528,6 +576,12 @@ public static class GameStatsTracker
     private class MaterialInventoryRewardsRequest
     {
         public PendingMaterialReward[] materials;
+    }
+
+    [Serializable]
+    private class ConsumeInventoryItemRequest
+    {
+        public int quantity;
     }
 
     [Serializable]

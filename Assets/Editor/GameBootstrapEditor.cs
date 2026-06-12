@@ -30,6 +30,20 @@ public class GameBootstrapEditor : Editor
     private SerializedProperty enemyProjectileMaterial;
     private SerializedProperty skinVisualDatabase;
     private SerializedProperty weaponVisualDatabase;
+    private SerializedProperty giantAttackStompSound;
+    private SerializedProperty menuButtonClickSound;
+    private SerializedProperty explosionSpecialAttackSound;
+    private SerializedProperty swordThrowSound;
+    private SerializedProperty spearThrowSound;
+    private SerializedProperty minionSpawnSound;
+    private SerializedProperty gravityBombSound;
+    private SerializedProperty exitPortalSound;
+    private SerializedProperty genericPowerSound;
+    private SerializedProperty fireTrailSound;
+    private SerializedProperty healthConsumableIcon;
+    private SerializedProperty healthConsumableIconTexture;
+    private SerializedProperty speedConsumableIcon;
+    private SerializedProperty speedConsumableIconTexture;
     private SerializedProperty enemyAttackOrbSprites;
     private SerializedProperty enemyAttackOrbTexture;
     private SerializedProperty enemyAttackOrbFrameCount;
@@ -83,6 +97,8 @@ public class GameBootstrapEditor : Editor
     private bool showMap = true;
     private bool showExit = true;
     private bool showMaterials = true;
+    private bool showSoundEffects = true;
+    private bool showConsumableUI = true;
     private bool showEnemyAttackOrbVisual = true;
     private bool showSwordVisual = true;
     private bool showCarriedSwordVisual = true;
@@ -119,6 +135,20 @@ public class GameBootstrapEditor : Editor
         enemyProjectileMaterial = serializedObject.FindProperty("enemyProjectileMaterial");
         skinVisualDatabase = serializedObject.FindProperty("skinVisualDatabase");
         weaponVisualDatabase = serializedObject.FindProperty("weaponVisualDatabase");
+        giantAttackStompSound = serializedObject.FindProperty("giantAttackStompSound");
+        menuButtonClickSound = serializedObject.FindProperty("menuButtonClickSound");
+        explosionSpecialAttackSound = serializedObject.FindProperty("explosionSpecialAttackSound");
+        swordThrowSound = serializedObject.FindProperty("swordThrowSound");
+        spearThrowSound = serializedObject.FindProperty("spearThrowSound");
+        minionSpawnSound = serializedObject.FindProperty("minionSpawnSound");
+        gravityBombSound = serializedObject.FindProperty("gravityBombSound");
+        exitPortalSound = serializedObject.FindProperty("exitPortalSound");
+        genericPowerSound = serializedObject.FindProperty("genericPowerSound");
+        fireTrailSound = serializedObject.FindProperty("fireTrailSound");
+        healthConsumableIcon = serializedObject.FindProperty("healthConsumableIcon");
+        healthConsumableIconTexture = serializedObject.FindProperty("healthConsumableIconTexture");
+        speedConsumableIcon = serializedObject.FindProperty("speedConsumableIcon");
+        speedConsumableIconTexture = serializedObject.FindProperty("speedConsumableIconTexture");
         enemyAttackOrbSprites = serializedObject.FindProperty("enemyAttackOrbSprites");
         enemyAttackOrbTexture = serializedObject.FindProperty("enemyAttackOrbTexture");
         enemyAttackOrbFrameCount = serializedObject.FindProperty("enemyAttackOrbFrameCount");
@@ -235,6 +265,34 @@ public class GameBootstrapEditor : Editor
             EditorGUILayout.PropertyField(enemyProjectileMaterial);
             EditorGUILayout.PropertyField(skinVisualDatabase);
             EditorGUILayout.PropertyField(weaponVisualDatabase);
+            EditorGUI.indentLevel--;
+        }
+
+        showSoundEffects = EditorGUILayout.Foldout(showSoundEffects, "Sound Effects", true);
+        if (showSoundEffects)
+        {
+            EditorGUI.indentLevel++;
+            EditorGUILayout.PropertyField(giantAttackStompSound, new GUIContent("Giant Attack Stomp"));
+            EditorGUILayout.PropertyField(menuButtonClickSound, new GUIContent("Menu Button Click"));
+            EditorGUILayout.PropertyField(explosionSpecialAttackSound, new GUIContent("Explosion Special Attack"));
+            EditorGUILayout.PropertyField(swordThrowSound, new GUIContent("Sword Throw"));
+            EditorGUILayout.PropertyField(spearThrowSound, new GUIContent("Spear Throw"));
+            EditorGUILayout.PropertyField(minionSpawnSound, new GUIContent("Minion Spawn"));
+            EditorGUILayout.PropertyField(gravityBombSound, new GUIContent("Gravity Bomb"));
+            EditorGUILayout.PropertyField(exitPortalSound, new GUIContent("Exit Portal"));
+            EditorGUILayout.PropertyField(genericPowerSound, new GUIContent("Generic Power"));
+            EditorGUILayout.PropertyField(fireTrailSound, new GUIContent("Fire Trail"));
+            EditorGUI.indentLevel--;
+        }
+
+        showConsumableUI = EditorGUILayout.Foldout(showConsumableUI, "Consumable UI", true);
+        if (showConsumableUI)
+        {
+            EditorGUI.indentLevel++;
+            EditorGUILayout.PropertyField(healthConsumableIcon, new GUIContent("Health Potion Icon Sprite"));
+            EditorGUILayout.PropertyField(healthConsumableIconTexture, new GUIContent("Health Potion Icon Texture"));
+            EditorGUILayout.PropertyField(speedConsumableIcon, new GUIContent("Speed Potion Icon Sprite"));
+            EditorGUILayout.PropertyField(speedConsumableIconTexture, new GUIContent("Speed Potion Icon Texture"));
             EditorGUI.indentLevel--;
         }
 

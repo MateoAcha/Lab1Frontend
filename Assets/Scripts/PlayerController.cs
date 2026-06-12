@@ -47,6 +47,11 @@ public class PlayerController : MonoBehaviour
     public float rangedProjectileSpeed = 12f;
     public float rangedProjectileLife = 2.2f;
     public float rangedProjectileSize = 0.35f;
+    [Header("Consumable UI")]
+    public Sprite healthConsumableIcon;
+    public Texture2D healthConsumableIconTexture;
+    public Sprite speedConsumableIcon;
+    public Texture2D speedConsumableIconTexture;
     [Header("Carried Ranged Orb Visual")]
     public Vector2 carriedRangedOrbOffset = new Vector2(0.18f, 0.08f);
     public Vector2 carriedRangedOrbScale = Vector2.one;
@@ -802,6 +807,7 @@ public class PlayerController : MonoBehaviour
         {
             Vector2 usedAim = i == 0 ? aim : GetCurrentAim();
             HideCarriedRangedOrbForAttackCooldown();
+            GameAudio.PlayMagicBurst();
             SpawnRangedAbilityProjectile(
                 "QuickBurstShot",
                 usedAim,
@@ -827,6 +833,7 @@ public class PlayerController : MonoBehaviour
         float damageMultiplier = 1f + level * Mathf.Max(0f, snipeShotLevelDamageBonus);
         nextChargeReady = Time.time + Mathf.Max(0f, chargeCooldown);
         HideCarriedRangedOrbForAttackCooldown();
+        GameAudio.PlayMagicBurst(0.55f);
         SpawnRangedAbilityProjectile(
             "SnipeShot",
             aim,
@@ -938,6 +945,7 @@ public class PlayerController : MonoBehaviour
     {
         int level = GetRangedSkillLevel("ranged_passive_2");
         nextBurstReady = Time.time + Mathf.Max(0f, burstCooldown);
+        GameAudio.PlayGenericPower();
         _stealthUntil = Mathf.Max(_stealthUntil, Time.time + Mathf.Max(0.1f, decoyStealthDuration));
         UpdateStealthVisual();
         SpawnDecoy(level);
@@ -993,6 +1001,7 @@ public class PlayerController : MonoBehaviour
         }
 
         nextBurstReady = Time.time + Mathf.Max(0f, burstCooldown);
+        GameAudio.PlayMinionSpawn();
         for (int i = 0; i < spawnCount; i++)
         {
             SpawnMinion(i, spawnCount);
@@ -1051,6 +1060,7 @@ public class PlayerController : MonoBehaviour
     private void ActivateDefaultBurst()
     {
         nextBurstReady = Time.time + Mathf.Max(0f, burstCooldown);
+        GameAudio.PlayGenericPower();
         int level = GetCurrentBurstSkillLevel();
         float radiusMultiplier = 1f + level * Mathf.Max(0f, burstLevelRadiusBonus);
 
@@ -1093,6 +1103,15 @@ public class PlayerController : MonoBehaviour
         nextChargeReady = Time.time + Mathf.Max(0f, chargeCooldown);
 
         bool boomerang = weaponKind == WeaponKind.Sword;
+        if (boomerang)
+        {
+            GameAudio.PlaySwordThrow();
+        }
+        else
+        {
+            GameAudio.PlaySpearThrow();
+        }
+
         int level = GetSwordSpearSkillLevel("swordspear_active_2");
         float rangeMultiplier = 1f + level * Mathf.Max(0f, weaponThrowLevelRangeBonus);
         Vector3 thrownSize = GetThrownWeaponSize(weaponKind);
@@ -1166,6 +1185,7 @@ public class PlayerController : MonoBehaviour
         int level = GetSwordSpearSkillLevel("swordspear_active_3");
         float durationMultiplier = 1f + level * Mathf.Max(0f, fireTrailLevelDurationBonus);
         nextChargeReady = Time.time + Mathf.Max(0f, chargeCooldown);
+        GameAudio.PlayFireTrail();
         _fireTrailBoostUntil = Time.time + Mathf.Max(0.1f, fireTrailDuration * durationMultiplier);
         _nextFireTrailAt = 0f;
         MaybeSpawnFireTrail(LastMoveInput.sqrMagnitude > 0.001f ? LastMoveInput : ReadMove());
@@ -1227,6 +1247,7 @@ public class PlayerController : MonoBehaviour
         look = aim;
         LastAimDirection = aim;
         nextBurstReady = Time.time + Mathf.Max(0f, burstCooldown);
+        GameAudio.PlayGenericPower();
         int level = GetSwordSpearSkillLevel("swordspear_passive_2");
         float sizeMultiplier = 1f + level * Mathf.Max(0f, wallLevelSizeBonus);
 
@@ -1239,10 +1260,7 @@ public class PlayerController : MonoBehaviour
         float angle = Mathf.Atan2(aim.y, aim.x) * Mathf.Rad2Deg + 90f;
         wall.transform.rotation = Quaternion.Euler(0f, 0f, angle);
 
-        SpriteRenderer renderer = wall.AddComponent<SpriteRenderer>();
-        renderer.sprite = SimpleSprite.Square;
-        renderer.color = new Color(0.48f, 0.78f, 1f, 0.86f);
-        renderer.sortingOrder = 7;
+        CreateGuardWallVisual(wall.transform, 7);
 
         BoxCollider2D box = wall.AddComponent<BoxCollider2D>();
         Rigidbody2D wallBody = wall.AddComponent<Rigidbody2D>();
@@ -1271,6 +1289,7 @@ public class PlayerController : MonoBehaviour
         look = aim;
         LastAimDirection = aim;
         nextBurstReady = Time.time + Mathf.Max(0f, burstCooldown);
+        GameAudio.PlayGravityBomb();
         int level = GetSwordSpearSkillLevel("swordspear_passive_3");
         float radiusMultiplier = 1f + level * Mathf.Max(0f, gravityBombLevelRadiusBonus);
 
@@ -1367,7 +1386,6 @@ public class PlayerController : MonoBehaviour
 
     private void SwingSword(Vector2 direction, float damageMultiplier, float rangeMultiplier, float lifeOverride)
     {
-        GameAudio.PlaySwordCut();
         float usedScale = Mathf.Max(1f, rangeMultiplier);
         float usedRange = range * swordRangeMultiplier * usedScale;
         float usedLength = length * 0.75f * usedScale;
@@ -1376,13 +1394,14 @@ public class PlayerController : MonoBehaviour
         float usedLife = (lifeOverride > 0f ? lifeOverride : Mathf.Max(time, 0.16f))
             * Mathf.Max(0.01f, visualSettings.durationMultiplier);
         _hideCarriedSwordUntil = Mathf.Max(_hideCarriedSwordUntil, Time.time + usedLife);
+        bool chargedSwing = rangeMultiplier > 1.01f;
+        GameAudio.PlaySwordCut(chargedSwing ? 1.6f : 1f);
 
         GameObject slash = new GameObject("PlayerSwordSwing");
         slash.transform.position = transform.position + (Vector3)direction * usedRange;
         slash.transform.localScale = new Vector3(usedLength, usedWidth, 1f);
 
         Sprite swordSprite = visualSettings.sprite;
-        bool chargedSwing = rangeMultiplier > 1.01f;
         if (chargedSwing)
             CreateChargeHitboxVisual(slash.transform, 9);
 
@@ -2067,6 +2086,53 @@ public class PlayerController : MonoBehaviour
 
         CreateChargeGlowPiece(parent, "ChargeFaintLight", Vector2.zero, Vector2.one, new Color(0.55f, 0.90f, 1f, 0.18f), sortingOrder);
         CreateChargeGlowPiece(parent, "ChargeSoftCenter", Vector2.zero, new Vector2(0.72f, 0.48f), new Color(0.85f, 1f, 1f, 0.10f), sortingOrder + 1);
+    }
+
+    private void CreateGuardWallVisual(Transform parent, int sortingOrder)
+    {
+        if (parent == null)
+            return;
+
+        Vector3 parentScale = parent.localScale;
+        float wallLength = Mathf.Max(0.01f, Mathf.Abs(parentScale.x));
+        float wallThickness = Mathf.Max(0.01f, Mathf.Abs(parentScale.y));
+        float capDiameter = wallThickness * 2.7f;
+        float capScaleX = capDiameter / wallLength;
+
+        CreateChargeGlowPiece(parent, "GuardWallOuterGlow", Vector2.zero, new Vector2(1.12f, 3.4f), new Color(0.30f, 0.82f, 1f, 0.22f), sortingOrder);
+        CreateChargeGlowPiece(parent, "GuardWallInnerGlow", Vector2.zero, new Vector2(0.98f, 2.1f), new Color(0.84f, 1f, 1f, 0.28f), sortingOrder + 1);
+        CreateChargeGlowPiece(parent, "GuardWallCore", Vector2.zero, new Vector2(0.92f, 0.78f), new Color(0.58f, 0.94f, 1f, 0.62f), sortingOrder + 2);
+        CreateGuardWallStripe(parent, sortingOrder + 3);
+        CreateGuardWallCap(parent, "GuardWallLeftBloom", new Vector2(-0.5f, 0f), new Vector2(capScaleX, 2.7f), sortingOrder + 2);
+        CreateGuardWallCap(parent, "GuardWallRightBloom", new Vector2(0.5f, 0f), new Vector2(capScaleX, 2.7f), sortingOrder + 2);
+    }
+
+    private void CreateGuardWallStripe(Transform parent, int sortingOrder)
+    {
+        GameObject stripe = new GameObject("GuardWallEnergySpine");
+        stripe.transform.SetParent(parent, false);
+        stripe.transform.localPosition = Vector3.zero;
+        stripe.transform.localRotation = Quaternion.identity;
+        stripe.transform.localScale = new Vector3(0.86f, 0.18f, 1f);
+
+        SpriteRenderer renderer = stripe.AddComponent<SpriteRenderer>();
+        renderer.sprite = SimpleSprite.Square;
+        renderer.color = new Color(0.94f, 1f, 1f, 0.72f);
+        renderer.sortingOrder = sortingOrder;
+    }
+
+    private void CreateGuardWallCap(Transform parent, string name, Vector2 position, Vector2 scale, int sortingOrder)
+    {
+        GameObject cap = new GameObject(name);
+        cap.transform.SetParent(parent, false);
+        cap.transform.localPosition = new Vector3(position.x, position.y, 0f);
+        cap.transform.localRotation = Quaternion.identity;
+        cap.transform.localScale = new Vector3(scale.x, scale.y, 1f);
+
+        SpriteRenderer renderer = cap.AddComponent<SpriteRenderer>();
+        renderer.sprite = SimpleSprite.Circle;
+        renderer.color = new Color(0.72f, 0.96f, 1f, 0.52f);
+        renderer.sortingOrder = sortingOrder;
     }
 
     private void CreateChargeGlowPiece(

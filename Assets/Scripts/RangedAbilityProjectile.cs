@@ -94,6 +94,8 @@ public class RangedAbilityProjectile : MonoBehaviour
 
     private void SpawnExplosion()
     {
+        GameAudio.PlayExplosionSpecialAttack();
+
         GameObject explosion = new GameObject("BombShotExplosion");
         explosion.transform.position = transform.position;
         explosion.transform.localScale = Vector3.one * 0.1f;

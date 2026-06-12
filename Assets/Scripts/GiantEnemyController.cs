@@ -124,6 +124,7 @@ public class GiantEnemyController : MonoBehaviour
     {
         attacking = true;
         body.linearVelocity = Vector2.zero;
+        GameAudio.PlayGiantAttackStomp();
 
         if (direction.sqrMagnitude < 0.001f)
         {

@@ -292,6 +292,36 @@ public class AuthApiClient
         }
     }
 
+    public IEnumerator ConsumeInventoryItem(int userId, int userInventoryId, int quantity, Action onSuccess, Action<string> onError)
+    {
+        string json = JsonUtility.ToJson(new ConsumeInventoryItemRequest
+        {
+            quantity = Mathf.Max(1, quantity)
+        });
+        var request = new UnityWebRequest(_baseUrl + $"/users/{userId}/inventory/{userInventoryId}/consume", "POST");
+        byte[] bodyRaw = Encoding.UTF8.GetBytes(json);
+        request.uploadHandler = new UploadHandlerRaw(bodyRaw);
+        request.downloadHandler = new DownloadHandlerBuffer();
+        request.SetRequestHeader("Content-Type", "application/json");
+        if (!TryAttachAuthorization(request, onError))
+        {
+            yield break;
+        }
+
+        Debug.Log($"[AuthApi] POST {_baseUrl}/users/{userId}/inventory/{userInventoryId}/consume qty={quantity}");
+        yield return request.SendWebRequest();
+
+        if (request.result == UnityWebRequest.Result.Success
+            && request.responseCode >= 200 && request.responseCode < 300)
+        {
+            onSuccess?.Invoke();
+        }
+        else
+        {
+            onError?.Invoke(FormatError(request));
+        }
+    }
+
     public IEnumerator GetPlayerStats(int userId, Action<PlayerStatsData> onSuccess, Action<string> onError)
     {
         var request = UnityWebRequest.Get(_baseUrl + $"/users/{userId}/stats");
@@ -1030,6 +1060,12 @@ public class AuthApiClient
     private class SpendMaterialRequest
     {
         public string materialKey;
+        public int quantity;
+    }
+
+    [Serializable]
+    private class ConsumeInventoryItemRequest
+    {
         public int quantity;
     }
 

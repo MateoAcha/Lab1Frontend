@@ -31,6 +31,10 @@ public static class PlayerLoadout
     public static int EquippedSkinId { get; private set; } = 0;
     public static string EquippedSkinName { get; private set; } = "";
     public static int EquippedWeaponItemId => EquippedWeapon != null ? EquippedWeapon.itemId : 0;
+    public static int EquippedConsumableUserInventoryId => EquippedConsumable != null ? EquippedConsumable.userInventoryId : 0;
+
+    private static int _pendingConsumableUserInventoryId;
+    private static int _pendingConsumableUsedQuantity;
 
     public static void ApplySkin(SkinData[] skins)
     {
@@ -227,7 +231,61 @@ public static class PlayerLoadout
         if (ConsumableQuantity <= 0) return false;
         if (!ConsumableIsSpeedBoost && ConsumableHealAmount <= 0f) return false;
         ConsumableQuantity--;
+        if (EquippedConsumable != null)
+        {
+            EquippedConsumable.quantity = Mathf.Max(0, EquippedConsumable.quantity - 1);
+            RegisterPendingConsumableUse(EquippedConsumable.userInventoryId);
+        }
         return true;
+    }
+
+    public static bool TryGetPendingConsumableUsage(out int userInventoryId, out int quantity)
+    {
+        userInventoryId = _pendingConsumableUserInventoryId;
+        quantity = _pendingConsumableUsedQuantity;
+        return userInventoryId > 0 && quantity > 0;
+    }
+
+    public static void MarkPendingConsumableUsageSynced(int userInventoryId, int quantity)
+    {
+        if (userInventoryId <= 0 || quantity <= 0)
+        {
+            return;
+        }
+
+        if (_pendingConsumableUserInventoryId != userInventoryId)
+        {
+            return;
+        }
+
+        _pendingConsumableUsedQuantity = Mathf.Max(0, _pendingConsumableUsedQuantity - quantity);
+        if (_pendingConsumableUsedQuantity == 0)
+        {
+            _pendingConsumableUserInventoryId = 0;
+        }
+    }
+
+    public static void ClearPendingConsumableUsage()
+    {
+        _pendingConsumableUserInventoryId = 0;
+        _pendingConsumableUsedQuantity = 0;
+    }
+
+    private static void RegisterPendingConsumableUse(int userInventoryId)
+    {
+        if (userInventoryId <= 0)
+        {
+            return;
+        }
+
+        if (_pendingConsumableUserInventoryId != 0 && _pendingConsumableUserInventoryId != userInventoryId)
+        {
+            Debug.LogWarning("PlayerLoadout: replacing unsynced consumable usage with the currently equipped consumable.");
+            _pendingConsumableUsedQuantity = 0;
+        }
+
+        _pendingConsumableUserInventoryId = userInventoryId;
+        _pendingConsumableUsedQuantity++;
     }
 
     private static int ParseKeyValue(string summary, string key)

@@ -35,6 +35,22 @@ public class GameBootstrap : MonoBehaviour
     public Material enemyProjectileMaterial;
     public SkinVisualDatabase skinVisualDatabase;
     public WeaponVisualDatabase weaponVisualDatabase;
+    [Header("Sound Effects")]
+    public AudioClip giantAttackStompSound;
+    public AudioClip menuButtonClickSound;
+    public AudioClip explosionSpecialAttackSound;
+    public AudioClip swordThrowSound;
+    public AudioClip spearThrowSound;
+    public AudioClip minionSpawnSound;
+    public AudioClip gravityBombSound;
+    public AudioClip exitPortalSound;
+    public AudioClip genericPowerSound;
+    public AudioClip fireTrailSound;
+    [Header("Consumable UI")]
+    public Sprite healthConsumableIcon;
+    public Texture2D healthConsumableIconTexture;
+    public Sprite speedConsumableIcon;
+    public Texture2D speedConsumableIconTexture;
     [Header("Enemy Attack Orb Visual")]
     public Sprite[] enemyAttackOrbSprites;
     public Texture2D enemyAttackOrbTexture;
@@ -141,6 +157,17 @@ public class GameBootstrap : MonoBehaviour
         SetupGameOverScreen();
         SetupPauseMenu();
         GameAudio.EnsureMusic();
+        GameAudio.ConfigureSoundEffects(
+            giantAttackStompSound,
+            menuButtonClickSound,
+            explosionSpecialAttackSound,
+            swordThrowSound,
+            spearThrowSound,
+            minionSpawnSound,
+            gravityBombSound,
+            exitPortalSound,
+            genericPowerSound,
+            fireTrailSound);
     }
 
     private void SetupCamera()
@@ -258,6 +285,10 @@ public class GameBootstrap : MonoBehaviour
         player.carriedRangedOrbOffset = carriedRangedOrbOffset;
         player.carriedRangedOrbScale = carriedRangedOrbScale;
         player.carriedRangedOrbSortingOrderOffset = carriedRangedOrbSortingOrderOffset;
+        player.healthConsumableIcon = healthConsumableIcon;
+        player.healthConsumableIconTexture = healthConsumableIconTexture;
+        player.speedConsumableIcon = speedConsumableIcon;
+        player.speedConsumableIconTexture = speedConsumableIconTexture;
         player.minionMoveSprites = minionMoveSprites;
         player.minionMoveTexture = minionMoveTexture;
         player.minionMoveResource = minionMoveResource;
