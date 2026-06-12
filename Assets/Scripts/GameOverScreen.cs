@@ -132,6 +132,7 @@ public class GameOverScreen : MonoBehaviour
         {
             Time.timeScale = 1f;
             Destroy(canvasObj);
+            GameAudio.StopMusic();
             SceneManager.LoadScene("Menu");
         });
     }

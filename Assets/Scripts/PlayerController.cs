@@ -615,6 +615,7 @@ public class PlayerController : MonoBehaviour
         }
 
         if (!PlayerLoadout.UseConsumable()) return;
+        GameAudio.PlayPotionDrink();
 
         if (PlayerLoadout.ConsumableIsSpeedBoost)
         {
@@ -636,6 +637,7 @@ public class PlayerController : MonoBehaviour
         if (!_networkConsumableIsSpeedBoost && _networkConsumableHealAmount <= 0f) return;
 
         _networkConsumableQuantity--;
+        GameAudio.PlayPotionDrink();
 
         if (_networkConsumableIsSpeedBoost)
         {
@@ -1365,6 +1367,7 @@ public class PlayerController : MonoBehaviour
 
     private void SwingSword(Vector2 direction, float damageMultiplier, float rangeMultiplier, float lifeOverride)
     {
+        GameAudio.PlaySwordCut();
         float usedScale = Mathf.Max(1f, rangeMultiplier);
         float usedRange = range * swordRangeMultiplier * usedScale;
         float usedLength = length * 0.75f * usedScale;
@@ -1422,6 +1425,7 @@ public class PlayerController : MonoBehaviour
 
     private void ShootProjectile(Vector2 direction, float damageMultiplier, float rangeMultiplier, float lifeOverride)
     {
+        GameAudio.PlayMagicBurst();
         GameObject projectile = new GameObject("PlayerProjectile");
         projectile.transform.position = transform.position + (Vector3)direction * 0.7f;
         projectile.transform.localScale = Vector3.one * Mathf.Max(0.05f, rangedProjectileSize);

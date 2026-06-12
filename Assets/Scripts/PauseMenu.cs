@@ -42,6 +42,7 @@ public class PauseMenu : MonoBehaviour
         IsPaused = false;
         Time.timeScale = 1f;
         Destroy(_overlay.transform.root.gameObject);
+        GameAudio.StopMusic();
         SceneManager.LoadScene("Menu");
     }
 
