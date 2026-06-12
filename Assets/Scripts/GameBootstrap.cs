@@ -157,17 +157,6 @@ public class GameBootstrap : MonoBehaviour
         SetupGameOverScreen();
         SetupPauseMenu();
         GameAudio.EnsureMusic();
-        GameAudio.ConfigureSoundEffects(
-            giantAttackStompSound,
-            menuButtonClickSound,
-            explosionSpecialAttackSound,
-            swordThrowSound,
-            spearThrowSound,
-            minionSpawnSound,
-            gravityBombSound,
-            exitPortalSound,
-            genericPowerSound,
-            fireTrailSound);
     }
 
     private void SetupCamera()
