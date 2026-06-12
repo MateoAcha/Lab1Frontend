@@ -1742,7 +1742,7 @@ public class AuthMenuController : MonoBehaviour
         if (!_dailyCoinsUiHooked)
         {
             _dailyCoinsUiHooked = true;
-            dailyCoinsButton.onClick.AddListener(ClaimDailyCoins);
+        dailyCoinsButton.onClick.AddListener(ClaimDailyCoins);
         }
     }
 
@@ -4262,7 +4262,9 @@ public class AuthMenuController : MonoBehaviour
         GameUiThemeRuntime.StyleButton(btn, img, baseColor);
         btn.interactable = interactable;
         if (interactable && onClick != null)
+        {
             btn.onClick.AddListener(onClick);
+        }
 
         VerticalLayoutGroup vg = card.AddComponent<VerticalLayoutGroup>();
         vg.padding = new RectOffset(24, 24, 36, 36);

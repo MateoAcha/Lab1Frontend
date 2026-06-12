@@ -6,6 +6,8 @@ public class GameAudio : MonoBehaviour
 
     private AudioSource _music;
     private AudioSource _sfx;
+    private bool _menuClickActive;
+    private int _clickPlayedFrame = -1;
 
     private AudioClip _clipMenuTheme;
     private AudioClip _clipMatchTheme0;   // Shattered Reaches
@@ -29,6 +31,12 @@ public class GameAudio : MonoBehaviour
     private AudioClip _clipExitPortal;
     private AudioClip _clipGenericPower;
     private AudioClip _clipFireTrail;
+
+    private void Update()
+    {
+        if (_menuClickActive && Input.GetMouseButtonDown(0))
+            PlayMenuButtonClick();
+    }
 
     private void Awake()
     {
@@ -122,12 +130,14 @@ public class GameAudio : MonoBehaviour
     public static void EnsureMenuMusic()
     {
         EnsureInstance();
+        if (Instance != null) { Instance._music.volume = 0.2f; Instance._menuClickActive = true; }
         SwitchMusic(Instance?._clipMenuTheme);
     }
 
     public static void EnsureMatchMusic(int mapIndex)
     {
         EnsureInstance();
+        if (Instance != null) Instance._menuClickActive = false;
         if (Instance == null) return;
         AudioClip track = mapIndex switch
         {
@@ -155,19 +165,25 @@ public class GameAudio : MonoBehaviour
     }
 
     public static void PlayMagicBurst(float volumeScale = 1f)     => PlayClip(Instance?._clipMagicBurst, volumeScale);
-    public static void PlayRangedEnemyShot()                      => PlayClip(Instance?._clipRangedEnemyShot, 0.35f);
+    public static void PlayRangedEnemyShot()                      => PlayClip(Instance?._clipRangedEnemyShot, 0.15f);
     public static void PlaySwordCut(float volumeScale = 1f)       => PlayClip(Instance?._clipSwordCut, volumeScale);
     public static void PlaySpearThrust()                          => PlayClip(Instance?._clipSpearThrust);
     public static void PlayItemPickup()                           => PlayClip(Instance?._clipItemPickup);
     public static void PlayPotionDrink()                          => PlayClip(Instance?._clipPotionDrink);
     public static void PlayGiantAttackStomp()                     => PlayClip(Instance?._clipGiantAttackStomp);
     public static void PlayGiantFootsteps()                       => PlayClip(Instance?._clipGiantFootsteps);
-    public static void PlayMenuButtonClick()                      => PlayClip(Instance?._clipMenuButtonClick);
+    public static void PlayMenuButtonClick()
+    {
+        if (Instance == null) return;
+        if (Time.frameCount == Instance._clickPlayedFrame) return;
+        Instance._clickPlayedFrame = Time.frameCount;
+        PlayClip(Instance._clipMenuButtonClick);
+    }
     public static void PlayExplosionSpecialAttack()               => PlayClip(Instance?._clipExplosionSpecialAttack);
     public static void PlaySwordThrow()                           => PlayClip(Instance?._clipSwordThrow);
     public static void PlaySpearThrow()                           => PlayClip(Instance?._clipSpearThrow);
-    public static void PlayMinionSpawn()                          => PlayClip(Instance?._clipMinionSpawn);
-    public static void PlayGravityBomb()                          => PlayClip(Instance?._clipGravityBomb);
+    public static void PlayMinionSpawn()                          => PlayClip(Instance?._clipMinionSpawn, 1.8f);
+    public static void PlayGravityBomb()                          => PlayClip(Instance?._clipGravityBomb, 1.8f);
     public static void PlayExitPortal()                           => PlayClip(Instance?._clipExitPortal);
     public static void PlayGenericPower()                         => PlayClip(Instance?._clipGenericPower);
     public static void PlayFireTrail()                            => PlayClip(Instance?._clipFireTrail);

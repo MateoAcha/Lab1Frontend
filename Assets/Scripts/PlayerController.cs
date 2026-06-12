@@ -807,7 +807,7 @@ public class PlayerController : MonoBehaviour
         {
             Vector2 usedAim = i == 0 ? aim : GetCurrentAim();
             HideCarriedRangedOrbForAttackCooldown();
-            GameAudio.PlayMagicBurst();
+            GameAudio.PlayMagicBurst(0.18f);
             SpawnRangedAbilityProjectile(
                 "QuickBurstShot",
                 usedAim,
@@ -833,7 +833,7 @@ public class PlayerController : MonoBehaviour
         float damageMultiplier = 1f + level * Mathf.Max(0f, snipeShotLevelDamageBonus);
         nextChargeReady = Time.time + Mathf.Max(0f, chargeCooldown);
         HideCarriedRangedOrbForAttackCooldown();
-        GameAudio.PlayMagicBurst(0.55f);
+        GameAudio.PlayMagicBurst(0.18f);
         SpawnRangedAbilityProjectile(
             "SnipeShot",
             aim,
@@ -1445,7 +1445,7 @@ public class PlayerController : MonoBehaviour
 
     private void ShootProjectile(Vector2 direction, float damageMultiplier, float rangeMultiplier, float lifeOverride)
     {
-        GameAudio.PlayMagicBurst();
+        GameAudio.PlayMagicBurst(0.18f);
         GameObject projectile = new GameObject("PlayerProjectile");
         projectile.transform.position = transform.position + (Vector3)direction * 0.7f;
         projectile.transform.localScale = Vector3.one * Mathf.Max(0.05f, rangedProjectileSize);
