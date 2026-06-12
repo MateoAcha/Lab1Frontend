@@ -185,6 +185,7 @@ public class AuthMenuController : MonoBehaviour
 
     private void Start()
     {
+        GameAudio.EnsureMenuMusic();
         GameUiThemeRuntime.SetTheme(uiTheme);
         SkinVisualDatabase.Register(skinVisualDatabase);
         WeaponVisualDatabase.Register(weaponVisualDatabase);

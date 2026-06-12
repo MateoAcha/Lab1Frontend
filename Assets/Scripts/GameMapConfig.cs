@@ -86,11 +86,11 @@ public static class GameMapSelection
         {
             new GameMapDefinition
             {
-                mapName = "Green Fields",
+                mapName = "Shattered Reaches",
                 materialDrop = new MapMaterialDefinition
                 {
                     inventoryKey = "green_fields_material",
-                    itemName = "Green Fields Material",
+                    itemName = "Shattered Reaches Material",
                     rarity = "Rare",
                     pickupColor = new Color(1f, 0.82f, 0.25f, 1f)
                 },
@@ -108,11 +108,11 @@ public static class GameMapSelection
             },
             new GameMapDefinition
             {
-                mapName = "Ash Basin",
+                mapName = "Ashen Stonefields",
                 materialDrop = new MapMaterialDefinition
                 {
                     inventoryKey = "ash_basin_material",
-                    itemName = "Ash Basin Material",
+                    itemName = "Ashen Stonefields Material",
                     rarity = "Rare",
                     pickupColor = new Color(0.95f, 0.36f, 0.25f, 1f)
                 },
@@ -130,11 +130,11 @@ public static class GameMapSelection
             },
             new GameMapDefinition
             {
-                mapName = "Moon Marsh",
+                mapName = "Damnation's Maw",
                 materialDrop = new MapMaterialDefinition
                 {
                     inventoryKey = "moon_marsh_material",
-                    itemName = "Moon Marsh Material",
+                    itemName = "Damnation's Maw Material",
                     rarity = "Rare",
                     pickupColor = new Color(0.3f, 0.95f, 0.9f, 1f)
                 },
@@ -159,17 +159,17 @@ public static class GameMapSelection
         {
             new MapSelectOption
             {
-                mapName = "Green Fields",
+                mapName = "Shattered Reaches",
                 previewColor = new Color(1f, 0.7853262f, 0.1273585f, 1f)
             },
             new MapSelectOption
             {
-                mapName = "Ash Basin",
+                mapName = "Ashen Stonefields",
                 previewColor = new Color(0.38f, 0.20f, 0.17f, 1f)
             },
             new MapSelectOption
             {
-                mapName = "Moon Marsh",
+                mapName = "Damnation's Maw",
                 previewColor = new Color(0.08f, 0.28f, 0.34f, 1f)
             }
         };

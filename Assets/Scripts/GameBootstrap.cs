@@ -140,7 +140,7 @@ public class GameBootstrap : MonoBehaviour
         SetupSpawner();
         SetupGameOverScreen();
         SetupPauseMenu();
-        GameAudio.EnsureMusic();
+        GameAudio.EnsureMatchMusic(GameMapSelection.SelectedMapIndex);
     }
 
     private void SetupCamera()

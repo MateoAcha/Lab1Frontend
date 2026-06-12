@@ -1313,6 +1313,7 @@ public class PlayerController : MonoBehaviour
 
     private void StabSpear(Vector2 direction, float damageMultiplier, float rangeMultiplier, float lifeOverride)
     {
+        GameAudio.PlaySpearThrust();
         float usedScale = Mathf.Max(1f, rangeMultiplier);
         float usedRange = range * usedScale;
         float usedLength = length * usedScale;
