@@ -34,15 +34,6 @@ public class GravityBombProjectile : MonoBehaviour
         OnlineNetworkRegistry.Unregister(this);
     }
 
-    private void OnEnable()  => OnlineNetworkRegistry.Register(this);
-    private void OnDisable() => OnlineNetworkRegistry.Unregister(this);
-
-    public float RemainingLife => _startAt > 0f
-        ? Mathf.Max(0f, _startAt + Mathf.Max(0.1f, travelTime) - Time.time)
-        : travelTime;
-
-    public Vector2 Velocity => direction.normalized * (Mathf.Max(0.5f, distance) / Mathf.Max(0.1f, travelTime));
-
     private void Start()
     {
         if (direction.sqrMagnitude < 0.001f)

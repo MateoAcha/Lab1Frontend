@@ -25,11 +25,6 @@ public class PlayerMinion : MonoBehaviour
         OnlineNetworkRegistry.Unregister(this);
     }
 
-    public Vector2 Velocity => _body != null ? _body.linearVelocity : Vector2.zero;
-
-    private void OnEnable()  => OnlineNetworkRegistry.Register(this);
-    private void OnDisable() => OnlineNetworkRegistry.Unregister(this);
-
     private void Awake()
     {
         _body = GetComponent<Rigidbody2D>();

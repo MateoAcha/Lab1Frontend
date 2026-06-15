@@ -23,13 +23,6 @@ public class ExpansionBurst : MonoBehaviour
         OnlineNetworkRegistry.Unregister(this);
     }
 
-    private void OnEnable()  => OnlineNetworkRegistry.Register(this);
-    private void OnDisable() => OnlineNetworkRegistry.Unregister(this);
-
-    public float RemainingLife => startAt > 0f
-        ? Mathf.Max(0f, startAt + Mathf.Max(0.01f, duration) - Time.time)
-        : duration;
-
     public Color VisualColor
     {
         get
