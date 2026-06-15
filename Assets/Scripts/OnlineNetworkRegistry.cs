@@ -17,6 +17,7 @@ public static class OnlineNetworkRegistry
     public static readonly List<FireTrailSegment> FireTrails = new List<FireTrailSegment>();
     public static readonly List<TemporaryWall> TemporaryWalls = new List<TemporaryWall>();
     public static readonly List<PlayerDecoy> PlayerDecoys = new List<PlayerDecoy>();
+    public static readonly List<DroppedMaterialPickup> MaterialPickups = new List<DroppedMaterialPickup>();
 
     public static void Register(EnemyController enemy)
     {
@@ -181,5 +182,16 @@ public static class OnlineNetworkRegistry
     public static void Unregister(PlayerDecoy decoy)
     {
         PlayerDecoys.Remove(decoy);
+    }
+
+    public static void Register(DroppedMaterialPickup pickup)
+    {
+        if (pickup != null && !MaterialPickups.Contains(pickup))
+            MaterialPickups.Add(pickup);
+    }
+
+    public static void Unregister(DroppedMaterialPickup pickup)
+    {
+        MaterialPickups.Remove(pickup);
     }
 }

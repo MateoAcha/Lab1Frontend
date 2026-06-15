@@ -16,6 +16,9 @@ public class GameStateGuest : MonoBehaviour
     private readonly Dictionary<int, OnlineEntityReplica> _enemyReplicas = new Dictionary<int, OnlineEntityReplica>();
     private readonly Dictionary<int, OnlineEntityReplica> _projectileReplicas = new Dictionary<int, OnlineEntityReplica>();
     private readonly Dictionary<int, OnlineEntityReplica> _effectReplicas = new Dictionary<int, OnlineEntityReplica>();
+    private readonly Dictionary<int, float> _effectReplicaExpiresAt = new Dictionary<int, float>();
+    private readonly Dictionary<int, DroppedMaterialPickup> _pickupReplicas = new Dictionary<int, DroppedMaterialPickup>();
+    private readonly HashSet<int> _locallyCollectedPickupIds = new HashSet<int>();
 
     private Material _meleeMat;
     private Material _rangedMat;
@@ -34,6 +37,8 @@ public class GameStateGuest : MonoBehaviour
     private GameObject _hostPauseNotice;
     private OnlineMatchInputMessage _lastSentInput;
     private float _nextInputHeartbeatAt;
+    private int _pickupCollectSeq;
+    private int _pendingPickupCollectId;
 
     private void Start()
     {
@@ -128,6 +133,8 @@ public class GameStateGuest : MonoBehaviour
             chargeSeq = player != null ? player.NetworkChargeSequence : 0,
             burstSeq = player != null ? player.NetworkBurstSequence : 0,
             consumableSeq = player != null ? player.NetworkConsumableSequence : 0,
+            pickupSeq = _pickupCollectSeq,
+            pickupId = _pendingPickupCollectId,
             weaponDamage = Mathf.Max(1, PlayerLoadout.WeaponDamage),
             weaponItemId = PlayerLoadout.EquippedWeaponItemId,
             weaponType = PlayerLoadout.CurrentWeaponKind.ToString(),
@@ -199,6 +206,8 @@ public class GameStateGuest : MonoBehaviour
         if (input.chargeSeq != _lastSentInput.chargeSeq) return true;
         if (input.burstSeq != _lastSentInput.burstSeq) return true;
         if (input.consumableSeq != _lastSentInput.consumableSeq) return true;
+        if (input.pickupSeq != _lastSentInput.pickupSeq) return true;
+        if (input.pickupId != _lastSentInput.pickupId) return true;
         if (input.weaponItemId != _lastSentInput.weaponItemId) return true;
         if (!string.Equals(input.weaponType, _lastSentInput.weaponType, StringComparison.Ordinal)) return true;
         if (!string.Equals(input.weaponColor, _lastSentInput.weaponColor, StringComparison.Ordinal)) return true;
@@ -256,6 +265,7 @@ public class GameStateGuest : MonoBehaviour
         ApplyEnemyState(state.enemies);
         ApplyProjectileState(state.projectiles);
         ApplyEffectState(state.effects);
+        ApplyMaterialPickupState(state.pickups);
 
         if (state.matchEnded && !_matchCompleted)
         {
@@ -541,6 +551,16 @@ public class GameStateGuest : MonoBehaviour
         SetLocalPlayerVisibleAndControllable(false);
     }
 
+    public void RequestMaterialPickupCollect(int pickupId)
+    {
+        if (pickupId <= 0)
+            return;
+
+        _locallyCollectedPickupIds.Add(pickupId);
+        _pendingPickupCollectId = pickupId;
+        _pickupCollectSeq++;
+    }
+
     private void HandleHostLeft()
     {
         if (_matchCompleted) return;
@@ -690,13 +710,21 @@ public class GameStateGuest : MonoBehaviour
                     ApplyProjectileReplicaShape(replica.transform, projectile);
                     ApplyProjectileReplicaVisual(replica.gameObject, projectile);
                     Vector3 position = new Vector3(projectile.x, projectile.y, 0f);
-                    if (projectile.isHitbox)
+                    if (projectile.isHitbox && projectile.swordSwing)
+                    {
+                        ConfigureSwordSwingReplica(replica.gameObject, projectile);
+                    }
+                    else if (projectile.isHitbox)
+                    {
                         replica.SnapTo(position);
+                    }
                     else
+                    {
                         replica.SetTarget(
                             position,
                             new Vector3(projectile.vx, projectile.vy, 0f),
                             20f);
+                    }
                 }
                 else
                 {
@@ -736,7 +764,15 @@ public class GameStateGuest : MonoBehaviour
         }
 
         OnlineEntityReplica replica = go.AddComponent<OnlineEntityReplica>();
-        replica.SnapTo(go.transform.position);
+        if (projectile.isHitbox && projectile.swordSwing)
+        {
+            replica.enabled = false;
+            ConfigureSwordSwingReplica(go, projectile);
+        }
+        else
+        {
+            replica.SnapTo(go.transform.position);
+        }
         return replica;
     }
 
@@ -806,12 +842,60 @@ public class GameStateGuest : MonoBehaviour
             float scaleX = Mathf.Max(0.05f, projectile.scaleX);
             float scaleY = Mathf.Max(0.05f, projectile.scaleY);
             target.localScale = new Vector3(scaleX, scaleY, 1f);
-            target.rotation = Quaternion.Euler(0f, 0f, projectile.rotationZ);
+            if (!projectile.swordSwing)
+                target.rotation = Quaternion.Euler(0f, 0f, projectile.rotationZ);
             return;
         }
 
         float size = projectile.size > 0f ? projectile.size : 0.25f;
         target.localScale = new Vector3(size, size, 1f);
+    }
+
+    private void ConfigureSwordSwingReplica(GameObject go, OnlineProjectileState projectile)
+    {
+        if (go == null || projectile == null || !projectile.swordSwing)
+            return;
+
+        OnlineEntityReplica replica = go.GetComponent<OnlineEntityReplica>();
+        if (replica != null)
+            replica.enabled = false;
+
+        OnlineSwordSwingReplica swing = go.GetComponent<OnlineSwordSwingReplica>();
+        Transform owner = ResolveProjectileOwner(projectile.ownerId);
+        if (swing == null)
+        {
+            swing = go.AddComponent<OnlineSwordSwingReplica>();
+            Vector2 direction = new Vector2(projectile.swingDirectionX, projectile.swingDirectionY);
+            if (direction.sqrMagnitude < 0.001f)
+            {
+                Vector3 fallbackDirection = Quaternion.Euler(0f, 0f, projectile.rotationZ) * Vector3.right;
+                direction = new Vector2(fallbackDirection.x, fallbackDirection.y);
+            }
+            swing.Begin(
+                owner,
+                direction,
+                projectile.swingDistance > 0f ? projectile.swingDistance : Mathf.Max(0.1f, projectile.size),
+                projectile.swingDuration > 0f ? projectile.swingDuration : Mathf.Max(0.08f, projectile.life),
+                projectile.swingArcDegrees > 0f ? projectile.swingArcDegrees : 110f);
+            return;
+        }
+
+        swing.RefreshOwner(owner);
+    }
+
+    private Transform ResolveProjectileOwner(int ownerId)
+    {
+        if (ownerId == 0 && RemotePlayerGhost.Instance != null)
+            return RemotePlayerGhost.Instance.transform;
+
+        PlayerController[] players = FindObjectsOfType<PlayerController>();
+        for (int i = 0; i < players.Length; i++)
+        {
+            if (players[i] != null && players[i].playerIndex == ownerId)
+                return players[i].transform;
+        }
+
+        return RemotePlayerGhost.Instance != null ? RemotePlayerGhost.Instance.transform : null;
     }
 
     private void ApplyEffectState(OnlineEffectState[] effects)
@@ -826,6 +910,8 @@ public class GameStateGuest : MonoBehaviour
                 if (effect.ownerId == 1) continue;
 
                 activeIds.Add(effect.id);
+                if (effect.type == OnlineEffectType.FireTrail)
+                    _effectReplicaExpiresAt[effect.id] = Time.time + Mathf.Max(0.05f, effect.life);
                 if (_effectReplicas.TryGetValue(effect.id, out OnlineEntityReplica replica) && replica != null)
                 {
                     ApplyEffectReplica(replica.gameObject, effect);
@@ -837,7 +923,39 @@ public class GameStateGuest : MonoBehaviour
             }
         }
 
-        RemoveInactive(_effectReplicas, activeIds);
+        RemoveInactiveEffects(activeIds);
+    }
+
+    private void ApplyMaterialPickupState(OnlineMaterialPickupState[] pickups)
+    {
+        var activeIds = new HashSet<int>();
+        var stateIds = new HashSet<int>();
+
+        if (pickups != null)
+        {
+            foreach (OnlineMaterialPickupState pickup in pickups)
+            {
+                if (pickup == null || pickup.id <= 0)
+                    continue;
+
+                stateIds.Add(pickup.id);
+                if (_locallyCollectedPickupIds.Contains(pickup.id))
+                    continue;
+
+                activeIds.Add(pickup.id);
+                if (_pickupReplicas.TryGetValue(pickup.id, out DroppedMaterialPickup replica) && replica != null)
+                {
+                    replica.ApplyNetworkState(pickup);
+                }
+                else
+                {
+                    _pickupReplicas[pickup.id] = DroppedMaterialPickup.SpawnNetworkReplica(pickup);
+                }
+            }
+        }
+
+        RemoveInactivePickups(activeIds);
+        ClearConfirmedLocalPickupCollections(stateIds);
     }
 
     private OnlineEntityReplica SpawnEffectReplica(OnlineEffectState effect)
@@ -970,6 +1088,14 @@ public class GameStateGuest : MonoBehaviour
             Color color = renderer.color;
             color.a = Mathf.Clamp01(color.a);
             renderer.color = color;
+        }
+
+        if (effect.type == OnlineEffectType.FireTrail)
+        {
+            OnlineFireTrailReplica fireTrail = go.GetComponent<OnlineFireTrailReplica>();
+            if (fireTrail == null)
+                fireTrail = go.AddComponent<OnlineFireTrailReplica>();
+            fireTrail.Configure(renderer, renderer.color, effect.life);
         }
     }
 
@@ -1237,8 +1363,7 @@ public class GameStateGuest : MonoBehaviour
     private static bool UsesSmoothedEffectScale(int effectType)
     {
         return effectType == OnlineEffectType.ExpansionBurst ||
-            effectType == OnlineEffectType.GravityWell ||
-            effectType == OnlineEffectType.FireTrail;
+            effectType == OnlineEffectType.GravityWell;
     }
 
     private static string GetEffectReplicaName(int effectType)
@@ -1287,6 +1412,61 @@ public class GameStateGuest : MonoBehaviour
 
         foreach (int id in dead)
             replicas.Remove(id);
+    }
+
+    private void RemoveInactiveEffects(HashSet<int> activeIds)
+    {
+        var dead = new List<int>();
+        foreach (var kv in _effectReplicas)
+        {
+            bool active = activeIds.Contains(kv.Key);
+            bool keepUntilExpiry = false;
+            if (!active && _effectReplicaExpiresAt.TryGetValue(kv.Key, out float expireAt))
+                keepUntilExpiry = Time.time < expireAt;
+
+            if ((active || keepUntilExpiry) && kv.Value != null)
+                continue;
+
+            if (kv.Value != null)
+                Destroy(kv.Value.gameObject);
+            dead.Add(kv.Key);
+        }
+
+        foreach (int id in dead)
+        {
+            _effectReplicas.Remove(id);
+            _effectReplicaExpiresAt.Remove(id);
+        }
+    }
+
+    private void RemoveInactivePickups(HashSet<int> activeIds)
+    {
+        var dead = new List<int>();
+        foreach (var kv in _pickupReplicas)
+        {
+            if (activeIds.Contains(kv.Key) && kv.Value != null)
+                continue;
+
+            if (kv.Value != null)
+                Destroy(kv.Value.gameObject);
+            dead.Add(kv.Key);
+        }
+
+        foreach (int id in dead)
+            _pickupReplicas.Remove(id);
+    }
+
+    private void ClearConfirmedLocalPickupCollections(HashSet<int> stateIds)
+    {
+        var confirmed = new List<int>();
+        foreach (int id in _locallyCollectedPickupIds)
+        {
+            if (!stateIds.Contains(id))
+                confirmed.Add(id);
+        }
+
+        foreach (int id in confirmed)
+            _locallyCollectedPickupIds.Remove(id);
     }
 
     private IEnumerator Send(string json)

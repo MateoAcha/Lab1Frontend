@@ -8,6 +8,7 @@ public class GameStateHost : MonoBehaviour
 {
     private const float SyncInterval = 1f / 15f;
     private const float AttackVisualMinLife = 0.22f;
+    private const float FireTrailAnnounceWindow = 0.45f;
 
     private GameWebSocketClient _ws;
     private PlayerController _remotePlayer;
@@ -16,6 +17,7 @@ public class GameStateHost : MonoBehaviour
     private int _lastChargeSeq;
     private int _lastBurstSeq;
     private int _lastConsumableSeq;
+    private int _lastPickupSeq;
     private int _nextEntityId = 1;
     private int _tick;
     private bool _sawRunActive;
@@ -123,6 +125,12 @@ public class GameStateHost : MonoBehaviour
         if (input.ready && input.readyMapIndex == GameMapSelection.SelectedMapIndex)
             MarkGuestReady();
 
+        if (input.pickupSeq > 0 && input.pickupSeq != _lastPickupSeq)
+        {
+            _lastPickupSeq = input.pickupSeq;
+            HandleGuestPickupCollect(input.pickupId);
+        }
+
         if (!_matchStarted)
         {
             _remotePlayer.ApplyExternalInput(Vector2.zero, Vector2.down, false, false, false, false);
@@ -188,7 +196,8 @@ public class GameStateHost : MonoBehaviour
             players = BuildPlayers(),
             enemies = BuildEnemies(),
             projectiles = BuildProjectiles(),
-            effects = BuildEffects()
+            effects = BuildEffects(),
+            pickups = BuildMaterialPickups()
         };
     }
 
@@ -408,6 +417,58 @@ public class GameStateHost : MonoBehaviour
         return effects.ToArray();
     }
 
+    private OnlineMaterialPickupState[] BuildMaterialPickups()
+    {
+        var pickups = new List<OnlineMaterialPickupState>();
+
+        for (int i = OnlineNetworkRegistry.MaterialPickups.Count - 1; i >= 0; i--)
+        {
+            DroppedMaterialPickup pickup = OnlineNetworkRegistry.MaterialPickups[i];
+            if (pickup == null)
+            {
+                OnlineNetworkRegistry.MaterialPickups.RemoveAt(i);
+                continue;
+            }
+
+            pickups.Add(new OnlineMaterialPickupState
+            {
+                id = GetOrAssignId(pickup.gameObject),
+                x = pickup.transform.position.x,
+                y = pickup.transform.position.y,
+                inventoryKey = pickup.InventoryKey,
+                itemName = pickup.ItemName,
+                rarity = pickup.Rarity,
+                color = "#" + ColorUtility.ToHtmlStringRGBA(pickup.PickupColor),
+                size = Mathf.Max(0.2f, pickup.PickupSize)
+            });
+        }
+
+        return pickups.ToArray();
+    }
+
+    private void HandleGuestPickupCollect(int pickupId)
+    {
+        if (pickupId <= 0)
+            return;
+
+        for (int i = OnlineNetworkRegistry.MaterialPickups.Count - 1; i >= 0; i--)
+        {
+            DroppedMaterialPickup pickup = OnlineNetworkRegistry.MaterialPickups[i];
+            if (pickup == null)
+            {
+                OnlineNetworkRegistry.MaterialPickups.RemoveAt(i);
+                continue;
+            }
+
+            NetworkEntityId entityId = pickup.GetComponent<NetworkEntityId>();
+            if (entityId == null || entityId.Id != pickupId)
+                continue;
+
+            pickup.CollectFromNetworkGuest();
+            return;
+        }
+    }
+
     private void AddThrownWeaponEffects(List<OnlineEffectState> effects)
     {
         for (int i = OnlineNetworkRegistry.ThrownWeapons.Count - 1; i >= 0; i--)
@@ -613,6 +674,9 @@ public class GameStateHost : MonoBehaviour
                 continue;
             }
 
+            if (fireTrail.Age > FireTrailAnnounceWindow)
+                continue;
+
             effects.Add(new OnlineEffectState
             {
                 id = GetOrAssignId(fireTrail.gameObject),
@@ -749,6 +813,7 @@ public class GameStateHost : MonoBehaviour
     {
         Transform t = hitBox.transform;
         Transform weaponVisual = FindWeaponVisual(t);
+        SwordSwingHitbox swordSwing = hitBox.GetComponent<SwordSwingHitbox>();
         PlayerController owner = MultiplayerState.GetPlayerByIndex(hitBox.ownerPlayerIndex);
         return new AttackVisualSnapshot
         {
@@ -761,6 +826,11 @@ public class GameStateHost : MonoBehaviour
             visualOffset = weaponVisual != null ? (Vector2)weaponVisual.localPosition : Vector2.zero,
             visualScale = weaponVisual != null ? (Vector2)weaponVisual.localScale : Vector2.one,
             visualRotationZ = weaponVisual != null ? weaponVisual.localEulerAngles.z : 0f,
+            swordSwing = swordSwing != null,
+            swingDirection = swordSwing != null ? swordSwing.direction : Vector2.zero,
+            swingDistance = swordSwing != null ? swordSwing.distance : 0f,
+            swingDuration = swordSwing != null ? swordSwing.duration : 0f,
+            swingArcDegrees = swordSwing != null ? swordSwing.arcDegrees : 0f,
             x = t.position.x,
             y = t.position.y,
             rotationZ = t.eulerAngles.z,
@@ -838,6 +908,11 @@ public class GameStateHost : MonoBehaviour
         public Vector2 visualOffset;
         public Vector2 visualScale = Vector2.one;
         public float visualRotationZ;
+        public bool swordSwing;
+        public Vector2 swingDirection;
+        public float swingDistance;
+        public float swingDuration;
+        public float swingArcDegrees;
         public float x;
         public float y;
         public float rotationZ;
@@ -866,6 +941,12 @@ public class GameStateHost : MonoBehaviour
                 visualScaleX = visualScale.x,
                 visualScaleY = visualScale.y,
                 visualRotationZ = visualRotationZ,
+                swordSwing = swordSwing,
+                swingDirectionX = swingDirection.x,
+                swingDirectionY = swingDirection.y,
+                swingDistance = swingDistance,
+                swingDuration = swingDuration,
+                swingArcDegrees = swingArcDegrees,
                 x = x,
                 y = y,
                 vx = 0f,

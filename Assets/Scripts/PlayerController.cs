@@ -440,14 +440,21 @@ public class PlayerController : MonoBehaviour
         int rangedPassiveSkillLevel = 0,
         int weaponItemId = 0)
     {
+        int nextSkinId = Mathf.Max(0, skinId);
+        string nextSkinColor = string.IsNullOrWhiteSpace(skinColor) ? "#FFFFFF" : skinColor;
+        bool skinChanged = !_hasNetworkLoadout ||
+            _networkSkinId != nextSkinId ||
+            !string.Equals(_networkSkinColor, nextSkinColor, System.StringComparison.Ordinal);
+
         _hasNetworkLoadout = true;
         _networkWeaponDamage = Mathf.Max(1, weaponDamage);
         _networkWeaponItemId = Mathf.Max(0, weaponItemId);
         _networkWeaponKind = PlayerLoadout.ParseWeaponKind(weaponType);
         _networkWeaponColor = PlayerLoadout.ParseWeaponColor(weaponColor, Color.white);
-        _networkSkinId = Mathf.Max(0, skinId);
-        _networkSkinColor = string.IsNullOrWhiteSpace(skinColor) ? "#FFFFFF" : skinColor;
-        ApplyNetworkSkin();
+        _networkSkinId = nextSkinId;
+        _networkSkinColor = nextSkinColor;
+        if (skinChanged)
+            ApplyNetworkSkin();
         _networkConsumableQuantity = Mathf.Max(0, consumableQuantity);
         _networkConsumableHealAmount = Mathf.Max(0f, consumableHealAmount);
         _networkConsumableCooldown = Mathf.Max(0f, consumableCooldown);
