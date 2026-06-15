@@ -12,6 +12,8 @@ public class PlayerThrownWeapon : MonoBehaviour
     public float life = 1.6f;
     public int damage = 1;
     public int ownerPlayerIndex;
+    public int weaponItemId;
+    public string weaponType = "Spear";
     public Color weaponColor = Color.white;
 
     private Vector2 _origin;
@@ -19,6 +21,17 @@ public class PlayerThrownWeapon : MonoBehaviour
     private bool _returning;
     private bool _notifiedBoomerangEnded;
     private readonly HashSet<int> _hitIds = new HashSet<int>();
+    public float RemainingLife => _dieAt > 0f ? Mathf.Max(0f, _dieAt - Time.time) : Mathf.Max(0f, life);
+
+    private void OnEnable()
+    {
+        OnlineNetworkRegistry.Register(this);
+    }
+
+    private void OnDisable()
+    {
+        OnlineNetworkRegistry.Unregister(this);
+    }
 
     private void Start()
     {

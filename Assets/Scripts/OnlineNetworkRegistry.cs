@@ -8,6 +8,13 @@ public static class OnlineNetworkRegistry
     public static readonly List<EnemyProjectile> Projectiles = new List<EnemyProjectile>();
     public static readonly List<PlayerProjectile> PlayerProjectiles = new List<PlayerProjectile>();
     public static readonly List<HitBox> PlayerHitBoxes = new List<HitBox>();
+    public static readonly List<PlayerThrownWeapon> ThrownWeapons = new List<PlayerThrownWeapon>();
+    public static readonly List<RangedAbilityProjectile> RangedAbilityProjectiles = new List<RangedAbilityProjectile>();
+    public static readonly List<ExpansionBurst> ExpansionBursts = new List<ExpansionBurst>();
+    public static readonly List<GravityBombProjectile> GravityBombs = new List<GravityBombProjectile>();
+    public static readonly List<GravityWell> GravityWells = new List<GravityWell>();
+    public static readonly List<PlayerMinion> PlayerMinions = new List<PlayerMinion>();
+    public static readonly List<FireTrailSegment> FireTrails = new List<FireTrailSegment>();
 
     public static void Register(EnemyController enemy)
     {
@@ -73,5 +80,82 @@ public static class OnlineNetworkRegistry
     public static void Unregister(HitBox hitBox)
     {
         PlayerHitBoxes.Remove(hitBox);
+    }
+
+    public static void Register(PlayerThrownWeapon weapon)
+    {
+        if (weapon != null && !ThrownWeapons.Contains(weapon))
+            ThrownWeapons.Add(weapon);
+    }
+
+    public static void Unregister(PlayerThrownWeapon weapon)
+    {
+        ThrownWeapons.Remove(weapon);
+    }
+
+    public static void Register(RangedAbilityProjectile projectile)
+    {
+        if (projectile != null && !RangedAbilityProjectiles.Contains(projectile))
+            RangedAbilityProjectiles.Add(projectile);
+    }
+
+    public static void Unregister(RangedAbilityProjectile projectile)
+    {
+        RangedAbilityProjectiles.Remove(projectile);
+    }
+
+    public static void Register(ExpansionBurst burst)
+    {
+        if (burst != null && !ExpansionBursts.Contains(burst))
+            ExpansionBursts.Add(burst);
+    }
+
+    public static void Unregister(ExpansionBurst burst)
+    {
+        ExpansionBursts.Remove(burst);
+    }
+
+    public static void Register(GravityBombProjectile bomb)
+    {
+        if (bomb != null && !GravityBombs.Contains(bomb))
+            GravityBombs.Add(bomb);
+    }
+
+    public static void Unregister(GravityBombProjectile bomb)
+    {
+        GravityBombs.Remove(bomb);
+    }
+
+    public static void Register(GravityWell well)
+    {
+        if (well != null && !GravityWells.Contains(well))
+            GravityWells.Add(well);
+    }
+
+    public static void Unregister(GravityWell well)
+    {
+        GravityWells.Remove(well);
+    }
+
+    public static void Register(PlayerMinion minion)
+    {
+        if (minion != null && !PlayerMinions.Contains(minion))
+            PlayerMinions.Add(minion);
+    }
+
+    public static void Unregister(PlayerMinion minion)
+    {
+        PlayerMinions.Remove(minion);
+    }
+
+    public static void Register(FireTrailSegment fireTrail)
+    {
+        if (fireTrail != null && !FireTrails.Contains(fireTrail))
+            FireTrails.Add(fireTrail);
+    }
+
+    public static void Unregister(FireTrailSegment fireTrail)
+    {
+        FireTrails.Remove(fireTrail);
     }
 }

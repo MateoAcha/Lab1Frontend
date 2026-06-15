@@ -15,6 +15,7 @@ public class GameStateGuest : MonoBehaviour
 
     private readonly Dictionary<int, OnlineEntityReplica> _enemyReplicas = new Dictionary<int, OnlineEntityReplica>();
     private readonly Dictionary<int, OnlineEntityReplica> _projectileReplicas = new Dictionary<int, OnlineEntityReplica>();
+    private readonly Dictionary<int, OnlineEntityReplica> _effectReplicas = new Dictionary<int, OnlineEntityReplica>();
 
     private Material _meleeMat;
     private Material _rangedMat;
@@ -254,6 +255,7 @@ public class GameStateGuest : MonoBehaviour
         ApplyMatchEndingState(state.matchEnding, state.matchEnded, state.endingPlayerId);
         ApplyEnemyState(state.enemies);
         ApplyProjectileState(state.projectiles);
+        ApplyEffectState(state.effects);
 
         if (state.matchEnded && !_matchCompleted)
         {
@@ -687,10 +689,14 @@ public class GameStateGuest : MonoBehaviour
                 {
                     ApplyProjectileReplicaShape(replica.transform, projectile);
                     ApplyProjectileReplicaVisual(replica.gameObject, projectile);
-                    replica.SetTarget(
-                        new Vector3(projectile.x, projectile.y, 0f),
-                        new Vector3(projectile.vx, projectile.vy, 0f),
-                        20f);
+                    Vector3 position = new Vector3(projectile.x, projectile.y, 0f);
+                    if (projectile.isHitbox)
+                        replica.SnapTo(position);
+                    else
+                        replica.SetTarget(
+                            position,
+                            new Vector3(projectile.vx, projectile.vy, 0f),
+                            20f);
                 }
                 else
                 {
@@ -806,6 +812,311 @@ public class GameStateGuest : MonoBehaviour
 
         float size = projectile.size > 0f ? projectile.size : 0.25f;
         target.localScale = new Vector3(size, size, 1f);
+    }
+
+    private void ApplyEffectState(OnlineEffectState[] effects)
+    {
+        var activeIds = new HashSet<int>();
+
+        if (effects != null)
+        {
+            foreach (OnlineEffectState effect in effects)
+            {
+                if (effect == null || effect.life <= 0f) continue;
+                if (effect.ownerId == 1) continue;
+
+                activeIds.Add(effect.id);
+                if (_effectReplicas.TryGetValue(effect.id, out OnlineEntityReplica replica) && replica != null)
+                {
+                    ApplyEffectReplica(replica.gameObject, effect);
+                }
+                else
+                {
+                    _effectReplicas[effect.id] = SpawnEffectReplica(effect);
+                }
+            }
+        }
+
+        RemoveInactive(_effectReplicas, activeIds);
+    }
+
+    private OnlineEntityReplica SpawnEffectReplica(OnlineEffectState effect)
+    {
+        GameObject go = new GameObject(GetEffectReplicaName(effect.type));
+        go.transform.position = new Vector3(effect.x, effect.y, 0f);
+        BuildEffectVisual(go, effect);
+
+        OnlineEntityReplica replica = go.AddComponent<OnlineEntityReplica>();
+        replica.SnapTo(go.transform.position);
+        ApplyEffectReplica(go, effect);
+        return replica;
+    }
+
+    private void ApplyEffectReplica(GameObject go, OnlineEffectState effect)
+    {
+        if (go == null || effect == null)
+            return;
+
+        go.transform.rotation = Quaternion.Euler(0f, 0f, effect.rotationZ);
+        go.transform.localScale = new Vector3(
+            Mathf.Approximately(effect.scaleX, 0f) ? 1f : effect.scaleX,
+            Mathf.Approximately(effect.scaleY, 0f) ? 1f : effect.scaleY,
+            1f);
+
+        OnlineEntityReplica replica = go.GetComponent<OnlineEntityReplica>();
+        Vector3 position = new Vector3(effect.x, effect.y, 0f);
+        if (IsFastEffect(effect.type))
+        {
+            if (replica != null) replica.SnapTo(position);
+            else go.transform.position = position;
+        }
+        else if (replica != null)
+        {
+            replica.SetTarget(position, new Vector3(effect.vx, effect.vy, 0f), 18f);
+        }
+        else
+        {
+            go.transform.position = position;
+        }
+
+        UpdateEffectVisual(go, effect);
+    }
+
+    private void BuildEffectVisual(GameObject go, OnlineEffectState effect)
+    {
+        if (go == null || effect == null)
+            return;
+
+        if (effect.type == OnlineEffectType.GravityBombProjectile)
+        {
+            EnsureGravityBombVisual(go);
+            return;
+        }
+
+        if (effect.type == OnlineEffectType.PlayerMinion)
+        {
+            EnsureMinionVisual(go);
+            return;
+        }
+
+        SpriteRenderer renderer = go.GetComponent<SpriteRenderer>();
+        if (renderer == null)
+            renderer = go.AddComponent<SpriteRenderer>();
+
+        renderer.sprite = (effect.type == OnlineEffectType.RangedAbilityProjectile && effect.explosive)
+            ? SimpleSprite.Square
+            : SimpleSprite.Circle;
+        renderer.sortingOrder = GetEffectSortingOrder(effect.type);
+    }
+
+    private void UpdateEffectVisual(GameObject go, OnlineEffectState effect)
+    {
+        if (effect.type == OnlineEffectType.ThrownWeapon)
+        {
+            ApplyThrownWeaponReplicaVisual(go, effect);
+            return;
+        }
+
+        if (effect.type == OnlineEffectType.GravityBombProjectile)
+        {
+            ApplyGravityBombReplicaVisual(go, effect);
+            return;
+        }
+
+        if (effect.type == OnlineEffectType.PlayerMinion)
+        {
+            UpdateMinionReplicaVisual(go, effect);
+            return;
+        }
+
+        SpriteRenderer renderer = go.GetComponent<SpriteRenderer>();
+        if (renderer == null)
+            return;
+
+        renderer.color = PlayerLoadout.ParseWeaponColor(effect.color, Color.white);
+        if (effect.type == OnlineEffectType.ExpansionBurst ||
+            effect.type == OnlineEffectType.GravityWell ||
+            effect.type == OnlineEffectType.FireTrail)
+        {
+            Color color = renderer.color;
+            color.a = Mathf.Clamp01(color.a);
+            renderer.color = color;
+        }
+    }
+
+    private void ApplyThrownWeaponReplicaVisual(GameObject go, OnlineEffectState effect)
+    {
+        SpriteRenderer rootRenderer = go.GetComponent<SpriteRenderer>();
+        Transform weaponVisual = go.transform.Find("WeaponVisual");
+
+        WeaponKind weaponKind = PlayerLoadout.ParseWeaponKind(effect.weaponType);
+        Sprite weaponSprite = OnlineWeaponVisuals.ResolveAttackSprite(
+            weaponKind,
+            effect.weaponItemId,
+            _bootstrap != null ? _bootstrap : FindObjectOfType<GameBootstrap>());
+
+        if (weaponSprite == null)
+        {
+            if (rootRenderer == null)
+                rootRenderer = go.AddComponent<SpriteRenderer>();
+            rootRenderer.enabled = true;
+            rootRenderer.sprite = SimpleSprite.Square;
+            rootRenderer.color = PlayerLoadout.ParseWeaponColor(effect.color, Color.white);
+            rootRenderer.sortingOrder = 12;
+            if (weaponVisual != null)
+                weaponVisual.gameObject.SetActive(false);
+            return;
+        }
+
+        if (rootRenderer != null)
+            rootRenderer.enabled = false;
+
+        if (weaponVisual == null)
+        {
+            GameObject visualObj = new GameObject("WeaponVisual");
+            visualObj.transform.SetParent(go.transform, false);
+            weaponVisual = visualObj.transform;
+        }
+
+        weaponVisual.gameObject.SetActive(true);
+        weaponVisual.localPosition = new Vector3(effect.visualOffsetX, effect.visualOffsetY, 0f);
+        weaponVisual.localRotation = Quaternion.Euler(0f, 0f, effect.visualRotationZ);
+        weaponVisual.localScale = new Vector3(
+            Mathf.Approximately(effect.visualScaleX, 0f) ? 1f : effect.visualScaleX,
+            Mathf.Approximately(effect.visualScaleY, 0f) ? 1f : effect.visualScaleY,
+            1f);
+
+        SpriteRenderer weaponRenderer = weaponVisual.GetComponent<SpriteRenderer>();
+        if (weaponRenderer == null)
+            weaponRenderer = weaponVisual.gameObject.AddComponent<SpriteRenderer>();
+        weaponRenderer.sprite = weaponSprite;
+        weaponRenderer.color = Color.white;
+        weaponRenderer.sortingOrder = 12;
+    }
+
+    private void EnsureGravityBombVisual(GameObject go)
+    {
+        if (go.transform.Find("Shadow") == null)
+        {
+            GameObject shadow = new GameObject("Shadow");
+            shadow.transform.SetParent(go.transform, false);
+            SpriteRenderer shadowRenderer = shadow.AddComponent<SpriteRenderer>();
+            shadowRenderer.sprite = SimpleSprite.Circle;
+            shadowRenderer.color = new Color(0f, 0f, 0f, 0.24f);
+            shadowRenderer.sortingOrder = 8;
+        }
+
+        if (go.transform.Find("BombVisual") == null)
+        {
+            GameObject visual = new GameObject("BombVisual");
+            visual.transform.SetParent(go.transform, false);
+            SpriteRenderer renderer = visual.AddComponent<SpriteRenderer>();
+            renderer.sprite = SimpleSprite.Circle;
+            renderer.sortingOrder = 14;
+        }
+    }
+
+    private void ApplyGravityBombReplicaVisual(GameObject go, OnlineEffectState effect)
+    {
+        EnsureGravityBombVisual(go);
+
+        Transform shadow = go.transform.Find("Shadow");
+        if (shadow != null)
+        {
+            shadow.localPosition = Vector3.zero;
+            shadow.localScale = new Vector3(
+                Mathf.Approximately(effect.shadowScaleX, 0f) ? 1f : effect.shadowScaleX,
+                Mathf.Approximately(effect.shadowScaleY, 0f) ? 0.35f : effect.shadowScaleY,
+                1f);
+        }
+
+        Transform visual = go.transform.Find("BombVisual");
+        if (visual != null)
+        {
+            visual.localPosition = new Vector3(0f, effect.visualOffsetY, 0f);
+            visual.localScale = new Vector3(
+                Mathf.Approximately(effect.visualScaleX, 0f) ? 1f : effect.visualScaleX,
+                Mathf.Approximately(effect.visualScaleY, 0f) ? 1f : effect.visualScaleY,
+                1f);
+            SpriteRenderer renderer = visual.GetComponent<SpriteRenderer>();
+            if (renderer != null)
+                renderer.color = PlayerLoadout.ParseWeaponColor(effect.color, Color.white);
+        }
+    }
+
+    private void EnsureMinionVisual(GameObject go)
+    {
+        Transform sprite = go.transform.Find("Sprite");
+        if (sprite != null)
+            return;
+
+        GameObject spriteObj = new GameObject("Sprite");
+        spriteObj.transform.SetParent(go.transform, false);
+        spriteObj.transform.localPosition = Vector3.zero;
+        spriteObj.transform.localScale = Vector3.one;
+
+        SpriteRenderer renderer = spriteObj.AddComponent<SpriteRenderer>();
+        renderer.sprite = SimpleSprite.Circle;
+        renderer.color = new Color(1f, 0.88f, 0.12f, 1f);
+        renderer.sortingOrder = 6;
+
+        PlayerMinionAnimator animator = spriteObj.AddComponent<PlayerMinionAnimator>();
+        if (_bootstrap != null)
+        {
+            animator.moveSprites = _bootstrap.minionMoveSprites;
+            animator.moveSheet = _bootstrap.minionMoveTexture;
+            animator.resourceSheetName = _bootstrap.minionMoveResource;
+            animator.fps = Mathf.Max(0.01f, _bootstrap.minionMoveFps);
+            animator.spriteScale = Mathf.Max(0.01f, _bootstrap.minionSpriteScale);
+        }
+    }
+
+    private void UpdateMinionReplicaVisual(GameObject go, OnlineEffectState effect)
+    {
+        EnsureMinionVisual(go);
+        Transform sprite = go.transform.Find("Sprite");
+        if (sprite == null)
+            return;
+
+        SpriteRenderer renderer = sprite.GetComponent<SpriteRenderer>();
+        if (renderer != null)
+            renderer.enabled = true;
+    }
+
+    private static bool IsFastEffect(int effectType)
+    {
+        return effectType == OnlineEffectType.ExpansionBurst ||
+            effectType == OnlineEffectType.GravityWell ||
+            effectType == OnlineEffectType.FireTrail ||
+            effectType == OnlineEffectType.ThrownWeapon ||
+            effectType == OnlineEffectType.GravityBombProjectile;
+    }
+
+    private static string GetEffectReplicaName(int effectType)
+    {
+        return effectType switch
+        {
+            OnlineEffectType.ThrownWeapon => "ThrownWeaponReplica",
+            OnlineEffectType.RangedAbilityProjectile => "RangedAbilityProjectileReplica",
+            OnlineEffectType.ExpansionBurst => "ExpansionBurstReplica",
+            OnlineEffectType.GravityBombProjectile => "GravityBombReplica",
+            OnlineEffectType.GravityWell => "GravityWellReplica",
+            OnlineEffectType.PlayerMinion => "PlayerMinionReplica",
+            OnlineEffectType.FireTrail => "FireTrailReplica",
+            _ => "OnlineEffectReplica"
+        };
+    }
+
+    private static int GetEffectSortingOrder(int effectType)
+    {
+        return effectType switch
+        {
+            OnlineEffectType.RangedAbilityProjectile => 12,
+            OnlineEffectType.ExpansionBurst => 13,
+            OnlineEffectType.GravityWell => 6,
+            OnlineEffectType.FireTrail => 5,
+            _ => 9
+        };
     }
 
     private void RemoveInactive(Dictionary<int, OnlineEntityReplica> replicas, HashSet<int> activeIds)

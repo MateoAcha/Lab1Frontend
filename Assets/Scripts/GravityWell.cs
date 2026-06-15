@@ -6,9 +6,21 @@ public class GravityWell : MonoBehaviour
     public float duration = 3f;
     public float pullStrength = 11f;
     public Color color = Color.white;
+    public int ownerPlayerIndex = -1;
 
     private float _dieAt;
     private SpriteRenderer _renderer;
+    public float RemainingLife => _dieAt > 0f ? Mathf.Max(0f, _dieAt - Time.time) : Mathf.Max(0f, duration);
+
+    private void OnEnable()
+    {
+        OnlineNetworkRegistry.Register(this);
+    }
+
+    private void OnDisable()
+    {
+        OnlineNetworkRegistry.Unregister(this);
+    }
 
     private void Start()
     {

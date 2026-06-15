@@ -7,9 +7,21 @@ public class ExpansionBurst : MonoBehaviour
     public float maxRadius = 3f;
     public float damage = 1;
     public float pushMultiplier = 2f;
+    public int ownerPlayerIndex = -1;
 
     private float startAt;
     private readonly HashSet<int> hitIds = new HashSet<int>();
+    public float RemainingLife => startAt > 0f ? Mathf.Max(0f, startAt + Mathf.Max(0.01f, duration) - Time.time) : Mathf.Max(0f, duration);
+
+    private void OnEnable()
+    {
+        OnlineNetworkRegistry.Register(this);
+    }
+
+    private void OnDisable()
+    {
+        OnlineNetworkRegistry.Unregister(this);
+    }
 
     private void Start()
     {

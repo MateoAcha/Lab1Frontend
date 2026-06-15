@@ -10,12 +10,28 @@ public class GravityBombProjectile : MonoBehaviour
     public float pullDuration = 3f;
     public float pullStrength = 11f;
     public Color bombColor = Color.white;
+    public int ownerPlayerIndex = -1;
 
     private Vector2 _start;
     private Vector2 _end;
     private float _startAt;
+    private float _explodeAt;
     private Transform _visual;
     private Transform _shadow;
+    public float RemainingLife => _explodeAt > 0f ? Mathf.Max(0f, _explodeAt - Time.time) : Mathf.Max(0.1f, travelTime);
+    public float VisualLocalY => _visual != null ? _visual.localPosition.y : 0f;
+    public Vector3 VisualLocalScale => _visual != null ? _visual.localScale : Vector3.one;
+    public Vector3 ShadowLocalScale => _shadow != null ? _shadow.localScale : new Vector3(1f, 0.35f, 1f);
+
+    private void OnEnable()
+    {
+        OnlineNetworkRegistry.Register(this);
+    }
+
+    private void OnDisable()
+    {
+        OnlineNetworkRegistry.Unregister(this);
+    }
 
     private void Start()
     {
@@ -28,6 +44,7 @@ public class GravityBombProjectile : MonoBehaviour
         _start = transform.position;
         _end = _start + direction * Mathf.Max(0.5f, distance);
         _startAt = Time.time;
+        _explodeAt = _startAt + Mathf.Max(0.1f, travelTime);
         BuildVisual();
     }
 
@@ -66,6 +83,7 @@ public class GravityBombProjectile : MonoBehaviour
         gravityWell.duration = Mathf.Max(0.1f, pullDuration);
         gravityWell.pullStrength = Mathf.Max(0f, pullStrength);
         gravityWell.color = bombColor;
+        gravityWell.ownerPlayerIndex = ownerPlayerIndex;
 
         Destroy(gameObject);
     }

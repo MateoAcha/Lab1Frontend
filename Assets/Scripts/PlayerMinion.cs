@@ -12,6 +12,18 @@ public class PlayerMinion : MonoBehaviour
     private Transform _target;
     private float _dieAt;
     private float _nextTouchDamageAt;
+    public Vector2 CurrentVelocity => _body != null ? _body.linearVelocity : Vector2.zero;
+    public float RemainingLife => _dieAt > 0f ? Mathf.Max(0f, _dieAt - Time.time) : Mathf.Max(0f, life);
+
+    private void OnEnable()
+    {
+        OnlineNetworkRegistry.Register(this);
+    }
+
+    private void OnDisable()
+    {
+        OnlineNetworkRegistry.Unregister(this);
+    }
 
     private void Awake()
     {

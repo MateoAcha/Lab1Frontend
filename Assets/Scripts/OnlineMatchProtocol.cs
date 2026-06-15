@@ -60,6 +60,18 @@ public class OnlineMatchStateMessage
     public OnlinePlayerState[] players;
     public OnlineEnemyState[] enemies;
     public OnlineProjectileState[] projectiles;
+    public OnlineEffectState[] effects;
+}
+
+public static class OnlineEffectType
+{
+    public const int ThrownWeapon = 1;
+    public const int RangedAbilityProjectile = 2;
+    public const int ExpansionBurst = 3;
+    public const int GravityBombProjectile = 4;
+    public const int GravityWell = 5;
+    public const int PlayerMinion = 6;
+    public const int FireTrail = 7;
 }
 
 [Serializable]
@@ -129,4 +141,33 @@ public class OnlineProjectileState
     public float vx;
     public float vy;
     public float life;
+}
+
+[Serializable]
+public class OnlineEffectState
+{
+    public int id;
+    public int type;
+    public int ownerId;
+    public float x;
+    public float y;
+    public float vx;
+    public float vy;
+    public float rotationZ;
+    public float scaleX = 1f;
+    public float scaleY = 1f;
+    public string color = "#FFFFFFFF";
+    public float life;
+    public bool explosive;
+    public bool boomerang;
+    public int weaponItemId;
+    public string weaponType = "Spear";
+    public bool hasWeaponVisual;
+    public float visualOffsetX;
+    public float visualOffsetY;
+    public float visualScaleX = 1f;
+    public float visualScaleY = 1f;
+    public float visualRotationZ;
+    public float shadowScaleX = 1f;
+    public float shadowScaleY = 0.35f;
 }

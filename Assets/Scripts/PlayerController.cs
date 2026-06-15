@@ -1096,6 +1096,7 @@ public class PlayerController : MonoBehaviour
         expansion.duration = Mathf.Max(0.01f, burstDuration);
         expansion.maxRadius = Mathf.Max(0.2f, burstRange * radiusMultiplier);
         expansion.pushMultiplier = Mathf.Max(0f, burstPushMultiplier);
+        expansion.ownerPlayerIndex = playerIndex;
         float scaledBurstDamage = GetWeaponDamage() * burstDamageMultiplier;
         expansion.damage = Mathf.Max(0f, scaledBurstDamage);
     }
@@ -1182,6 +1183,8 @@ public class PlayerController : MonoBehaviour
         thrown.owner = transform;
         thrown.direction = aim;
         thrown.boomerang = boomerang;
+        thrown.weaponItemId = GetWeaponItemId();
+        thrown.weaponType = weaponKind.ToString();
         thrown.speed = Mathf.Max(0.1f, weaponThrowSpeed);
         thrown.returnSpeed = Mathf.Max(0.1f, boomerangReturnSpeed);
         thrown.maxDistance = Mathf.Max(0.5f, weaponThrowRange * rangeMultiplier);
@@ -1309,6 +1312,7 @@ public class PlayerController : MonoBehaviour
 
         GravityBombProjectile gravityBomb = bomb.AddComponent<GravityBombProjectile>();
         gravityBomb.direction = aim;
+        gravityBomb.ownerPlayerIndex = playerIndex;
         gravityBomb.distance = Mathf.Max(0.5f, gravityBombDistance);
         gravityBomb.travelTime = Mathf.Max(0.1f, gravityBombTravelTime);
         gravityBomb.arcHeight = Mathf.Max(0f, gravityBombArcHeight);
