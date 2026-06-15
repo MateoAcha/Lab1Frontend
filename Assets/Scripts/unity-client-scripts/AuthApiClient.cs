@@ -6,6 +6,8 @@ using UnityEngine.Networking;
 
 public class AuthApiClient
 {
+    private const string LobbyClientIdHeader = "X-Lobby-Client-Id";
+
     private readonly string _baseUrl;
 
     public AuthApiClient(string baseUrl)
@@ -958,12 +960,13 @@ public class AuthApiClient
         onSuccess?.Invoke(data ?? new LobbyRoomListData());
     }
 
-    public IEnumerator LobbyCreate(Action<LobbyRoomData> onSuccess, Action<string> onError)
+    public IEnumerator LobbyCreate(string lobbyClientId, Action<LobbyRoomData> onSuccess, Action<string> onError)
     {
         var request = new UnityWebRequest(_baseUrl + "/lobby/create", "POST");
         request.uploadHandler   = new UploadHandlerRaw(new byte[0]);
         request.downloadHandler = new DownloadHandlerBuffer();
         request.SetRequestHeader("Content-Type", "application/json");
+        AttachLobbyClientId(request, lobbyClientId);
         if (!TryAttachAuthorization(request, onError))
         {
             yield break;
@@ -985,12 +988,13 @@ public class AuthApiClient
         onSuccess?.Invoke(room);
     }
 
-    public IEnumerator LobbyStart(int roomNumber, Action onSuccess, Action<string> onError)
+    public IEnumerator LobbyStart(int roomNumber, string lobbyClientId, Action onSuccess, Action<string> onError)
     {
         var request = new UnityWebRequest(_baseUrl + $"/lobby/start?roomNumber={Mathf.Max(1, roomNumber)}", "POST");
         request.uploadHandler   = new UploadHandlerRaw(new byte[0]);
         request.downloadHandler = new DownloadHandlerBuffer();
         request.SetRequestHeader("Content-Type", "application/json");
+        AttachLobbyClientId(request, lobbyClientId);
         if (!TryAttachAuthorization(request, onError))
         {
             yield break;
@@ -1004,7 +1008,7 @@ public class AuthApiClient
             onError?.Invoke(FormatError(request));
     }
 
-    public IEnumerator LobbyPing(int roomNumber, string weapon, string armor, string item, float x, float y,
+    public IEnumerator LobbyPing(int roomNumber, string lobbyClientId, string weapon, string armor, string item, float x, float y,
         Action<LobbyPlayerData[], bool> onSuccess, Action<string> onError)
     {
         string json = JsonUtility.ToJson(new LobbyPingRequest
@@ -1019,6 +1023,7 @@ public class AuthApiClient
         request.uploadHandler   = new UploadHandlerRaw(Encoding.UTF8.GetBytes(json));
         request.downloadHandler = new DownloadHandlerBuffer();
         request.SetRequestHeader("Content-Type", "application/json");
+        AttachLobbyClientId(request, lobbyClientId);
         if (!TryAttachAuthorization(request, onError))
         {
             yield break;
@@ -1040,14 +1045,21 @@ public class AuthApiClient
         onSuccess?.Invoke(wrapper?.players ?? new LobbyPlayerData[0], wrapper?.started ?? false);
     }
 
-    public IEnumerator LobbyLeave(int roomNumber)
+    public IEnumerator LobbyLeave(int roomNumber, string lobbyClientId)
     {
         var request = new UnityWebRequest(_baseUrl + $"/lobby/leave?roomNumber={Mathf.Max(1, roomNumber)}", "DELETE");
         request.uploadHandler   = new UploadHandlerRaw(new byte[0]);
         request.downloadHandler = new DownloadHandlerBuffer();
+        AttachLobbyClientId(request, lobbyClientId);
         if (!string.IsNullOrWhiteSpace(AuthSession.AccessToken))
             request.SetRequestHeader("Authorization", $"Bearer {AuthSession.AccessToken}");
         yield return request.SendWebRequest();
+    }
+
+    private void AttachLobbyClientId(UnityWebRequest request, string lobbyClientId)
+    {
+        if (!string.IsNullOrWhiteSpace(lobbyClientId))
+            request.SetRequestHeader(LobbyClientIdHeader, lobbyClientId);
     }
 
     [Serializable]
