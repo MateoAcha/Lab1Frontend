@@ -43,8 +43,6 @@ public class GameStateGuest : MonoBehaviour
         EnemySpawner spawner = FindObjectOfType<EnemySpawner>();
         if (spawner != null) spawner.enabled = false;
 
-        GameAudio.StopMusic(); // will start again once first map state arrives
-
         GameStatsTracker.StartMatch();
 
         _bootstrap = FindObjectOfType<GameBootstrap>();
@@ -149,11 +147,6 @@ public class GameStateGuest : MonoBehaviour
         FillSkillInput(input, SkillWeaponBranch.SwordSpear, SkillSlotKind.Passive);
         FillSkillInput(input, SkillWeaponBranch.Ranged, SkillSlotKind.Active);
         FillSkillInput(input, SkillWeaponBranch.Ranged, SkillSlotKind.Passive);
-        if (_pendingPickupId >= 0)
-        {
-            input.pickedUpItemId = _pendingPickupId;
-            _pendingPickupId = -1;
-        }
         return input;
     }
 
@@ -346,11 +339,6 @@ public class GameStateGuest : MonoBehaviour
             GameMapSelection.Select(mapIndex);
         }
 
-        if (mapIndex != _appliedMapIndex)
-        {
-            _appliedMapIndex = mapIndex;
-            GameAudio.EnsureMatchMusic(mapIndex);
-        }
     }
 
     private void ApplyMatchEndingState(bool matchEnding, bool matchEnded, int endingPlayerId)
@@ -1311,178 +1299,6 @@ public class GameStateGuest : MonoBehaviour
 
         foreach (int id in dead)
             replicas.Remove(id);
-    }
-
-    private void ApplyItemDropState(OnlineItemDropState[] drops)
-    {
-        var activeIds = new HashSet<int>();
-        if (drops != null)
-        {
-            foreach (OnlineItemDropState drop in drops)
-            {
-                if (drop == null) continue;
-                activeIds.Add(drop.id);
-                if (!_itemDropReplicas.TryGetValue(drop.id, out GameObject go) || go == null)
-                {
-                    go = new GameObject("ItemDropReplica");
-                    go.transform.position = new Vector3(drop.x, drop.y, 0f);
-                    go.transform.localScale = Vector3.one * 0.9f;
-                    SpriteRenderer sr = go.AddComponent<SpriteRenderer>();
-                    sr.sprite = SimpleSprite.Circle;
-                    sr.color = new Color(1f, 0.85f, 0.2f, 1f);
-                    sr.sortingOrder = 4;
-                    CircleCollider2D col = go.AddComponent<CircleCollider2D>();
-                    col.isTrigger = true;
-                    col.radius = 0.55f;
-                    _itemDropReplicas[drop.id] = go;
-                }
-                else
-                {
-                    go.transform.position = new Vector3(drop.x, drop.y, 0f);
-                }
-            }
-        }
-
-        var deadDrops = new List<int>();
-        foreach (var kv in _itemDropReplicas)
-        {
-            if (!activeIds.Contains(kv.Key) || kv.Value == null)
-            {
-                if (kv.Value != null) Destroy(kv.Value);
-                deadDrops.Add(kv.Key);
-            }
-        }
-        foreach (int id in deadDrops) _itemDropReplicas.Remove(id);
-
-        CheckItemPickup();
-    }
-
-    private void CheckItemPickup()
-    {
-        if (_pendingPickupId >= 0 || _itemDropReplicas.Count == 0) return;
-        PlayerController player = PlayerController.main;
-        if (player == null) return;
-        Vector2 playerPos = player.transform.position;
-        foreach (var kv in _itemDropReplicas)
-        {
-            if (kv.Value == null) continue;
-            float dist = Vector2.Distance(playerPos, (Vector2)kv.Value.transform.position);
-            if (dist < 0.8f)
-            {
-                _pendingPickupId = kv.Key;
-                GameStatsTracker.RegisterMaterialCollected(FindCurrentMapMaterialDrop());
-                GameAudio.PlayItemPickup();
-                Destroy(kv.Value);
-                _itemDropReplicas.Remove(kv.Key);
-                break;
-            }
-        }
-    }
-
-    private static MapMaterialDefinition FindCurrentMapMaterialDrop()
-    {
-        GameBootstrap bootstrap = UnityEngine.Object.FindObjectOfType<GameBootstrap>();
-        return bootstrap != null ? bootstrap.GetSelectedMapMaterialDrop() : null;
-    }
-
-    private void ApplyAbilityEffects(OnlineAbilityState[] abilities)
-    {
-        var seen = new HashSet<int>();
-        if (abilities != null)
-        {
-            foreach (OnlineAbilityState s in abilities)
-            {
-                if (s == null) continue;
-                seen.Add(s.id);
-                if (!_abilityReplicas.ContainsKey(s.id))
-                    _abilityReplicas[s.id] = SpawnAbilityReplica(s);
-            }
-        }
-
-        var toRemove = new List<int>();
-        foreach (var kv in _abilityReplicas)
-        {
-            if (!seen.Contains(kv.Key))
-                toRemove.Add(kv.Key);
-        }
-        foreach (int id in toRemove)
-        {
-            if (_abilityReplicas[id] != null)
-                UnityEngine.Object.Destroy(_abilityReplicas[id]);
-            _abilityReplicas.Remove(id);
-        }
-    }
-
-    private GameObject SpawnAbilityReplica(OnlineAbilityState s)
-    {
-        Color col = new Color(s.cr / 255f, s.cg / 255f, s.cb / 255f, 0.6f);
-        Vector3 pos = new Vector3(s.x, s.y, 0f);
-
-        switch (s.type)
-        {
-            case 0: // ExpansionBurst - expanding circle
-            {
-                var go = new GameObject("BurstReplica");
-                go.transform.position = pos;
-                go.transform.localScale = Vector3.one * Mathf.Max(0.05f, s.scale);
-                var sr = go.AddComponent<SpriteRenderer>();
-                sr.sprite = SimpleSprite.Circle;
-                sr.color = new Color(col.r, col.g, col.b, 0.45f);
-                sr.sortingOrder = 11;
-                var rep = go.AddComponent<AbilityReplica>();
-                rep.targetScale = s.maxScale;
-                rep.dieAt = Time.time + s.remaining;
-                return go;
-            }
-            case 1: // GravityBomb - moving ball
-            {
-                var go = new GameObject("GravityBombReplica");
-                go.transform.position = pos;
-                go.transform.localScale = Vector3.one * 0.8f;
-                var sr = go.AddComponent<SpriteRenderer>();
-                sr.sprite = SimpleSprite.Circle;
-                sr.color = col;
-                sr.sortingOrder = 14;
-                var rep = go.AddComponent<AbilityReplica>();
-                rep.velocity = new Vector2(s.vx, s.vy);
-                rep.dieAt = Time.time + s.remaining;
-                return go;
-            }
-            case 2: // GravityWell - pulsing circle
-            {
-                var go = new GameObject("GravityWellReplica");
-                go.transform.position = pos;
-                go.transform.localScale = Vector3.one * Mathf.Max(0.5f, s.scale);
-                var sr = go.AddComponent<SpriteRenderer>();
-                sr.sprite = SimpleSprite.Circle;
-                sr.color = new Color(col.r, col.g, col.b, 0.22f);
-                sr.sortingOrder = 6;
-                var rep = go.AddComponent<AbilityReplica>();
-                rep.pulse = true;
-                rep.dieAt = Time.time + s.remaining;
-                return go;
-            }
-            case 3: // ThrownWeapon - moving rectangle
-            {
-                var go = new GameObject("ThrownWeaponReplica");
-                go.transform.position = pos;
-                float ws = Mathf.Max(0.1f, s.scale);
-                go.transform.localScale = new Vector3(ws, ws * 0.3f, 1f);
-                float angle = Mathf.Atan2(s.vy, s.vx) * Mathf.Rad2Deg;
-                go.transform.rotation = Quaternion.Euler(0f, 0f, angle);
-                var sr = go.AddComponent<SpriteRenderer>();
-                sr.sprite = SimpleSprite.Square;
-                sr.color = col;
-                sr.sortingOrder = 12;
-                var rep = go.AddComponent<AbilityReplica>();
-                rep.velocity = new Vector2(s.vx, s.vy);
-                rep.rotateSpeed = 860f;
-                rep.dieAt = Time.time + s.remaining;
-                return go;
-            }
-            default:
-                return null;
-        }
     }
 
     private IEnumerator Send(string json)

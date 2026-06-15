@@ -147,20 +147,6 @@ public class GameStateHost : MonoBehaviour
             burstDown,
             consumableDown);
 
-        if (input.pickedUpItemId >= 0)
-        {
-            for (int i = OnlineNetworkRegistry.ItemDrops.Count - 1; i >= 0; i--)
-            {
-                DroppedMaterialPickup drop = OnlineNetworkRegistry.ItemDrops[i];
-                if (drop == null) { OnlineNetworkRegistry.ItemDrops.RemoveAt(i); continue; }
-                NetworkEntityId netId = drop.GetComponent<NetworkEntityId>();
-                if (netId != null && netId.Id == input.pickedUpItemId)
-                {
-                    UnityEngine.Object.Destroy(drop.gameObject);
-                    break;
-                }
-            }
-        }
     }
 
     private void MarkGuestReady()
