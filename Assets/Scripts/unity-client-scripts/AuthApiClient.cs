@@ -7,6 +7,7 @@ using UnityEngine.Networking;
 public class AuthApiClient
 {
     private const string LobbyClientIdHeader = "X-Lobby-Client-Id";
+    private const string SessionExpiredMessage = "Session expired or was replaced. Please log in again.";
 
     private readonly string _baseUrl;
 
@@ -40,7 +41,7 @@ public class AuthApiClient
             password = password
         };
 
-        yield return PostJson("/users/login", JsonUtility.ToJson(payload), onSuccess, onError);
+        yield return PostJson("/users/login", JsonUtility.ToJson(payload), onSuccess, onError, loginRequest: true);
     }
 
     public IEnumerator GoogleLogin(
@@ -119,7 +120,7 @@ public class AuthApiClient
         if (request.result != UnityWebRequest.Result.Success
             || request.responseCode < 200 || request.responseCode >= 300)
         {
-            onError?.Invoke(FormatError(request));
+            onError?.Invoke(FormatError(request, loginRequest: true));
             yield break;
         }
 
@@ -712,7 +713,8 @@ public class AuthApiClient
         string jsonBody,
         Action<AuthUserData> onSuccess,
         Action<string> onError,
-        bool requiresAuth = false)
+        bool requiresAuth = false,
+        bool loginRequest = false)
     {
         var request = new UnityWebRequest(_baseUrl + endpoint, "POST");
         byte[] bodyRaw = Encoding.UTF8.GetBytes(jsonBody);
@@ -733,7 +735,7 @@ public class AuthApiClient
 
         if (request.result != UnityWebRequest.Result.Success)
         {
-            string error = FormatError(request);
+            string error = FormatError(request, loginRequest);
             Debug.LogError($"[AuthApi] Network error: {error}");
             onError?.Invoke(error);
             yield break;
@@ -741,7 +743,7 @@ public class AuthApiClient
 
         if (request.responseCode < 200 || request.responseCode >= 300)
         {
-            string error = FormatError(request);
+            string error = FormatError(request, loginRequest);
             Debug.LogError($"[AuthApi] API error: {error}");
             onError?.Invoke(error);
             yield break;
@@ -836,9 +838,10 @@ public class AuthApiClient
     {
         if (string.IsNullOrWhiteSpace(AuthSession.AccessToken))
         {
-            const string authError = "Missing access token. Please log in again.";
-            Debug.LogError($"[AuthApi] {authError}");
-            onError?.Invoke(authError);
+            if (AuthSession.IsLoggedIn)
+                AuthSession.Logout();
+            Debug.LogError($"[AuthApi] {SessionExpiredMessage}");
+            onError?.Invoke(SessionExpiredMessage);
             return false;
         }
 
@@ -882,11 +885,18 @@ public class AuthApiClient
         onSuccess?.Invoke(status);
     }
 
-    private string FormatError(UnityWebRequest request)
+    private string FormatError(UnityWebRequest request, bool loginRequest = false)
     {
         string raw = request.downloadHandler != null ? request.downloadHandler.text : "";
         long code  = request.responseCode;
         Debug.Log($"[AuthApi] Error body (code={code}): {raw}");
+
+        if (!loginRequest && (code == 401 || code == 403))
+        {
+            if (AuthSession.IsLoggedIn)
+                AuthSession.Logout();
+            return SessionExpiredMessage;
+        }
 
         // Try to extract a message from the JSON body (works with both Spring Boot formats).
         if (!string.IsNullOrWhiteSpace(raw))
