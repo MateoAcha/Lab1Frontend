@@ -16,6 +16,17 @@ public class RangedAbilityProjectile : MonoBehaviour
 
     private float _dieAt;
     private bool _finished;
+    public float RemainingLife => _dieAt > 0f ? Mathf.Max(0f, _dieAt - Time.time) : Mathf.Max(0f, life);
+
+    private void OnEnable()
+    {
+        OnlineNetworkRegistry.Register(this);
+    }
+
+    private void OnDisable()
+    {
+        OnlineNetworkRegistry.Unregister(this);
+    }
 
     public float RemainingLife => _dieAt > 0f ? Mathf.Max(0f, _dieAt - Time.time) : Mathf.Max(0f, life);
 
@@ -123,5 +134,6 @@ public class RangedAbilityProjectile : MonoBehaviour
         burst.maxRadius = Mathf.Max(0.2f, explosionRadius);
         burst.damage = Mathf.Max(0f, explosionDamage);
         burst.pushMultiplier = Mathf.Max(0f, explosionPushMultiplier);
+        burst.ownerPlayerIndex = ownerPlayerIndex;
     }
 }

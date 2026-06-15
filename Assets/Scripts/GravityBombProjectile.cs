@@ -10,13 +10,29 @@ public class GravityBombProjectile : MonoBehaviour
     public float pullDuration = 3f;
     public float pullStrength = 11f;
     public Color bombColor = Color.white;
-    public int ownerPlayerIndex;
+    public int ownerPlayerIndex = -1;
 
     private Vector2 _start;
     private Vector2 _end;
     private float _startAt;
+    private float _explodeAt;
     private Transform _visual;
     private Transform _shadow;
+    public float RemainingLife => _explodeAt > 0f ? Mathf.Max(0f, _explodeAt - Time.time) : Mathf.Max(0.1f, travelTime);
+    public float VisualLocalY => _visual != null ? _visual.localPosition.y : 0f;
+    public Vector3 VisualLocalScale => _visual != null ? _visual.localScale : Vector3.one;
+    public Vector3 ShadowLocalScale => _shadow != null ? _shadow.localScale : new Vector3(1f, 0.35f, 1f);
+    public Vector2 CurrentVelocity { get; private set; }
+
+    private void OnEnable()
+    {
+        OnlineNetworkRegistry.Register(this);
+    }
+
+    private void OnDisable()
+    {
+        OnlineNetworkRegistry.Unregister(this);
+    }
 
     private void OnEnable()  => OnlineNetworkRegistry.Register(this);
     private void OnDisable() => OnlineNetworkRegistry.Unregister(this);
@@ -38,14 +54,19 @@ public class GravityBombProjectile : MonoBehaviour
         _start = transform.position;
         _end = _start + direction * Mathf.Max(0.5f, distance);
         _startAt = Time.time;
+        _explodeAt = _startAt + Mathf.Max(0.1f, travelTime);
         BuildVisual();
     }
 
     private void Update()
     {
+        Vector2 before = transform.position;
         float t = Mathf.Clamp01((Time.time - _startAt) / Mathf.Max(0.1f, travelTime));
         Vector2 groundPosition = Vector2.Lerp(_start, _end, t);
         transform.position = groundPosition;
+        CurrentVelocity = Time.deltaTime > 0.0001f
+            ? (groundPosition - before) / Time.deltaTime
+            : Vector2.zero;
 
         float height = Mathf.Sin(t * Mathf.PI) * Mathf.Max(0f, arcHeight);
         if (_visual != null)

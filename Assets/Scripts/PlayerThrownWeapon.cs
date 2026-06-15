@@ -12,6 +12,8 @@ public class PlayerThrownWeapon : MonoBehaviour
     public float life = 1.6f;
     public int damage = 1;
     public int ownerPlayerIndex;
+    public int weaponItemId;
+    public string weaponType = "Spear";
     public Color weaponColor = Color.white;
 
     private Vector2 _origin;
@@ -19,6 +21,18 @@ public class PlayerThrownWeapon : MonoBehaviour
     private bool _returning;
     private bool _notifiedBoomerangEnded;
     private readonly HashSet<int> _hitIds = new HashSet<int>();
+    public float RemainingLife => _dieAt > 0f ? Mathf.Max(0f, _dieAt - Time.time) : Mathf.Max(0f, life);
+    public Vector2 CurrentVelocity { get; private set; }
+
+    private void OnEnable()
+    {
+        OnlineNetworkRegistry.Register(this);
+    }
+
+    private void OnDisable()
+    {
+        OnlineNetworkRegistry.Unregister(this);
+    }
 
     private void OnEnable()  => OnlineNetworkRegistry.Register(this);
     private void OnDisable() => OnlineNetworkRegistry.Unregister(this);
@@ -40,6 +54,7 @@ public class PlayerThrownWeapon : MonoBehaviour
     private void Update()
     {
         float dt = Time.deltaTime;
+        Vector2 before = transform.position;
         if (Time.time >= _dieAt)
         {
             NotifyBoomerangEnded();
@@ -50,11 +65,13 @@ public class PlayerThrownWeapon : MonoBehaviour
         if (boomerang)
         {
             UpdateBoomerang(dt);
+            UpdateVelocity(before, dt);
             return;
         }
 
         transform.position += (Vector3)(direction * (Mathf.Max(0.1f, speed) * dt));
         transform.rotation = Quaternion.Euler(0f, 0f, Mathf.Atan2(direction.y, direction.x) * Mathf.Rad2Deg);
+        UpdateVelocity(before, dt);
 
         if (Vector2.Distance(_origin, transform.position) >= Mathf.Max(0.5f, maxDistance))
         {
@@ -95,6 +112,13 @@ public class PlayerThrownWeapon : MonoBehaviour
         float usedSpeed = _returning ? Mathf.Max(0.1f, returnSpeed) : Mathf.Max(0.1f, speed);
         transform.position += (Vector3)(moveDirection * (usedSpeed * dt));
         transform.Rotate(0f, 0f, 860f * dt);
+    }
+
+    private void UpdateVelocity(Vector2 before, float dt)
+    {
+        CurrentVelocity = dt > 0.0001f
+            ? ((Vector2)transform.position - before) / dt
+            : Vector2.zero;
     }
 
     private void OnDestroy()

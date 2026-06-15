@@ -19,9 +19,13 @@ public class GameStateHost : MonoBehaviour
     private int _nextEntityId = 1;
     private int _tick;
     private bool _sawRunActive;
+    private bool _guestReady;
+    private bool _matchStarted;
 
     private void Start()
     {
+        OnlineMatchStartGate.Show("Waiting for guest...");
+        GameAudio.StopMusic();
         HitBox.Spawned += HandleHitBoxSpawned;
         _remotePlayer = FindRemotePlayer();
         StartCoroutine(ConnectThenSync());
@@ -38,6 +42,7 @@ public class GameStateHost : MonoBehaviour
         if (connectTask.IsFaulted || !_ws.IsConnected)
         {
             Debug.LogWarning("GameStateHost: WebSocket connect failed - " + connectTask.Exception?.GetBaseException()?.Message);
+            OnlineMatchStartGate.SetMessage("Could not connect to match server.");
             yield break;
         }
 
@@ -63,7 +68,12 @@ public class GameStateHost : MonoBehaviour
 
     private void HandleGuestMessage(string json)
     {
-        if (string.IsNullOrWhiteSpace(json) || !json.Contains("\"input\""))
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return;
+        }
+
+        if (!json.Contains("\"input\""))
         {
             return;
         }
@@ -110,6 +120,15 @@ public class GameStateHost : MonoBehaviour
             input.rangedPassiveSkillLevel,
             input.weaponItemId);
 
+        if (input.ready && input.readyMapIndex == GameMapSelection.SelectedMapIndex)
+            MarkGuestReady();
+
+        if (!_matchStarted)
+        {
+            _remotePlayer.ApplyExternalInput(Vector2.zero, Vector2.down, false, false, false, false);
+            return;
+        }
+
         bool attackDown = input.attackSeq > 0 && input.attackSeq != _lastAttackSeq;
         bool chargeDown = input.chargeSeq > 0 && input.chargeSeq != _lastChargeSeq;
         bool burstDown = input.burstSeq > 0 && input.burstSeq != _lastBurstSeq;
@@ -144,6 +163,17 @@ public class GameStateHost : MonoBehaviour
         }
     }
 
+    private void MarkGuestReady()
+    {
+        if (_guestReady)
+            return;
+
+        _guestReady = true;
+        _matchStarted = true;
+        OnlineMatchStartGate.Hide();
+        GameAudio.EnsureMatchMusic(GameMapSelection.SelectedMapIndex);
+    }
+
     private OnlineMatchStateMessage BuildState()
     {
         bool ended = _sawRunActive && !GameStatsTracker.IsRunActive;
@@ -155,10 +185,12 @@ public class GameStateHost : MonoBehaviour
         return new OnlineMatchStateMessage
         {
             tick = ++_tick,
+            matchStarted = _matchStarted,
             matchEnded = ended,
             matchEnding = MatchExit.IsEnding,
             matchFinished = ended && GameStatsTracker.LastRunWasFinished,
             pausedByHost = PauseMenu.IsPaused,
+            endingPlayerId = MatchExit.EndingPlayerId,
             meleeKills = meleeKills,
             rangedKills = rangedKills,
             giantKills = giantKills,
@@ -171,8 +203,7 @@ public class GameStateHost : MonoBehaviour
             players = BuildPlayers(),
             enemies = BuildEnemies(),
             projectiles = BuildProjectiles(),
-            itemDrops = BuildItemDrops(),
-            abilities = BuildAbilities()
+            effects = BuildEffects()
         };
     }
 
@@ -209,8 +240,9 @@ public class GameStateHost : MonoBehaviour
             skinId = GetPlayerSkinId(id, player),
             skinColor = GetPlayerSkinColor(id, player),
             attackSeq = GetPlayerAttackSequence(id, player),
-            weaponType = id == 0 ? PlayerLoadout.CurrentWeaponKind.ToString() : "",
-            weaponColor = id == 0 ? PlayerLoadout.WeaponColorHex : "#FFFFFF"
+            weaponItemId = GetPlayerWeaponItemId(id, player),
+            weaponType = GetPlayerWeaponType(id, player),
+            weaponColor = GetPlayerWeaponColor(id, player)
         };
     }
 
@@ -233,6 +265,27 @@ public class GameStateHost : MonoBehaviour
         if (id == 1)
             return _lastAttackSeq;
         return player != null ? player.NetworkAttackSequence : 0;
+    }
+
+    private int GetPlayerWeaponItemId(int id, PlayerController player)
+    {
+        if (id == 0)
+            return PlayerLoadout.EquippedWeaponItemId;
+        return player != null ? player.NetworkWeaponItemId : 0;
+    }
+
+    private string GetPlayerWeaponType(int id, PlayerController player)
+    {
+        if (id == 0)
+            return PlayerLoadout.CurrentWeaponKind.ToString();
+        return player != null ? player.NetworkWeaponType : "Spear";
+    }
+
+    private string GetPlayerWeaponColor(int id, PlayerController player)
+    {
+        if (id == 0)
+            return PlayerLoadout.WeaponColorHex;
+        return player != null ? player.NetworkWeaponColor : "#FFFFFF";
     }
 
     private OnlineEnemyState[] BuildEnemies()
@@ -393,111 +446,302 @@ public class GameStateHost : MonoBehaviour
         return projectiles.ToArray();
     }
 
-    private OnlineAbilityState[] BuildAbilities()
+    private OnlineEffectState[] BuildEffects()
     {
-        var list = new List<OnlineAbilityState>();
+        var effects = new List<OnlineEffectState>();
 
-        for (int i = OnlineNetworkRegistry.Bursts.Count - 1; i >= 0; i--)
-        {
-            ExpansionBurst burst = OnlineNetworkRegistry.Bursts[i];
-            if (burst == null) { OnlineNetworkRegistry.Bursts.RemoveAt(i); continue; }
-            if (burst.ownerPlayerIndex != 0) continue;
-            Color c = burst.VisualColor;
-            list.Add(new OnlineAbilityState
-            {
-                id = GetOrAssignId(burst.gameObject),
-                type = 0,
-                x = burst.transform.position.x,
-                y = burst.transform.position.y,
-                scale = burst.transform.localScale.x,
-                maxScale = burst.maxRadius * 2f,
-                remaining = burst.RemainingLife,
-                cr = Mathf.RoundToInt(c.r * 255),
-                cg = Mathf.RoundToInt(c.g * 255),
-                cb = Mathf.RoundToInt(c.b * 255)
-            });
-        }
+        AddThrownWeaponEffects(effects);
+        AddRangedAbilityProjectileEffects(effects);
+        AddExpansionBurstEffects(effects);
+        AddGravityBombEffects(effects);
+        AddGravityWellEffects(effects);
+        AddPlayerMinionEffects(effects);
+        AddFireTrailEffects(effects);
+        AddTemporaryWallEffects(effects);
+        AddPlayerDecoyEffects(effects);
 
-        for (int i = OnlineNetworkRegistry.GravityBombs.Count - 1; i >= 0; i--)
-        {
-            GravityBombProjectile bomb = OnlineNetworkRegistry.GravityBombs[i];
-            if (bomb == null) { OnlineNetworkRegistry.GravityBombs.RemoveAt(i); continue; }
-            if (bomb.ownerPlayerIndex != 0) continue;
-            Vector2 vel = bomb.Velocity;
-            list.Add(new OnlineAbilityState
-            {
-                id = GetOrAssignId(bomb.gameObject),
-                type = 1,
-                x = bomb.transform.position.x,
-                y = bomb.transform.position.y,
-                vx = vel.x, vy = vel.y,
-                scale = 0.8f,
-                remaining = bomb.RemainingLife,
-                cr = Mathf.RoundToInt(bomb.bombColor.r * 255),
-                cg = Mathf.RoundToInt(bomb.bombColor.g * 255),
-                cb = Mathf.RoundToInt(bomb.bombColor.b * 255)
-            });
-        }
+        return effects.ToArray();
+    }
 
-        for (int i = OnlineNetworkRegistry.GravityWells.Count - 1; i >= 0; i--)
-        {
-            GravityWell well = OnlineNetworkRegistry.GravityWells[i];
-            if (well == null) { OnlineNetworkRegistry.GravityWells.RemoveAt(i); continue; }
-            if (well.ownerPlayerIndex != 0) continue;
-            list.Add(new OnlineAbilityState
-            {
-                id = GetOrAssignId(well.gameObject),
-                type = 2,
-                x = well.transform.position.x,
-                y = well.transform.position.y,
-                scale = well.radius * 2f,
-                remaining = well.RemainingLife,
-                cr = Mathf.RoundToInt(well.color.r * 255),
-                cg = Mathf.RoundToInt(well.color.g * 255),
-                cb = Mathf.RoundToInt(well.color.b * 255)
-            });
-        }
-
+    private void AddThrownWeaponEffects(List<OnlineEffectState> effects)
+    {
         for (int i = OnlineNetworkRegistry.ThrownWeapons.Count - 1; i >= 0; i--)
         {
             PlayerThrownWeapon weapon = OnlineNetworkRegistry.ThrownWeapons[i];
-            if (weapon == null) { OnlineNetworkRegistry.ThrownWeapons.RemoveAt(i); continue; }
-            if (weapon.ownerPlayerIndex != 0) continue;
-            Vector2 vel = weapon.Velocity;
-            Vector3 ws = weapon.transform.localScale;
-            list.Add(new OnlineAbilityState
+            if (weapon == null)
+            {
+                OnlineNetworkRegistry.ThrownWeapons.RemoveAt(i);
+                continue;
+            }
+
+            Transform visual = FindWeaponVisual(weapon.transform);
+            Vector2 velocity = weapon.CurrentVelocity;
+            effects.Add(new OnlineEffectState
             {
                 id = GetOrAssignId(weapon.gameObject),
-                type = 3,
+                type = OnlineEffectType.ThrownWeapon,
+                ownerId = weapon.ownerPlayerIndex,
                 x = weapon.transform.position.x,
                 y = weapon.transform.position.y,
-                vx = vel.x, vy = vel.y,
-                scale = Mathf.Max(ws.x, ws.y),
-                remaining = weapon.RemainingLife,
-                cr = Mathf.RoundToInt(weapon.weaponColor.r * 255),
-                cg = Mathf.RoundToInt(weapon.weaponColor.g * 255),
-                cb = Mathf.RoundToInt(weapon.weaponColor.b * 255)
+                vx = velocity.x,
+                vy = velocity.y,
+                rotationZ = weapon.transform.eulerAngles.z,
+                scaleX = Mathf.Max(0.05f, weapon.transform.localScale.x),
+                scaleY = Mathf.Max(0.05f, weapon.transform.localScale.y),
+                color = "#" + ColorUtility.ToHtmlStringRGBA(weapon.weaponColor),
+                life = weapon.RemainingLife,
+                boomerang = weapon.boomerang,
+                weaponItemId = weapon.weaponItemId,
+                weaponType = string.IsNullOrWhiteSpace(weapon.weaponType) ? (weapon.boomerang ? "Sword" : "Spear") : weapon.weaponType,
+                hasWeaponVisual = visual != null,
+                visualOffsetX = visual != null ? visual.localPosition.x : 0f,
+                visualOffsetY = visual != null ? visual.localPosition.y : 0f,
+                visualScaleX = visual != null ? visual.localScale.x : 1f,
+                visualScaleY = visual != null ? visual.localScale.y : 1f,
+                visualRotationZ = visual != null ? visual.localEulerAngles.z : 0f
             });
         }
-
-        return list.Count > 0 ? list.ToArray() : null;
     }
 
-    private OnlineItemDropState[] BuildItemDrops()
+    private void AddRangedAbilityProjectileEffects(List<OnlineEffectState> effects)
     {
-        var drops = new List<OnlineItemDropState>();
-        for (int i = OnlineNetworkRegistry.ItemDrops.Count - 1; i >= 0; i--)
+        for (int i = OnlineNetworkRegistry.RangedAbilityProjectiles.Count - 1; i >= 0; i--)
         {
-            DroppedMaterialPickup drop = OnlineNetworkRegistry.ItemDrops[i];
-            if (drop == null) { OnlineNetworkRegistry.ItemDrops.RemoveAt(i); continue; }
-            drops.Add(new OnlineItemDropState
+            RangedAbilityProjectile projectile = OnlineNetworkRegistry.RangedAbilityProjectiles[i];
+            if (projectile == null)
             {
-                id = GetOrAssignId(drop.gameObject),
-                x = drop.transform.position.x,
-                y = drop.transform.position.y
+                OnlineNetworkRegistry.RangedAbilityProjectiles.RemoveAt(i);
+                continue;
+            }
+
+            effects.Add(new OnlineEffectState
+            {
+                id = GetOrAssignId(projectile.gameObject),
+                type = OnlineEffectType.RangedAbilityProjectile,
+                ownerId = projectile.ownerPlayerIndex,
+                x = projectile.transform.position.x,
+                y = projectile.transform.position.y,
+                vx = projectile.direction.x * projectile.speed,
+                vy = projectile.direction.y * projectile.speed,
+                rotationZ = projectile.transform.eulerAngles.z,
+                scaleX = Mathf.Max(0.05f, projectile.transform.localScale.x),
+                scaleY = Mathf.Max(0.05f, projectile.transform.localScale.y),
+                color = "#" + ColorUtility.ToHtmlStringRGBA(projectile.projectileColor),
+                life = projectile.RemainingLife,
+                explosive = projectile.explodesOnImpact
             });
         }
-        return drops.Count > 0 ? drops.ToArray() : null;
+    }
+
+    private void AddExpansionBurstEffects(List<OnlineEffectState> effects)
+    {
+        for (int i = OnlineNetworkRegistry.ExpansionBursts.Count - 1; i >= 0; i--)
+        {
+            ExpansionBurst burst = OnlineNetworkRegistry.ExpansionBursts[i];
+            if (burst == null)
+            {
+                OnlineNetworkRegistry.ExpansionBursts.RemoveAt(i);
+                continue;
+            }
+
+            SpriteRenderer renderer = burst.GetComponent<SpriteRenderer>();
+            Color color = renderer != null ? renderer.color : new Color(0.5f, 0.9f, 1f, 0.25f);
+            effects.Add(new OnlineEffectState
+            {
+                id = GetOrAssignId(burst.gameObject),
+                type = OnlineEffectType.ExpansionBurst,
+                ownerId = burst.ownerPlayerIndex,
+                x = burst.transform.position.x,
+                y = burst.transform.position.y,
+                rotationZ = burst.transform.eulerAngles.z,
+                scaleX = Mathf.Max(0.05f, burst.transform.localScale.x),
+                scaleY = Mathf.Max(0.05f, burst.transform.localScale.y),
+                color = "#" + ColorUtility.ToHtmlStringRGBA(color),
+                life = Mathf.Max(0.08f, burst.RemainingLife)
+            });
+        }
+    }
+
+    private void AddGravityBombEffects(List<OnlineEffectState> effects)
+    {
+        for (int i = OnlineNetworkRegistry.GravityBombs.Count - 1; i >= 0; i--)
+        {
+            GravityBombProjectile bomb = OnlineNetworkRegistry.GravityBombs[i];
+            if (bomb == null)
+            {
+                OnlineNetworkRegistry.GravityBombs.RemoveAt(i);
+                continue;
+            }
+
+            Vector3 visualScale = bomb.VisualLocalScale;
+            Vector3 shadowScale = bomb.ShadowLocalScale;
+            Vector2 velocity = bomb.CurrentVelocity;
+            effects.Add(new OnlineEffectState
+            {
+                id = GetOrAssignId(bomb.gameObject),
+                type = OnlineEffectType.GravityBombProjectile,
+                ownerId = bomb.ownerPlayerIndex,
+                x = bomb.transform.position.x,
+                y = bomb.transform.position.y,
+                vx = velocity.x,
+                vy = velocity.y,
+                rotationZ = bomb.transform.eulerAngles.z,
+                scaleX = 1f,
+                scaleY = 1f,
+                color = "#" + ColorUtility.ToHtmlStringRGBA(bomb.bombColor),
+                life = bomb.RemainingLife,
+                visualOffsetY = bomb.VisualLocalY,
+                visualScaleX = visualScale.x,
+                visualScaleY = visualScale.y,
+                shadowScaleX = shadowScale.x,
+                shadowScaleY = shadowScale.y
+            });
+        }
+    }
+
+    private void AddGravityWellEffects(List<OnlineEffectState> effects)
+    {
+        for (int i = OnlineNetworkRegistry.GravityWells.Count - 1; i >= 0; i--)
+        {
+            GravityWell well = OnlineNetworkRegistry.GravityWells[i];
+            if (well == null)
+            {
+                OnlineNetworkRegistry.GravityWells.RemoveAt(i);
+                continue;
+            }
+
+            SpriteRenderer renderer = well.GetComponent<SpriteRenderer>();
+            Color color = renderer != null ? renderer.color : well.color;
+            effects.Add(new OnlineEffectState
+            {
+                id = GetOrAssignId(well.gameObject),
+                type = OnlineEffectType.GravityWell,
+                ownerId = well.ownerPlayerIndex,
+                x = well.transform.position.x,
+                y = well.transform.position.y,
+                scaleX = Mathf.Max(0.05f, well.transform.localScale.x),
+                scaleY = Mathf.Max(0.05f, well.transform.localScale.y),
+                color = "#" + ColorUtility.ToHtmlStringRGBA(color),
+                life = well.RemainingLife
+            });
+        }
+    }
+
+    private void AddPlayerMinionEffects(List<OnlineEffectState> effects)
+    {
+        for (int i = OnlineNetworkRegistry.PlayerMinions.Count - 1; i >= 0; i--)
+        {
+            PlayerMinion minion = OnlineNetworkRegistry.PlayerMinions[i];
+            if (minion == null)
+            {
+                OnlineNetworkRegistry.PlayerMinions.RemoveAt(i);
+                continue;
+            }
+
+            Vector2 velocity = minion.CurrentVelocity;
+            effects.Add(new OnlineEffectState
+            {
+                id = GetOrAssignId(minion.gameObject),
+                type = OnlineEffectType.PlayerMinion,
+                ownerId = minion.ownerPlayerIndex,
+                x = minion.transform.position.x,
+                y = minion.transform.position.y,
+                vx = velocity.x,
+                vy = velocity.y,
+                rotationZ = minion.transform.eulerAngles.z,
+                scaleX = Mathf.Max(0.05f, minion.transform.localScale.x),
+                scaleY = Mathf.Max(0.05f, minion.transform.localScale.y),
+                color = "#FFE01FFF",
+                life = minion.RemainingLife
+            });
+        }
+    }
+
+    private void AddFireTrailEffects(List<OnlineEffectState> effects)
+    {
+        for (int i = OnlineNetworkRegistry.FireTrails.Count - 1; i >= 0; i--)
+        {
+            FireTrailSegment fireTrail = OnlineNetworkRegistry.FireTrails[i];
+            if (fireTrail == null)
+            {
+                OnlineNetworkRegistry.FireTrails.RemoveAt(i);
+                continue;
+            }
+
+            effects.Add(new OnlineEffectState
+            {
+                id = GetOrAssignId(fireTrail.gameObject),
+                type = OnlineEffectType.FireTrail,
+                ownerId = fireTrail.ownerPlayerIndex,
+                x = fireTrail.transform.position.x,
+                y = fireTrail.transform.position.y,
+                scaleX = Mathf.Max(0.05f, fireTrail.transform.localScale.x),
+                scaleY = Mathf.Max(0.05f, fireTrail.transform.localScale.y),
+                color = "#" + ColorUtility.ToHtmlStringRGBA(fireTrail.fireColor),
+                life = fireTrail.RemainingLife
+            });
+        }
+    }
+
+    private void AddTemporaryWallEffects(List<OnlineEffectState> effects)
+    {
+        for (int i = OnlineNetworkRegistry.TemporaryWalls.Count - 1; i >= 0; i--)
+        {
+            TemporaryWall wall = OnlineNetworkRegistry.TemporaryWalls[i];
+            if (wall == null)
+            {
+                OnlineNetworkRegistry.TemporaryWalls.RemoveAt(i);
+                continue;
+            }
+
+            SpriteRenderer renderer = wall.GetComponentInChildren<SpriteRenderer>();
+            Color color = renderer != null ? renderer.color : new Color(0.58f, 0.94f, 1f, 0.62f);
+            effects.Add(new OnlineEffectState
+            {
+                id = GetOrAssignId(wall.gameObject),
+                type = OnlineEffectType.TemporaryWall,
+                ownerId = wall.ownerPlayerIndex,
+                x = wall.transform.position.x,
+                y = wall.transform.position.y,
+                rotationZ = wall.transform.eulerAngles.z,
+                scaleX = Mathf.Max(0.05f, wall.transform.localScale.x),
+                scaleY = Mathf.Max(0.05f, wall.transform.localScale.y),
+                color = "#" + ColorUtility.ToHtmlStringRGBA(color),
+                life = wall.RemainingLife
+            });
+        }
+    }
+
+    private void AddPlayerDecoyEffects(List<OnlineEffectState> effects)
+    {
+        for (int i = OnlineNetworkRegistry.PlayerDecoys.Count - 1; i >= 0; i--)
+        {
+            PlayerDecoy decoy = OnlineNetworkRegistry.PlayerDecoys[i];
+            if (decoy == null)
+            {
+                OnlineNetworkRegistry.PlayerDecoys.RemoveAt(i);
+                continue;
+            }
+
+            SpriteRenderer renderer = decoy.GetComponent<SpriteRenderer>();
+            Color color = renderer != null ? renderer.color : Color.white;
+            PlayerController owner = MultiplayerState.GetPlayerByIndex(decoy.ownerPlayerIndex);
+            effects.Add(new OnlineEffectState
+            {
+                id = GetOrAssignId(decoy.gameObject),
+                type = OnlineEffectType.PlayerDecoy,
+                ownerId = decoy.ownerPlayerIndex,
+                x = decoy.transform.position.x,
+                y = decoy.transform.position.y,
+                rotationZ = decoy.transform.eulerAngles.z,
+                scaleX = Mathf.Max(0.05f, decoy.transform.localScale.x),
+                scaleY = Mathf.Max(0.05f, decoy.transform.localScale.y),
+                color = "#" + ColorUtility.ToHtmlStringRGBA(color),
+                life = decoy.RemainingLife,
+                skinId = owner != null ? owner.NetworkSkinId : 0,
+                skinColor = owner != null ? owner.NetworkSkinColor : "#FFFFFF"
+            });
+        }
     }
 
     private void AddPlayerHitBoxStates(List<OnlineProjectileState> projectiles)
@@ -559,11 +803,19 @@ public class GameStateHost : MonoBehaviour
     private AttackVisualSnapshot BuildAttackVisualSnapshot(int id, HitBox hitBox, float expireAt)
     {
         Transform t = hitBox.transform;
+        Transform weaponVisual = FindWeaponVisual(t);
+        PlayerController owner = MultiplayerState.GetPlayerByIndex(hitBox.ownerPlayerIndex);
         return new AttackVisualSnapshot
         {
             id = id,
             ownerId = hitBox.ownerPlayerIndex,
             color = "#" + ColorUtility.ToHtmlStringRGBA(hitBox.visualColor),
+            weaponType = owner != null ? owner.NetworkWeaponType : "Spear",
+            weaponItemId = owner != null ? owner.NetworkWeaponItemId : 0,
+            hasWeaponVisual = weaponVisual != null,
+            visualOffset = weaponVisual != null ? (Vector2)weaponVisual.localPosition : Vector2.zero,
+            visualScale = weaponVisual != null ? (Vector2)weaponVisual.localScale : Vector2.one,
+            visualRotationZ = weaponVisual != null ? weaponVisual.localEulerAngles.z : 0f,
             x = t.position.x,
             y = t.position.y,
             rotationZ = t.eulerAngles.z,
@@ -571,6 +823,21 @@ public class GameStateHost : MonoBehaviour
             scaleY = Mathf.Max(0.05f, t.localScale.y),
             expireAt = expireAt
         };
+    }
+
+    private Transform FindWeaponVisual(Transform root)
+    {
+        if (root == null)
+            return null;
+
+        for (int i = 0; i < root.childCount; i++)
+        {
+            Transform child = root.GetChild(i);
+            if (child != null && child.GetComponent<SpriteRenderer>() != null && child.name == "WeaponVisual")
+                return child;
+        }
+
+        return null;
     }
 
     private int GetOrAssignId(GameObject obj)
@@ -610,6 +877,8 @@ public class GameStateHost : MonoBehaviour
     private void OnDestroy()
     {
         HitBox.Spawned -= HandleHitBoxSpawned;
+        if (OnlineMatchStartGate.IsWaiting)
+            OnlineMatchStartGate.Reset();
         _ws?.Dispose();
     }
 
@@ -618,6 +887,12 @@ public class GameStateHost : MonoBehaviour
         public int id;
         public int ownerId;
         public string color;
+        public string weaponType;
+        public int weaponItemId;
+        public bool hasWeaponVisual;
+        public Vector2 visualOffset;
+        public Vector2 visualScale = Vector2.one;
+        public float visualRotationZ;
         public float x;
         public float y;
         public float rotationZ;
@@ -634,10 +909,18 @@ public class GameStateHost : MonoBehaviour
                 ownerId = ownerId,
                 isHitbox = true,
                 color = color,
+                weaponType = weaponType,
+                weaponItemId = weaponItemId,
+                hasWeaponVisual = hasWeaponVisual,
                 size = Mathf.Max(scaleX, scaleY),
                 scaleX = scaleX,
                 scaleY = scaleY,
                 rotationZ = rotationZ,
+                visualOffsetX = visualOffset.x,
+                visualOffsetY = visualOffset.y,
+                visualScaleX = visualScale.x,
+                visualScaleY = visualScale.y,
+                visualRotationZ = visualRotationZ,
                 x = x,
                 y = y,
                 vx = 0f,

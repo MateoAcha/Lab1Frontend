@@ -123,6 +123,10 @@ public class GameBootstrap : MonoBehaviour
         MultiplayerState.Reset();
         MultiplayerState.SetMultiplayer(isMultiplayer || isOnline);
         if (isOnline) { MultiplayerState.SetOnline(true); MultiplayerState.SetHost(isHost); MultiplayerState.SetOnlineRoomNumber(onlineRoom); }
+        if (isOnline)
+            OnlineMatchStartGate.Show(isHost ? "Waiting for guest..." : "Syncing online match...");
+        else
+            OnlineMatchStartGate.Reset();
         SkinVisualDatabase.Register(skinVisualDatabase);
         WeaponVisualDatabase.Register(weaponVisualDatabase);
         ApplySelectedMapDefinition(false);
@@ -156,7 +160,10 @@ public class GameBootstrap : MonoBehaviour
         SetupSpawner();
         SetupGameOverScreen();
         SetupPauseMenu();
-        GameAudio.EnsureMusic();
+        if (isOnline)
+            GameAudio.StopMusic();
+        else
+            GameAudio.EnsureMusic();
         GameAudio.ConfigureSoundEffects(
             giantAttackStompSound,
             menuButtonClickSound,
@@ -199,9 +206,8 @@ public class GameBootstrap : MonoBehaviour
         GameObject ghost = new GameObject("RemotePlayerGhost");
         ghost.transform.localScale = new Vector3(playerSize, playerSize, 1f);
 
-        // Sprite child keeps PlayerAnimator from overriding the root's playerSize scale
         GameObject spriteObj = new GameObject("Sprite");
-        spriteObj.transform.SetParent(ghost.transform);
+        spriteObj.transform.SetParent(ghost.transform, false);
         spriteObj.transform.localPosition = Vector3.zero;
         spriteObj.transform.localRotation = Quaternion.identity;
         spriteObj.transform.localScale = Vector3.one;

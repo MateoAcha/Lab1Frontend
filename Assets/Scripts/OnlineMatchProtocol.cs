@@ -8,6 +8,8 @@ public class OnlineMatchInputMessage
     public float moveY;
     public float aimX;
     public float aimY = -1f;
+    public bool ready;
+    public int readyMapIndex = -1;
     public int attackSeq;
     public int chargeSeq;
     public int burstSeq;
@@ -41,10 +43,12 @@ public class OnlineMatchStateMessage
 {
     public string type = "state";
     public int tick;
+    public bool matchStarted = true;
     public bool matchEnded;
     public bool matchEnding;
     public bool matchFinished;
     public bool pausedByHost;
+    public int endingPlayerId = -1;
     public int meleeKills;
     public int rangedKills;
     public int giantKills;
@@ -57,8 +61,20 @@ public class OnlineMatchStateMessage
     public OnlinePlayerState[] players;
     public OnlineEnemyState[] enemies;
     public OnlineProjectileState[] projectiles;
-    public OnlineItemDropState[] itemDrops;
-    public OnlineAbilityState[] abilities;
+    public OnlineEffectState[] effects;
+}
+
+public static class OnlineEffectType
+{
+    public const int ThrownWeapon = 1;
+    public const int RangedAbilityProjectile = 2;
+    public const int ExpansionBurst = 3;
+    public const int GravityBombProjectile = 4;
+    public const int GravityWell = 5;
+    public const int PlayerMinion = 6;
+    public const int FireTrail = 7;
+    public const int TemporaryWall = 8;
+    public const int PlayerDecoy = 9;
 }
 
 [Serializable]
@@ -84,7 +100,8 @@ public class OnlinePlayerState
     public int skinId;
     public string skinColor = "#FFFFFF";
     public int attackSeq;
-    public string weaponType = "";
+    public int weaponItemId;
+    public string weaponType = "Spear";
     public string weaponColor = "#FFFFFF";
 }
 
@@ -110,10 +127,18 @@ public class OnlineProjectileState
     public int ownerId;
     public bool isHitbox;
     public string color;
+    public bool hasWeaponVisual;
+    public int weaponItemId;
+    public string weaponType = "Spear";
     public float size;
     public float scaleX;
     public float scaleY;
     public float rotationZ;
+    public float visualOffsetX;
+    public float visualOffsetY;
+    public float visualScaleX = 1f;
+    public float visualScaleY = 1f;
+    public float visualRotationZ;
     public float x;
     public float y;
     public float vx;
@@ -145,4 +170,35 @@ public class OnlineAbilityState
     public int cr;
     public int cg;
     public int cb;
+}
+
+[Serializable]
+public class OnlineEffectState
+{
+    public int id;
+    public int type;
+    public int ownerId;
+    public float x;
+    public float y;
+    public float vx;
+    public float vy;
+    public float rotationZ;
+    public float scaleX = 1f;
+    public float scaleY = 1f;
+    public string color = "#FFFFFFFF";
+    public float life;
+    public bool explosive;
+    public bool boomerang;
+    public int weaponItemId;
+    public string weaponType = "Spear";
+    public bool hasWeaponVisual;
+    public float visualOffsetX;
+    public float visualOffsetY;
+    public float visualScaleX = 1f;
+    public float visualScaleY = 1f;
+    public float visualRotationZ;
+    public float shadowScaleX = 1f;
+    public float shadowScaleY = 0.35f;
+    public int skinId;
+    public string skinColor = "#FFFFFF";
 }

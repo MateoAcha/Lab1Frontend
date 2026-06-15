@@ -8,13 +8,15 @@ public static class OnlineNetworkRegistry
     public static readonly List<EnemyProjectile> Projectiles = new List<EnemyProjectile>();
     public static readonly List<PlayerProjectile> PlayerProjectiles = new List<PlayerProjectile>();
     public static readonly List<HitBox> PlayerHitBoxes = new List<HitBox>();
-    public static readonly List<PlayerMinion> PlayerMinions = new List<PlayerMinion>();
+    public static readonly List<PlayerThrownWeapon> ThrownWeapons = new List<PlayerThrownWeapon>();
     public static readonly List<RangedAbilityProjectile> RangedAbilityProjectiles = new List<RangedAbilityProjectile>();
-    public static readonly List<DroppedMaterialPickup> ItemDrops = new List<DroppedMaterialPickup>();
-    public static readonly List<ExpansionBurst> Bursts = new List<ExpansionBurst>();
+    public static readonly List<ExpansionBurst> ExpansionBursts = new List<ExpansionBurst>();
     public static readonly List<GravityBombProjectile> GravityBombs = new List<GravityBombProjectile>();
     public static readonly List<GravityWell> GravityWells = new List<GravityWell>();
-    public static readonly List<PlayerThrownWeapon> ThrownWeapons = new List<PlayerThrownWeapon>();
+    public static readonly List<PlayerMinion> PlayerMinions = new List<PlayerMinion>();
+    public static readonly List<FireTrailSegment> FireTrails = new List<FireTrailSegment>();
+    public static readonly List<TemporaryWall> TemporaryWalls = new List<TemporaryWall>();
+    public static readonly List<PlayerDecoy> PlayerDecoys = new List<PlayerDecoy>();
 
     public static void Register(EnemyController enemy)
     {
@@ -82,6 +84,61 @@ public static class OnlineNetworkRegistry
         PlayerHitBoxes.Remove(hitBox);
     }
 
+    public static void Register(PlayerThrownWeapon weapon)
+    {
+        if (weapon != null && !ThrownWeapons.Contains(weapon))
+            ThrownWeapons.Add(weapon);
+    }
+
+    public static void Unregister(PlayerThrownWeapon weapon)
+    {
+        ThrownWeapons.Remove(weapon);
+    }
+
+    public static void Register(RangedAbilityProjectile projectile)
+    {
+        if (projectile != null && !RangedAbilityProjectiles.Contains(projectile))
+            RangedAbilityProjectiles.Add(projectile);
+    }
+
+    public static void Unregister(RangedAbilityProjectile projectile)
+    {
+        RangedAbilityProjectiles.Remove(projectile);
+    }
+
+    public static void Register(ExpansionBurst burst)
+    {
+        if (burst != null && !ExpansionBursts.Contains(burst))
+            ExpansionBursts.Add(burst);
+    }
+
+    public static void Unregister(ExpansionBurst burst)
+    {
+        ExpansionBursts.Remove(burst);
+    }
+
+    public static void Register(GravityBombProjectile bomb)
+    {
+        if (bomb != null && !GravityBombs.Contains(bomb))
+            GravityBombs.Add(bomb);
+    }
+
+    public static void Unregister(GravityBombProjectile bomb)
+    {
+        GravityBombs.Remove(bomb);
+    }
+
+    public static void Register(GravityWell well)
+    {
+        if (well != null && !GravityWells.Contains(well))
+            GravityWells.Add(well);
+    }
+
+    public static void Unregister(GravityWell well)
+    {
+        GravityWells.Remove(well);
+    }
+
     public static void Register(PlayerMinion minion)
     {
         if (minion != null && !PlayerMinions.Contains(minion))
@@ -93,37 +150,36 @@ public static class OnlineNetworkRegistry
         PlayerMinions.Remove(minion);
     }
 
-    public static void Register(RangedAbilityProjectile proj)
+    public static void Register(FireTrailSegment fireTrail)
     {
-        if (proj != null && !RangedAbilityProjectiles.Contains(proj))
-            RangedAbilityProjectiles.Add(proj);
+        if (fireTrail != null && !FireTrails.Contains(fireTrail))
+            FireTrails.Add(fireTrail);
     }
 
-    public static void Unregister(RangedAbilityProjectile proj)
+    public static void Unregister(FireTrailSegment fireTrail)
     {
-        RangedAbilityProjectiles.Remove(proj);
+        FireTrails.Remove(fireTrail);
     }
 
-    public static void Register(DroppedMaterialPickup drop)
+    public static void Register(TemporaryWall wall)
     {
-        if (drop != null && !ItemDrops.Contains(drop))
-            ItemDrops.Add(drop);
+        if (wall != null && !TemporaryWalls.Contains(wall))
+            TemporaryWalls.Add(wall);
     }
 
-    public static void Unregister(DroppedMaterialPickup drop)
+    public static void Unregister(TemporaryWall wall)
     {
-        ItemDrops.Remove(drop);
+        TemporaryWalls.Remove(wall);
     }
 
-    public static void Register(ExpansionBurst b)   { if (b != null && !Bursts.Contains(b)) Bursts.Add(b); }
-    public static void Unregister(ExpansionBurst b) => Bursts.Remove(b);
+    public static void Register(PlayerDecoy decoy)
+    {
+        if (decoy != null && !PlayerDecoys.Contains(decoy))
+            PlayerDecoys.Add(decoy);
+    }
 
-    public static void Register(GravityBombProjectile b)   { if (b != null && !GravityBombs.Contains(b)) GravityBombs.Add(b); }
-    public static void Unregister(GravityBombProjectile b) => GravityBombs.Remove(b);
-
-    public static void Register(GravityWell w)   { if (w != null && !GravityWells.Contains(w)) GravityWells.Add(w); }
-    public static void Unregister(GravityWell w) => GravityWells.Remove(w);
-
-    public static void Register(PlayerThrownWeapon t)   { if (t != null && !ThrownWeapons.Contains(t)) ThrownWeapons.Add(t); }
-    public static void Unregister(PlayerThrownWeapon t) => ThrownWeapons.Remove(t);
+    public static void Unregister(PlayerDecoy decoy)
+    {
+        PlayerDecoys.Remove(decoy);
+    }
 }

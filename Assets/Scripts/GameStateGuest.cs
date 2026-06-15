@@ -15,10 +15,7 @@ public class GameStateGuest : MonoBehaviour
 
     private readonly Dictionary<int, OnlineEntityReplica> _enemyReplicas = new Dictionary<int, OnlineEntityReplica>();
     private readonly Dictionary<int, OnlineEntityReplica> _projectileReplicas = new Dictionary<int, OnlineEntityReplica>();
-    private readonly Dictionary<int, GameObject> _itemDropReplicas = new Dictionary<int, GameObject>();
-    private readonly Dictionary<int, GameObject> _abilityReplicas = new Dictionary<int, GameObject>();
-    private int _pendingPickupId = -1;
-    private int _appliedMapIndex = -1;
+    private readonly Dictionary<int, OnlineEntityReplica> _effectReplicas = new Dictionary<int, OnlineEntityReplica>();
 
     private Material _meleeMat;
     private Material _rangedMat;
@@ -27,15 +24,22 @@ public class GameStateGuest : MonoBehaviour
     private Texture2D _enemyAttackOrbTexture;
     private int _enemyAttackOrbFrameCount = 3;
     private float _enemyAttackOrbFps = 10f;
+    private GameBootstrap _bootstrap;
     private GameWebSocketClient _ws;
     private bool _matchCompleted;
     private bool _hostPaused;
+    private bool _sentReady;
+    private bool _matchStarted;
+    private bool _appliedMatchEndingVisual;
     private GameObject _hostPauseNotice;
     private OnlineMatchInputMessage _lastSentInput;
     private float _nextInputHeartbeatAt;
 
     private void Start()
     {
+        OnlineMatchStartGate.Show("Syncing online match...");
+        GameAudio.StopMusic();
+
         EnemySpawner spawner = FindObjectOfType<EnemySpawner>();
         if (spawner != null) spawner.enabled = false;
 
@@ -43,16 +47,16 @@ public class GameStateGuest : MonoBehaviour
 
         GameStatsTracker.StartMatch();
 
-        GameBootstrap bootstrap = FindObjectOfType<GameBootstrap>();
-        if (bootstrap != null)
+        _bootstrap = FindObjectOfType<GameBootstrap>();
+        if (_bootstrap != null)
         {
-            _meleeMat = bootstrap.meleeEnemyMaterial;
-            _rangedMat = bootstrap.rangedEnemyMaterial;
-            _projMat = bootstrap.enemyProjectileMaterial;
-            _enemyAttackOrbSprites = bootstrap.enemyAttackOrbSprites;
-            _enemyAttackOrbTexture = bootstrap.enemyAttackOrbTexture;
-            _enemyAttackOrbFrameCount = bootstrap.enemyAttackOrbFrameCount;
-            _enemyAttackOrbFps = bootstrap.enemyAttackOrbFps;
+            _meleeMat = _bootstrap.meleeEnemyMaterial;
+            _rangedMat = _bootstrap.rangedEnemyMaterial;
+            _projMat = _bootstrap.enemyProjectileMaterial;
+            _enemyAttackOrbSprites = _bootstrap.enemyAttackOrbSprites;
+            _enemyAttackOrbTexture = _bootstrap.enemyAttackOrbTexture;
+            _enemyAttackOrbFrameCount = _bootstrap.enemyAttackOrbFrameCount;
+            _enemyAttackOrbFps = _bootstrap.enemyAttackOrbFps;
         }
 
         BuildHostPauseNotice();
@@ -70,6 +74,7 @@ public class GameStateGuest : MonoBehaviour
         if (connectTask.IsFaulted || !_ws.IsConnected)
         {
             Debug.LogWarning("GameStateGuest: WebSocket connect failed - " + connectTask.Exception?.GetBaseException()?.Message);
+            OnlineMatchStartGate.SetMessage("Could not connect to host.");
             yield break;
         }
 
@@ -248,16 +253,16 @@ public class GameStateGuest : MonoBehaviour
 
     private void ApplyState(OnlineMatchStateMessage state)
     {
-        EnemySpawner.SetNetworkElapsedTime(state.elapsedSeconds);
+        EnemySpawner.SetNetworkElapsedTime(state.matchStarted ? state.elapsedSeconds : 0f);
         ApplyMapState(state.mapIndex);
+        ApplyStartState(state);
         ApplyExitState(state);
-        ApplyPlayerStates(state.players, state.matchEnded);
-        ApplyHostPauseState(state.pausedByHost, state.matchEnded);
-        ApplyMatchEndingState(state.matchEnding, state.matchEnded);
+        ApplyPlayerStates(state.players, state.matchEnded, state.matchStarted);
+        ApplyHostPauseState(state.pausedByHost, state.matchEnded, state.matchStarted);
+        ApplyMatchEndingState(state.matchEnding, state.matchEnded, state.endingPlayerId);
         ApplyEnemyState(state.enemies);
         ApplyProjectileState(state.projectiles);
-        ApplyItemDropState(state.itemDrops);
-        ApplyAbilityEffects(state.abilities);
+        ApplyEffectState(state.effects);
 
         if (state.matchEnded && !_matchCompleted)
         {
@@ -274,6 +279,38 @@ public class GameStateGuest : MonoBehaviour
                 Mathf.Max(0, state.elapsedSeconds),
                 state.matchFinished);
         }
+    }
+
+    private void ApplyStartState(OnlineMatchStateMessage state)
+    {
+        if (state == null)
+        {
+            return;
+        }
+
+        if (!_sentReady && state.mapIndex >= 0)
+        {
+            _sentReady = true;
+            OnlineMatchStartGate.SetMessage("Waiting for host...");
+            OnlineMatchInputMessage readyInput = BuildInput();
+            readyInput.ready = true;
+            readyInput.readyMapIndex = state.mapIndex;
+            StartCoroutine(Send(JsonUtility.ToJson(readyInput)));
+        }
+
+        if (state.matchStarted)
+        {
+            if (!_matchStarted)
+            {
+                _matchStarted = true;
+                OnlineMatchStartGate.Hide();
+            }
+
+            GameAudio.EnsureMatchMusic(state.mapIndex);
+            return;
+        }
+
+        OnlineMatchStartGate.Show(_sentReady ? "Waiting for host..." : "Syncing online match...");
     }
 
     private void ApplyExitState(OnlineMatchStateMessage state)
@@ -316,7 +353,7 @@ public class GameStateGuest : MonoBehaviour
         }
     }
 
-    private void ApplyMatchEndingState(bool matchEnding, bool matchEnded)
+    private void ApplyMatchEndingState(bool matchEnding, bool matchEnded, int endingPlayerId)
     {
         if (!matchEnding || matchEnded)
         {
@@ -337,9 +374,78 @@ public class GameStateGuest : MonoBehaviour
         {
             body.linearVelocity = Vector2.zero;
         }
+
+        if (!_appliedMatchEndingVisual)
+        {
+            _appliedMatchEndingVisual = true;
+            Transform target = ResolveEndingPlayerTransform(endingPlayerId);
+            if (target != null)
+                StartCoroutine(WarpSyncedPlayerVisual(target));
+        }
     }
 
-    private void ApplyPlayerStates(OnlinePlayerState[] players, bool matchEnded)
+    private Transform ResolveEndingPlayerTransform(int endingPlayerId)
+    {
+        if (endingPlayerId == 1 && PlayerController.main != null)
+            return PlayerController.main.transform;
+
+        if (endingPlayerId == 0 && RemotePlayerGhost.Instance != null)
+            return RemotePlayerGhost.Instance.transform;
+
+        PlayerController player = PlayerController.main;
+        if (player == null)
+            return RemotePlayerGhost.Instance != null ? RemotePlayerGhost.Instance.transform : null;
+
+        Vector2 exitPosition = MatchExit.Position;
+        Transform local = player.transform;
+        Transform remote = RemotePlayerGhost.Instance != null ? RemotePlayerGhost.Instance.transform : null;
+        if (remote == null)
+            return local;
+
+        float localDistance = ((Vector2)local.position - exitPosition).sqrMagnitude;
+        float remoteDistance = ((Vector2)remote.position - exitPosition).sqrMagnitude;
+        return localDistance <= remoteDistance ? local : remote;
+    }
+
+    private IEnumerator WarpSyncedPlayerVisual(Transform target)
+    {
+        Vector3 startScale = target.localScale;
+        Vector3 startPosition = target.position;
+        const float duration = 0.7f;
+        float elapsed = 0f;
+
+        while (elapsed < duration && target != null)
+        {
+            elapsed += Time.unscaledDeltaTime;
+            float t = Mathf.Clamp01(elapsed / duration);
+            float eased = t * t * (3f - 2f * t);
+            float width = Mathf.Lerp(1f, 0.08f, eased);
+            float height = Mathf.Lerp(1f, 2.4f, eased);
+            target.localScale = new Vector3(startScale.x * width, startScale.y * height, startScale.z);
+            target.position = startPosition + Vector3.up * Mathf.Lerp(0f, 1.1f, eased);
+            SetRenderersAlpha(target, Mathf.Lerp(1f, 0f, eased));
+            yield return null;
+        }
+
+        if (target != null)
+            target.gameObject.SetActive(false);
+    }
+
+    private static void SetRenderersAlpha(Transform target, float alpha)
+    {
+        SpriteRenderer[] renderers = target.GetComponentsInChildren<SpriteRenderer>();
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            if (renderers[i] == null)
+                continue;
+
+            Color color = renderers[i].color;
+            color.a = alpha;
+            renderers[i].color = color;
+        }
+    }
+
+    private void ApplyPlayerStates(OnlinePlayerState[] players, bool matchEnded, bool matchStarted)
     {
         if (players == null) return;
 
@@ -350,7 +456,7 @@ public class GameStateGuest : MonoBehaviour
             if (player.id == 0)
                 ApplyRemoteHostPlayer(player);
             else if (player.id == 1)
-                ApplyLocalGuestPlayer(player, matchEnded);
+                ApplyLocalGuestPlayer(player, matchEnded, matchStarted);
         }
     }
 
@@ -372,11 +478,12 @@ public class GameStateGuest : MonoBehaviour
             state.hp,
             state.maxHp,
             state.attackSeq,
+            state.weaponItemId,
             state.weaponType,
             state.weaponColor);
     }
 
-    private void ApplyLocalGuestPlayer(OnlinePlayerState state, bool matchEnded)
+    private void ApplyLocalGuestPlayer(OnlinePlayerState state, bool matchEnded, bool matchStarted)
     {
         PlayerController player = PlayerController.main;
         if (player == null) return;
@@ -394,7 +501,7 @@ public class GameStateGuest : MonoBehaviour
             ? authoritative
             : Vector3.Lerp(player.transform.position, authoritative, 0.18f);
 
-        SetLocalPlayerVisibleAndControllable(state.alive && !matchEnded);
+        SetLocalPlayerVisibleAndControllable(matchStarted && state.alive && !matchEnded);
     }
 
     private void SetLocalPlayerVisibleAndControllable(bool alive)
@@ -414,7 +521,7 @@ public class GameStateGuest : MonoBehaviour
         if (body != null && !alive) body.linearVelocity = Vector2.zero;
     }
 
-    private void ApplyHostPauseState(bool paused, bool matchEnded)
+    private void ApplyHostPauseState(bool paused, bool matchEnded, bool matchStarted)
     {
         _hostPaused = paused && !matchEnded;
         if (_hostPauseNotice != null)
@@ -422,6 +529,15 @@ public class GameStateGuest : MonoBehaviour
 
         PlayerController player = PlayerController.main;
         if (player == null || matchEnded) return;
+
+        if (!matchStarted)
+        {
+            player.enabled = false;
+            Rigidbody2D waitingBody = player.GetComponent<Rigidbody2D>();
+            if (waitingBody != null)
+                waitingBody.linearVelocity = Vector2.zero;
+            return;
+        }
 
         Health health = player.GetComponent<Health>();
         bool alive = health == null || health.hp > 0f;
@@ -442,6 +558,7 @@ public class GameStateGuest : MonoBehaviour
     {
         if (_matchCompleted) return;
         _matchCompleted = true;
+        OnlineMatchStartGate.Reset();
         Time.timeScale = 1f;
         MultiplayerState.RequestReturnToOnlineMenu();
         SceneManager.LoadScene("Menu");
@@ -584,10 +701,15 @@ public class GameStateGuest : MonoBehaviour
                 if (_projectileReplicas.TryGetValue(projectile.id, out OnlineEntityReplica replica) && replica != null)
                 {
                     ApplyProjectileReplicaShape(replica.transform, projectile);
-                    replica.SetTarget(
-                        new Vector3(projectile.x, projectile.y, 0f),
-                        new Vector3(projectile.vx, projectile.vy, 0f),
-                        20f);
+                    ApplyProjectileReplicaVisual(replica.gameObject, projectile);
+                    Vector3 position = new Vector3(projectile.x, projectile.y, 0f);
+                    if (projectile.isHitbox)
+                        replica.SnapTo(position);
+                    else
+                        replica.SetTarget(
+                            position,
+                            new Vector3(projectile.vx, projectile.vy, 0f),
+                            20f);
                 }
                 else
                 {
@@ -629,6 +751,7 @@ public class GameStateGuest : MonoBehaviour
                 : new Color(1f, 0.55f, 0.15f, 1f));
         sr.sortingOrder = 9;
         if (!projectile.fromPlayer && _projMat != null) { sr.sharedMaterial = _projMat; sr.color = Color.white; }
+        ApplyProjectileReplicaVisual(go, projectile);
         if (hasEnemyOrbSprite && enemyFrames.Length > 1)
         {
             EnemyProjectileAnimator animator = go.AddComponent<EnemyProjectileAnimator>();
@@ -639,6 +762,63 @@ public class GameStateGuest : MonoBehaviour
         OnlineEntityReplica replica = go.AddComponent<OnlineEntityReplica>();
         replica.SnapTo(go.transform.position);
         return replica;
+    }
+
+    private void ApplyProjectileReplicaVisual(GameObject go, OnlineProjectileState projectile)
+    {
+        if (go == null || projectile == null)
+            return;
+
+        SpriteRenderer rootRenderer = go.GetComponent<SpriteRenderer>();
+        Transform weaponVisual = go.transform.Find("WeaponVisual");
+
+        if (!projectile.isHitbox || !projectile.hasWeaponVisual)
+        {
+            if (rootRenderer != null)
+                rootRenderer.enabled = true;
+            if (weaponVisual != null)
+                weaponVisual.gameObject.SetActive(false);
+            return;
+        }
+
+        WeaponKind weaponKind = PlayerLoadout.ParseWeaponKind(projectile.weaponType);
+        Sprite weaponSprite = OnlineWeaponVisuals.ResolveAttackSprite(
+            weaponKind,
+            projectile.weaponItemId,
+            _bootstrap != null ? _bootstrap : FindObjectOfType<GameBootstrap>());
+        if (weaponSprite == null)
+        {
+            if (rootRenderer != null)
+                rootRenderer.enabled = true;
+            if (weaponVisual != null)
+                weaponVisual.gameObject.SetActive(false);
+            return;
+        }
+
+        if (rootRenderer != null)
+            rootRenderer.enabled = false;
+
+        if (weaponVisual == null)
+        {
+            GameObject visualObj = new GameObject("WeaponVisual");
+            visualObj.transform.SetParent(go.transform, false);
+            weaponVisual = visualObj.transform;
+        }
+
+        weaponVisual.gameObject.SetActive(true);
+        weaponVisual.localPosition = new Vector3(projectile.visualOffsetX, projectile.visualOffsetY, 0f);
+        weaponVisual.localRotation = Quaternion.Euler(0f, 0f, projectile.visualRotationZ);
+        weaponVisual.localScale = new Vector3(
+            Mathf.Approximately(projectile.visualScaleX, 0f) ? 1f : projectile.visualScaleX,
+            Mathf.Approximately(projectile.visualScaleY, 0f) ? 1f : projectile.visualScaleY,
+            1f);
+
+        SpriteRenderer weaponRenderer = weaponVisual.GetComponent<SpriteRenderer>();
+        if (weaponRenderer == null)
+            weaponRenderer = weaponVisual.gameObject.AddComponent<SpriteRenderer>();
+        weaponRenderer.sprite = weaponSprite;
+        weaponRenderer.color = Color.white;
+        weaponRenderer.sortingOrder = 10;
     }
 
     private void ApplyProjectileReplicaShape(Transform target, OnlineProjectileState projectile)
@@ -656,6 +836,464 @@ public class GameStateGuest : MonoBehaviour
 
         float size = projectile.size > 0f ? projectile.size : 0.25f;
         target.localScale = new Vector3(size, size, 1f);
+    }
+
+    private void ApplyEffectState(OnlineEffectState[] effects)
+    {
+        var activeIds = new HashSet<int>();
+
+        if (effects != null)
+        {
+            foreach (OnlineEffectState effect in effects)
+            {
+                if (effect == null || effect.life <= 0f) continue;
+                if (effect.ownerId == 1) continue;
+
+                activeIds.Add(effect.id);
+                if (_effectReplicas.TryGetValue(effect.id, out OnlineEntityReplica replica) && replica != null)
+                {
+                    ApplyEffectReplica(replica.gameObject, effect);
+                }
+                else
+                {
+                    _effectReplicas[effect.id] = SpawnEffectReplica(effect);
+                }
+            }
+        }
+
+        RemoveInactive(_effectReplicas, activeIds);
+    }
+
+    private OnlineEntityReplica SpawnEffectReplica(OnlineEffectState effect)
+    {
+        GameObject go = new GameObject(GetEffectReplicaName(effect.type));
+        go.transform.position = new Vector3(effect.x, effect.y, 0f);
+        BuildEffectVisual(go, effect);
+
+        OnlineEntityReplica replica = go.AddComponent<OnlineEntityReplica>();
+        replica.SnapTo(go.transform.position);
+        ApplyEffectReplica(go, effect);
+        return replica;
+    }
+
+    private void ApplyEffectReplica(GameObject go, OnlineEffectState effect)
+    {
+        if (go == null || effect == null)
+            return;
+
+        if (!UsesLocalEffectRotation(effect))
+            go.transform.rotation = Quaternion.Euler(0f, 0f, effect.rotationZ);
+        Vector3 effectScale = new Vector3(
+            Mathf.Approximately(effect.scaleX, 0f) ? 1f : effect.scaleX,
+            Mathf.Approximately(effect.scaleY, 0f) ? 1f : effect.scaleY,
+            1f);
+        if (UsesSmoothedEffectScale(effect.type))
+            SmoothScale(go.transform, effectScale, 24f);
+        else
+            go.transform.localScale = effectScale;
+
+        OnlineEntityReplica replica = go.GetComponent<OnlineEntityReplica>();
+        Vector3 position = new Vector3(effect.x, effect.y, 0f);
+        if (IsFastEffect(effect.type))
+        {
+            if (replica != null) replica.SnapTo(position);
+            else go.transform.position = position;
+        }
+        else if (replica != null)
+        {
+            replica.SetTarget(position, new Vector3(effect.vx, effect.vy, 0f), 18f);
+        }
+        else
+        {
+            go.transform.position = position;
+        }
+
+        UpdateEffectVisual(go, effect);
+    }
+
+    private void BuildEffectVisual(GameObject go, OnlineEffectState effect)
+    {
+        if (go == null || effect == null)
+            return;
+
+        if (effect.type == OnlineEffectType.GravityBombProjectile)
+        {
+            EnsureGravityBombVisual(go);
+            return;
+        }
+
+        if (effect.type == OnlineEffectType.PlayerMinion)
+        {
+            EnsureMinionVisual(go);
+            return;
+        }
+
+        if (effect.type == OnlineEffectType.TemporaryWall)
+        {
+            EnsureTemporaryWallVisual(go, effect);
+            return;
+        }
+
+        if (effect.type == OnlineEffectType.PlayerDecoy)
+        {
+            EnsurePlayerDecoyVisual(go, effect);
+            return;
+        }
+
+        SpriteRenderer renderer = go.GetComponent<SpriteRenderer>();
+        if (renderer == null)
+            renderer = go.AddComponent<SpriteRenderer>();
+
+        renderer.sprite = (effect.type == OnlineEffectType.RangedAbilityProjectile && effect.explosive)
+            ? SimpleSprite.Square
+            : SimpleSprite.Circle;
+        renderer.sortingOrder = GetEffectSortingOrder(effect.type);
+    }
+
+    private void UpdateEffectVisual(GameObject go, OnlineEffectState effect)
+    {
+        if (effect.type == OnlineEffectType.ThrownWeapon)
+        {
+            ApplyThrownWeaponReplicaVisual(go, effect);
+            return;
+        }
+
+        if (effect.type == OnlineEffectType.GravityBombProjectile)
+        {
+            ApplyGravityBombReplicaVisual(go, effect);
+            return;
+        }
+
+        if (effect.type == OnlineEffectType.PlayerMinion)
+        {
+            UpdateMinionReplicaVisual(go, effect);
+            return;
+        }
+
+        if (effect.type == OnlineEffectType.TemporaryWall)
+        {
+            UpdateTemporaryWallReplicaVisual(go, effect);
+            return;
+        }
+
+        if (effect.type == OnlineEffectType.PlayerDecoy)
+        {
+            UpdatePlayerDecoyReplicaVisual(go, effect);
+            return;
+        }
+
+        SpriteRenderer renderer = go.GetComponent<SpriteRenderer>();
+        if (renderer == null)
+            return;
+
+        renderer.color = PlayerLoadout.ParseWeaponColor(effect.color, Color.white);
+        if (effect.type == OnlineEffectType.ExpansionBurst ||
+            effect.type == OnlineEffectType.GravityWell ||
+            effect.type == OnlineEffectType.FireTrail)
+        {
+            Color color = renderer.color;
+            color.a = Mathf.Clamp01(color.a);
+            renderer.color = color;
+        }
+    }
+
+    private void ApplyThrownWeaponReplicaVisual(GameObject go, OnlineEffectState effect)
+    {
+        ConfigureSpin(go, effect.boomerang, 860f);
+
+        SpriteRenderer rootRenderer = go.GetComponent<SpriteRenderer>();
+        Transform weaponVisual = go.transform.Find("WeaponVisual");
+
+        WeaponKind weaponKind = PlayerLoadout.ParseWeaponKind(effect.weaponType);
+        Sprite weaponSprite = OnlineWeaponVisuals.ResolveAttackSprite(
+            weaponKind,
+            effect.weaponItemId,
+            _bootstrap != null ? _bootstrap : FindObjectOfType<GameBootstrap>());
+
+        if (weaponSprite == null)
+        {
+            if (rootRenderer == null)
+                rootRenderer = go.AddComponent<SpriteRenderer>();
+            rootRenderer.enabled = true;
+            rootRenderer.sprite = SimpleSprite.Square;
+            rootRenderer.color = PlayerLoadout.ParseWeaponColor(effect.color, Color.white);
+            rootRenderer.sortingOrder = 12;
+            if (weaponVisual != null)
+                weaponVisual.gameObject.SetActive(false);
+            return;
+        }
+
+        if (rootRenderer != null)
+            rootRenderer.enabled = false;
+
+        if (weaponVisual == null)
+        {
+            GameObject visualObj = new GameObject("WeaponVisual");
+            visualObj.transform.SetParent(go.transform, false);
+            weaponVisual = visualObj.transform;
+        }
+
+        weaponVisual.gameObject.SetActive(true);
+        weaponVisual.localPosition = new Vector3(effect.visualOffsetX, effect.visualOffsetY, 0f);
+        weaponVisual.localRotation = Quaternion.Euler(0f, 0f, effect.visualRotationZ);
+        weaponVisual.localScale = new Vector3(
+            Mathf.Approximately(effect.visualScaleX, 0f) ? 1f : effect.visualScaleX,
+            Mathf.Approximately(effect.visualScaleY, 0f) ? 1f : effect.visualScaleY,
+            1f);
+
+        SpriteRenderer weaponRenderer = weaponVisual.GetComponent<SpriteRenderer>();
+        if (weaponRenderer == null)
+            weaponRenderer = weaponVisual.gameObject.AddComponent<SpriteRenderer>();
+        weaponRenderer.sprite = weaponSprite;
+        weaponRenderer.color = Color.white;
+        weaponRenderer.sortingOrder = 12;
+    }
+
+    private void EnsureGravityBombVisual(GameObject go)
+    {
+        if (go.transform.Find("Shadow") == null)
+        {
+            GameObject shadow = new GameObject("Shadow");
+            shadow.transform.SetParent(go.transform, false);
+            SpriteRenderer shadowRenderer = shadow.AddComponent<SpriteRenderer>();
+            shadowRenderer.sprite = SimpleSprite.Circle;
+            shadowRenderer.color = new Color(0f, 0f, 0f, 0.24f);
+            shadowRenderer.sortingOrder = 8;
+        }
+
+        if (go.transform.Find("BombVisual") == null)
+        {
+            GameObject visual = new GameObject("BombVisual");
+            visual.transform.SetParent(go.transform, false);
+            SpriteRenderer renderer = visual.AddComponent<SpriteRenderer>();
+            renderer.sprite = SimpleSprite.Circle;
+            renderer.sortingOrder = 14;
+        }
+    }
+
+    private void ApplyGravityBombReplicaVisual(GameObject go, OnlineEffectState effect)
+    {
+        EnsureGravityBombVisual(go);
+
+        Transform shadow = go.transform.Find("Shadow");
+        if (shadow != null)
+        {
+            Vector3 shadowScale = new Vector3(
+                Mathf.Approximately(effect.shadowScaleX, 0f) ? 1f : effect.shadowScaleX,
+                Mathf.Approximately(effect.shadowScaleY, 0f) ? 0.35f : effect.shadowScaleY,
+                1f);
+            SmoothLocalTransform(shadow, Vector3.zero, shadowScale, 22f);
+        }
+
+        Transform visual = go.transform.Find("BombVisual");
+        if (visual != null)
+        {
+            Vector3 visualPosition = new Vector3(0f, effect.visualOffsetY, 0f);
+            Vector3 visualScale = new Vector3(
+                Mathf.Approximately(effect.visualScaleX, 0f) ? 1f : effect.visualScaleX,
+                Mathf.Approximately(effect.visualScaleY, 0f) ? 1f : effect.visualScaleY,
+                1f);
+            SmoothLocalTransform(visual, visualPosition, visualScale, 22f);
+            ConfigureSpin(visual.gameObject, true, 540f);
+            SpriteRenderer renderer = visual.GetComponent<SpriteRenderer>();
+            if (renderer != null)
+                renderer.color = PlayerLoadout.ParseWeaponColor(effect.color, Color.white);
+        }
+    }
+
+    private void EnsureMinionVisual(GameObject go)
+    {
+        Transform sprite = go.transform.Find("Sprite");
+        if (sprite != null)
+            return;
+
+        GameObject spriteObj = new GameObject("Sprite");
+        spriteObj.transform.SetParent(go.transform, false);
+        spriteObj.transform.localPosition = Vector3.zero;
+        spriteObj.transform.localScale = Vector3.one;
+
+        SpriteRenderer renderer = spriteObj.AddComponent<SpriteRenderer>();
+        renderer.sprite = SimpleSprite.Circle;
+        renderer.color = new Color(1f, 0.88f, 0.12f, 1f);
+        renderer.sortingOrder = 6;
+
+        PlayerMinionAnimator animator = spriteObj.AddComponent<PlayerMinionAnimator>();
+        if (_bootstrap != null)
+        {
+            animator.moveSprites = _bootstrap.minionMoveSprites;
+            animator.moveSheet = _bootstrap.minionMoveTexture;
+            animator.resourceSheetName = _bootstrap.minionMoveResource;
+            animator.fps = Mathf.Max(0.01f, _bootstrap.minionMoveFps);
+            animator.spriteScale = Mathf.Max(0.01f, _bootstrap.minionSpriteScale);
+        }
+    }
+
+    private void UpdateMinionReplicaVisual(GameObject go, OnlineEffectState effect)
+    {
+        EnsureMinionVisual(go);
+        Transform sprite = go.transform.Find("Sprite");
+        if (sprite == null)
+            return;
+
+        SpriteRenderer renderer = sprite.GetComponent<SpriteRenderer>();
+        if (renderer != null)
+            renderer.enabled = true;
+    }
+
+    private void EnsureTemporaryWallVisual(GameObject go, OnlineEffectState effect)
+    {
+        if (go.transform.Find("GuardWallCore") != null)
+            return;
+
+        float wallLength = Mathf.Max(0.01f, Mathf.Abs(effect.scaleX));
+        float wallThickness = Mathf.Max(0.01f, Mathf.Abs(effect.scaleY));
+        float capDiameter = wallThickness * 2.7f;
+        float capScaleX = capDiameter / wallLength;
+
+        CreateReplicaGlowPiece(go.transform, "GuardWallOuterGlow", Vector2.zero, new Vector2(1.12f, 3.4f), new Color(0.30f, 0.82f, 1f, 0.22f), 7);
+        CreateReplicaGlowPiece(go.transform, "GuardWallInnerGlow", Vector2.zero, new Vector2(0.98f, 2.1f), new Color(0.84f, 1f, 1f, 0.28f), 8);
+        CreateReplicaGlowPiece(go.transform, "GuardWallCore", Vector2.zero, new Vector2(0.92f, 0.78f), new Color(0.58f, 0.94f, 1f, 0.62f), 9);
+        CreateReplicaGlowPiece(go.transform, "GuardWallEnergySpine", Vector2.zero, new Vector2(0.86f, 0.18f), new Color(0.94f, 1f, 1f, 0.72f), 10);
+        CreateReplicaGlowPiece(go.transform, "GuardWallLeftBloom", new Vector2(-0.5f, 0f), new Vector2(capScaleX, 2.7f), new Color(0.72f, 0.96f, 1f, 0.52f), 9, SimpleSprite.Circle);
+        CreateReplicaGlowPiece(go.transform, "GuardWallRightBloom", new Vector2(0.5f, 0f), new Vector2(capScaleX, 2.7f), new Color(0.72f, 0.96f, 1f, 0.52f), 9, SimpleSprite.Circle);
+    }
+
+    private void UpdateTemporaryWallReplicaVisual(GameObject go, OnlineEffectState effect)
+    {
+        EnsureTemporaryWallVisual(go, effect);
+    }
+
+    private void EnsurePlayerDecoyVisual(GameObject go, OnlineEffectState effect)
+    {
+        SpriteRenderer renderer = go.GetComponent<SpriteRenderer>();
+        if (renderer == null)
+            renderer = go.AddComponent<SpriteRenderer>();
+
+        renderer.sortingOrder = 4;
+        PlayerSkinVisuals.Apply(renderer, effect.skinId, effect.skinColor, null);
+        Color color = PlayerLoadout.ParseWeaponColor(effect.color, Color.white);
+        color.a = Mathf.Clamp01(color.a);
+        renderer.color = color;
+    }
+
+    private void UpdatePlayerDecoyReplicaVisual(GameObject go, OnlineEffectState effect)
+    {
+        EnsurePlayerDecoyVisual(go, effect);
+    }
+
+    private void CreateReplicaGlowPiece(
+        Transform parent,
+        string name,
+        Vector2 position,
+        Vector2 scale,
+        Color color,
+        int sortingOrder,
+        Sprite sprite = null)
+    {
+        GameObject piece = new GameObject(name);
+        piece.transform.SetParent(parent, false);
+        piece.transform.localPosition = new Vector3(position.x, position.y, 0f);
+        piece.transform.localRotation = Quaternion.identity;
+        piece.transform.localScale = new Vector3(scale.x, scale.y, 1f);
+
+        SpriteRenderer renderer = piece.AddComponent<SpriteRenderer>();
+        renderer.sprite = sprite != null ? sprite : SimpleSprite.Square;
+        renderer.color = color;
+        renderer.sortingOrder = sortingOrder;
+    }
+
+    private static void ConfigureSpin(GameObject go, bool active, float zDegreesPerSecond)
+    {
+        if (go == null)
+            return;
+
+        OnlineReplicaSpin spin = go.GetComponent<OnlineReplicaSpin>();
+        if (!active)
+        {
+            if (spin != null)
+                spin.zDegreesPerSecond = 0f;
+            return;
+        }
+
+        if (spin == null)
+            spin = go.AddComponent<OnlineReplicaSpin>();
+        spin.zDegreesPerSecond = zDegreesPerSecond;
+    }
+
+    private static void SmoothLocalTransform(Transform target, Vector3 localPosition, Vector3 localScale, float lerpSpeed)
+    {
+        if (target == null)
+            return;
+
+        OnlineLocalTransformSmoother smoother = target.GetComponent<OnlineLocalTransformSmoother>();
+        if (smoother == null)
+            smoother = target.gameObject.AddComponent<OnlineLocalTransformSmoother>();
+        smoother.SetTarget(localPosition, localScale, lerpSpeed);
+    }
+
+    private static void SmoothScale(Transform target, Vector3 scale, float lerpSpeed)
+    {
+        if (target == null)
+            return;
+
+        OnlineScaleSmoother smoother = target.GetComponent<OnlineScaleSmoother>();
+        if (smoother == null)
+            smoother = target.gameObject.AddComponent<OnlineScaleSmoother>();
+        smoother.SetTarget(scale, lerpSpeed);
+    }
+
+    private static bool IsFastEffect(int effectType)
+    {
+        return effectType == OnlineEffectType.ExpansionBurst ||
+            effectType == OnlineEffectType.GravityWell ||
+            effectType == OnlineEffectType.FireTrail ||
+            effectType == OnlineEffectType.TemporaryWall ||
+            effectType == OnlineEffectType.PlayerDecoy;
+    }
+
+    private static bool UsesLocalEffectRotation(OnlineEffectState effect)
+    {
+        return effect != null &&
+            effect.type == OnlineEffectType.ThrownWeapon &&
+            effect.boomerang;
+    }
+
+    private static bool UsesSmoothedEffectScale(int effectType)
+    {
+        return effectType == OnlineEffectType.ExpansionBurst ||
+            effectType == OnlineEffectType.GravityWell ||
+            effectType == OnlineEffectType.FireTrail;
+    }
+
+    private static string GetEffectReplicaName(int effectType)
+    {
+        return effectType switch
+        {
+            OnlineEffectType.ThrownWeapon => "ThrownWeaponReplica",
+            OnlineEffectType.RangedAbilityProjectile => "RangedAbilityProjectileReplica",
+            OnlineEffectType.ExpansionBurst => "ExpansionBurstReplica",
+            OnlineEffectType.GravityBombProjectile => "GravityBombReplica",
+            OnlineEffectType.GravityWell => "GravityWellReplica",
+            OnlineEffectType.PlayerMinion => "PlayerMinionReplica",
+            OnlineEffectType.FireTrail => "FireTrailReplica",
+            OnlineEffectType.TemporaryWall => "TemporaryWallReplica",
+            OnlineEffectType.PlayerDecoy => "PlayerDecoyReplica",
+            _ => "OnlineEffectReplica"
+        };
+    }
+
+    private static int GetEffectSortingOrder(int effectType)
+    {
+        return effectType switch
+        {
+            OnlineEffectType.RangedAbilityProjectile => 12,
+            OnlineEffectType.ExpansionBurst => 13,
+            OnlineEffectType.GravityWell => 6,
+            OnlineEffectType.FireTrail => 5,
+            OnlineEffectType.TemporaryWall => 9,
+            OnlineEffectType.PlayerDecoy => 4,
+            _ => 9
+        };
     }
 
     private void RemoveInactive(Dictionary<int, OnlineEntityReplica> replicas, HashSet<int> activeIds)
@@ -866,6 +1504,8 @@ public class GameStateGuest : MonoBehaviour
 
     private void OnDestroy()
     {
+        if (OnlineMatchStartGate.IsWaiting)
+            OnlineMatchStartGate.Reset();
         _ws?.Dispose();
     }
 }

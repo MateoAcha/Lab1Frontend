@@ -214,6 +214,9 @@ public class PlayerController : MonoBehaviour
     public int NetworkConsumableSequence { get; private set; }
     public int NetworkSkinId => _hasNetworkLoadout ? _networkSkinId : PlayerLoadout.EquippedSkinId;
     public string NetworkSkinColor => _hasNetworkLoadout ? _networkSkinColor : PlayerSkinVisuals.GetEquippedSkinColorHex();
+    public int NetworkWeaponItemId => GetWeaponItemId();
+    public string NetworkWeaponType => GetWeaponKind().ToString();
+    public string NetworkWeaponColor => "#" + ColorUtility.ToHtmlStringRGB(_hasNetworkLoadout ? _networkWeaponColor : PlayerLoadout.WeaponColor);
     public bool EnemiesCanSee => Time.time >= _stealthUntil;
 
     public float ChargeCooldownProgress01
@@ -306,6 +309,14 @@ public class PlayerController : MonoBehaviour
 
     private void Update()
     {
+        if (OnlineMatchStartGate.IsWaiting)
+        {
+            LastMoveInput = Vector2.zero;
+            if (body != null)
+                body.linearVelocity = Vector2.zero;
+            return;
+        }
+
         bool chargeDown = ReadChargeDown();
         if (!_useExternalInput && chargeDown) NetworkChargeSequence++;
         if (chargeDown && Time.time >= nextChargeReady)
@@ -1172,6 +1183,8 @@ public class PlayerController : MonoBehaviour
         thrown.owner = transform;
         thrown.direction = aim;
         thrown.boomerang = boomerang;
+        thrown.weaponItemId = GetWeaponItemId();
+        thrown.weaponType = weaponKind.ToString();
         thrown.speed = Mathf.Max(0.1f, weaponThrowSpeed);
         thrown.returnSpeed = Mathf.Max(0.1f, boomerangReturnSpeed);
         thrown.maxDistance = Mathf.Max(0.5f, weaponThrowRange * rangeMultiplier);
@@ -1299,6 +1312,7 @@ public class PlayerController : MonoBehaviour
 
         GravityBombProjectile gravityBomb = bomb.AddComponent<GravityBombProjectile>();
         gravityBomb.direction = aim;
+        gravityBomb.ownerPlayerIndex = playerIndex;
         gravityBomb.distance = Mathf.Max(0.5f, gravityBombDistance);
         gravityBomb.travelTime = Mathf.Max(0.1f, gravityBombTravelTime);
         gravityBomb.arcHeight = Mathf.Max(0f, gravityBombArcHeight);
