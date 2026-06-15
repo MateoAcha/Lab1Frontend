@@ -11,6 +11,8 @@ public class OnlinePlayerSync : MonoBehaviour
     public float RemoteHp { get; private set; } = 10f;
     public float RemoteMaxHp { get; private set; } = 10f;
     public bool HasRemotePlayer { get; private set; }
+    public string RemoteWeaponType { get; private set; } = "";
+    public string RemoteWeaponColor { get; private set; } = "#FFFFFF";
 
     public void SetRemotePosition(Vector3 pos)
     {
@@ -27,7 +29,7 @@ public class OnlinePlayerSync : MonoBehaviour
         SetRemoteState(pos, velocity, skinId, skinColor, RemoteHp, RemoteMaxHp);
     }
 
-    public void SetRemoteState(Vector3 pos, Vector3 velocity, int skinId, string skinColor, float hp, float maxHp, int attackSequence = 0)
+    public void SetRemoteState(Vector3 pos, Vector3 velocity, int skinId, string skinColor, float hp, float maxHp, int attackSequence = 0, string weaponType = "", string weaponColor = "#FFFFFF")
     {
         RemotePlayerPosition = pos;
         RemotePlayerVelocity = velocity;
@@ -37,6 +39,8 @@ public class OnlinePlayerSync : MonoBehaviour
         RemoteMaxHp = Mathf.Max(0.01f, maxHp);
         RemoteHp = Mathf.Clamp(hp, 0f, RemoteMaxHp);
         HasRemotePlayer = true;
+        if (!string.IsNullOrWhiteSpace(weaponType)) RemoteWeaponType = weaponType;
+        if (!string.IsNullOrWhiteSpace(weaponColor)) RemoteWeaponColor = weaponColor;
     }
 
     public void ClearRemotePlayer()

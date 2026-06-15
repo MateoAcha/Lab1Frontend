@@ -33,6 +33,7 @@ public class OnlineMatchInputMessage
     public int rangedActiveSkillLevel;
     public string rangedPassiveSkillId = "";
     public int rangedPassiveSkillLevel;
+    public int pickedUpItemId = -1;
 }
 
 [Serializable]
@@ -56,6 +57,8 @@ public class OnlineMatchStateMessage
     public OnlinePlayerState[] players;
     public OnlineEnemyState[] enemies;
     public OnlineProjectileState[] projectiles;
+    public OnlineItemDropState[] itemDrops;
+    public OnlineAbilityState[] abilities;
 }
 
 [Serializable]
@@ -81,6 +84,8 @@ public class OnlinePlayerState
     public int skinId;
     public string skinColor = "#FFFFFF";
     public int attackSeq;
+    public string weaponType = "";
+    public string weaponColor = "#FFFFFF";
 }
 
 [Serializable]
@@ -114,4 +119,30 @@ public class OnlineProjectileState
     public float vx;
     public float vy;
     public float life;
+    public bool isMinion;
+}
+
+[Serializable]
+public class OnlineItemDropState
+{
+    public int id;
+    public float x;
+    public float y;
+}
+
+[Serializable]
+public class OnlineAbilityState
+{
+    public int id;
+    public int type;     // 0=burst 1=gravityBomb 2=well 3=thrownWeapon
+    public float x;
+    public float y;
+    public float vx;
+    public float vy;
+    public float scale;
+    public float maxScale;
+    public float remaining;
+    public int cr;
+    public int cg;
+    public int cb;
 }

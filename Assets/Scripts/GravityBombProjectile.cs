@@ -10,12 +10,22 @@ public class GravityBombProjectile : MonoBehaviour
     public float pullDuration = 3f;
     public float pullStrength = 11f;
     public Color bombColor = Color.white;
+    public int ownerPlayerIndex;
 
     private Vector2 _start;
     private Vector2 _end;
     private float _startAt;
     private Transform _visual;
     private Transform _shadow;
+
+    private void OnEnable()  => OnlineNetworkRegistry.Register(this);
+    private void OnDisable() => OnlineNetworkRegistry.Unregister(this);
+
+    public float RemainingLife => _startAt > 0f
+        ? Mathf.Max(0f, _startAt + Mathf.Max(0.1f, travelTime) - Time.time)
+        : travelTime;
+
+    public Vector2 Velocity => direction.normalized * (Mathf.Max(0.5f, distance) / Mathf.Max(0.1f, travelTime));
 
     private void Start()
     {
@@ -66,6 +76,7 @@ public class GravityBombProjectile : MonoBehaviour
         gravityWell.duration = Mathf.Max(0.1f, pullDuration);
         gravityWell.pullStrength = Mathf.Max(0f, pullStrength);
         gravityWell.color = bombColor;
+        gravityWell.ownerPlayerIndex = ownerPlayerIndex;
 
         Destroy(gameObject);
     }

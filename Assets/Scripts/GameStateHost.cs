@@ -127,6 +127,21 @@ public class GameStateHost : MonoBehaviour
             chargeDown,
             burstDown,
             consumableDown);
+
+        if (input.pickedUpItemId >= 0)
+        {
+            for (int i = OnlineNetworkRegistry.ItemDrops.Count - 1; i >= 0; i--)
+            {
+                DroppedMaterialPickup drop = OnlineNetworkRegistry.ItemDrops[i];
+                if (drop == null) { OnlineNetworkRegistry.ItemDrops.RemoveAt(i); continue; }
+                NetworkEntityId netId = drop.GetComponent<NetworkEntityId>();
+                if (netId != null && netId.Id == input.pickedUpItemId)
+                {
+                    UnityEngine.Object.Destroy(drop.gameObject);
+                    break;
+                }
+            }
+        }
     }
 
     private OnlineMatchStateMessage BuildState()
@@ -155,7 +170,9 @@ public class GameStateHost : MonoBehaviour
             exits = MatchExit.GetActiveStates(),
             players = BuildPlayers(),
             enemies = BuildEnemies(),
-            projectiles = BuildProjectiles()
+            projectiles = BuildProjectiles(),
+            itemDrops = BuildItemDrops(),
+            abilities = BuildAbilities()
         };
     }
 
@@ -191,7 +208,9 @@ public class GameStateHost : MonoBehaviour
             alive = alive,
             skinId = GetPlayerSkinId(id, player),
             skinColor = GetPlayerSkinColor(id, player),
-            attackSeq = GetPlayerAttackSequence(id, player)
+            attackSeq = GetPlayerAttackSequence(id, player),
+            weaponType = id == 0 ? PlayerLoadout.CurrentWeaponKind.ToString() : "",
+            weaponColor = id == 0 ? PlayerLoadout.WeaponColorHex : "#FFFFFF"
         };
     }
 
@@ -329,9 +348,156 @@ public class GameStateHost : MonoBehaviour
             });
         }
 
+        for (int i = OnlineNetworkRegistry.RangedAbilityProjectiles.Count - 1; i >= 0; i--)
+        {
+            RangedAbilityProjectile proj = OnlineNetworkRegistry.RangedAbilityProjectiles[i];
+            if (proj == null) { OnlineNetworkRegistry.RangedAbilityProjectiles.RemoveAt(i); continue; }
+            projectiles.Add(new OnlineProjectileState
+            {
+                id = GetOrAssignId(proj.gameObject),
+                fromPlayer = true,
+                ownerId = proj.ownerPlayerIndex,
+                color = "#" + ColorUtility.ToHtmlStringRGB(proj.projectileColor),
+                size = Mathf.Max(0.05f, proj.transform.localScale.x),
+                x = proj.transform.position.x,
+                y = proj.transform.position.y,
+                vx = proj.direction.x * proj.speed,
+                vy = proj.direction.y * proj.speed,
+                life = proj.RemainingLife
+            });
+        }
+
+        for (int i = OnlineNetworkRegistry.PlayerMinions.Count - 1; i >= 0; i--)
+        {
+            PlayerMinion minion = OnlineNetworkRegistry.PlayerMinions[i];
+            if (minion == null) { OnlineNetworkRegistry.PlayerMinions.RemoveAt(i); continue; }
+            Vector2 vel = minion.Velocity;
+            projectiles.Add(new OnlineProjectileState
+            {
+                id = GetOrAssignId(minion.gameObject),
+                fromPlayer = true,
+                ownerId = minion.ownerPlayerIndex,
+                isMinion = true,
+                color = "#" + ColorUtility.ToHtmlStringRGB(PlayerLoadout.WeaponColor),
+                size = Mathf.Max(0.1f, minion.transform.localScale.x),
+                x = minion.transform.position.x,
+                y = minion.transform.position.y,
+                vx = vel.x,
+                vy = vel.y,
+                life = 1f
+            });
+        }
+
         AddPlayerHitBoxStates(projectiles);
 
         return projectiles.ToArray();
+    }
+
+    private OnlineAbilityState[] BuildAbilities()
+    {
+        var list = new List<OnlineAbilityState>();
+
+        for (int i = OnlineNetworkRegistry.Bursts.Count - 1; i >= 0; i--)
+        {
+            ExpansionBurst burst = OnlineNetworkRegistry.Bursts[i];
+            if (burst == null) { OnlineNetworkRegistry.Bursts.RemoveAt(i); continue; }
+            if (burst.ownerPlayerIndex != 0) continue;
+            Color c = burst.VisualColor;
+            list.Add(new OnlineAbilityState
+            {
+                id = GetOrAssignId(burst.gameObject),
+                type = 0,
+                x = burst.transform.position.x,
+                y = burst.transform.position.y,
+                scale = burst.transform.localScale.x,
+                maxScale = burst.maxRadius * 2f,
+                remaining = burst.RemainingLife,
+                cr = Mathf.RoundToInt(c.r * 255),
+                cg = Mathf.RoundToInt(c.g * 255),
+                cb = Mathf.RoundToInt(c.b * 255)
+            });
+        }
+
+        for (int i = OnlineNetworkRegistry.GravityBombs.Count - 1; i >= 0; i--)
+        {
+            GravityBombProjectile bomb = OnlineNetworkRegistry.GravityBombs[i];
+            if (bomb == null) { OnlineNetworkRegistry.GravityBombs.RemoveAt(i); continue; }
+            if (bomb.ownerPlayerIndex != 0) continue;
+            Vector2 vel = bomb.Velocity;
+            list.Add(new OnlineAbilityState
+            {
+                id = GetOrAssignId(bomb.gameObject),
+                type = 1,
+                x = bomb.transform.position.x,
+                y = bomb.transform.position.y,
+                vx = vel.x, vy = vel.y,
+                scale = 0.8f,
+                remaining = bomb.RemainingLife,
+                cr = Mathf.RoundToInt(bomb.bombColor.r * 255),
+                cg = Mathf.RoundToInt(bomb.bombColor.g * 255),
+                cb = Mathf.RoundToInt(bomb.bombColor.b * 255)
+            });
+        }
+
+        for (int i = OnlineNetworkRegistry.GravityWells.Count - 1; i >= 0; i--)
+        {
+            GravityWell well = OnlineNetworkRegistry.GravityWells[i];
+            if (well == null) { OnlineNetworkRegistry.GravityWells.RemoveAt(i); continue; }
+            if (well.ownerPlayerIndex != 0) continue;
+            list.Add(new OnlineAbilityState
+            {
+                id = GetOrAssignId(well.gameObject),
+                type = 2,
+                x = well.transform.position.x,
+                y = well.transform.position.y,
+                scale = well.radius * 2f,
+                remaining = well.RemainingLife,
+                cr = Mathf.RoundToInt(well.color.r * 255),
+                cg = Mathf.RoundToInt(well.color.g * 255),
+                cb = Mathf.RoundToInt(well.color.b * 255)
+            });
+        }
+
+        for (int i = OnlineNetworkRegistry.ThrownWeapons.Count - 1; i >= 0; i--)
+        {
+            PlayerThrownWeapon weapon = OnlineNetworkRegistry.ThrownWeapons[i];
+            if (weapon == null) { OnlineNetworkRegistry.ThrownWeapons.RemoveAt(i); continue; }
+            if (weapon.ownerPlayerIndex != 0) continue;
+            Vector2 vel = weapon.Velocity;
+            Vector3 ws = weapon.transform.localScale;
+            list.Add(new OnlineAbilityState
+            {
+                id = GetOrAssignId(weapon.gameObject),
+                type = 3,
+                x = weapon.transform.position.x,
+                y = weapon.transform.position.y,
+                vx = vel.x, vy = vel.y,
+                scale = Mathf.Max(ws.x, ws.y),
+                remaining = weapon.RemainingLife,
+                cr = Mathf.RoundToInt(weapon.weaponColor.r * 255),
+                cg = Mathf.RoundToInt(weapon.weaponColor.g * 255),
+                cb = Mathf.RoundToInt(weapon.weaponColor.b * 255)
+            });
+        }
+
+        return list.Count > 0 ? list.ToArray() : null;
+    }
+
+    private OnlineItemDropState[] BuildItemDrops()
+    {
+        var drops = new List<OnlineItemDropState>();
+        for (int i = OnlineNetworkRegistry.ItemDrops.Count - 1; i >= 0; i--)
+        {
+            DroppedMaterialPickup drop = OnlineNetworkRegistry.ItemDrops[i];
+            if (drop == null) { OnlineNetworkRegistry.ItemDrops.RemoveAt(i); continue; }
+            drops.Add(new OnlineItemDropState
+            {
+                id = GetOrAssignId(drop.gameObject),
+                x = drop.transform.position.x,
+                y = drop.transform.position.y
+            });
+        }
+        return drops.Count > 0 ? drops.ToArray() : null;
     }
 
     private void AddPlayerHitBoxStates(List<OnlineProjectileState> projectiles)

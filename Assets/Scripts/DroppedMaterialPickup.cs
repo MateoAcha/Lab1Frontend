@@ -6,6 +6,11 @@ public class DroppedMaterialPickup : MonoBehaviour
     private Sprite generatedSprite;
     private float bobOffset;
 
+    public MapMaterialDefinition MaterialDrop => materialDrop;
+
+    private void OnEnable()  => OnlineNetworkRegistry.Register(this);
+    private void OnDisable() => OnlineNetworkRegistry.Unregister(this);
+
     public static void SpawnForCurrentMap(Vector3 position)
     {
         GameBootstrap bootstrap = FindObjectOfType<GameBootstrap>();

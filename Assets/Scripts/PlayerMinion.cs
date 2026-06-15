@@ -13,6 +13,11 @@ public class PlayerMinion : MonoBehaviour
     private float _dieAt;
     private float _nextTouchDamageAt;
 
+    public Vector2 Velocity => _body != null ? _body.linearVelocity : Vector2.zero;
+
+    private void OnEnable()  => OnlineNetworkRegistry.Register(this);
+    private void OnDisable() => OnlineNetworkRegistry.Unregister(this);
+
     private void Awake()
     {
         _body = GetComponent<Rigidbody2D>();

@@ -20,6 +20,11 @@ public class PlayerThrownWeapon : MonoBehaviour
     private bool _notifiedBoomerangEnded;
     private readonly HashSet<int> _hitIds = new HashSet<int>();
 
+    private void OnEnable()  => OnlineNetworkRegistry.Register(this);
+    private void OnDisable() => OnlineNetworkRegistry.Unregister(this);
+    public float RemainingLife => _dieAt > 0f ? Mathf.Max(0f, _dieAt - Time.time) : Mathf.Max(0.05f, life);
+    public Vector2 Velocity => direction.normalized * Mathf.Max(0.1f, speed);
+
     private void Start()
     {
         if (direction.sqrMagnitude < 0.001f)

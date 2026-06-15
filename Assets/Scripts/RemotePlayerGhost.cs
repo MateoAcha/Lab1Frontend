@@ -9,9 +9,12 @@ public class RemotePlayerGhost : MonoBehaviour
     private int _appliedSkinId = -1;
     private string _appliedSkinColor = "";
     private int _appliedAttackSequence;
+    private SpriteRenderer _weaponSr;
+    private string _appliedWeaponColor = "";
+    private Vector3 _frameVelocity;
 
     public int CurrentSkinId => OnlinePlayerSync.Instance != null ? OnlinePlayerSync.Instance.RemoteSkinId : 0;
-    public Vector3 CurrentVelocity => OnlinePlayerSync.Instance != null ? OnlinePlayerSync.Instance.RemotePlayerVelocity : Vector3.zero;
+    public Vector3 CurrentVelocity => _frameVelocity;
 
     private void Awake()
     {
@@ -20,7 +23,7 @@ public class RemotePlayerGhost : MonoBehaviour
 
     private void Start()
     {
-        _sr = GetComponent<SpriteRenderer>();
+        _sr = GetComponentInChildren<SpriteRenderer>();
         _health = GetComponent<Health>();
     }
 
@@ -40,8 +43,10 @@ public class RemotePlayerGhost : MonoBehaviour
 
         ApplyRemoteSkinIfChanged();
         ApplyRemoteAttackIfChanged();
+        ApplyRemoteWeaponIfChanged();
         ApplyRemoteHealth();
 
+        Vector3 prevPos = transform.position;
         Vector3 target = OnlinePlayerSync.Instance.RemotePlayerPosition
             + OnlinePlayerSync.Instance.RemotePlayerVelocity * 0.08f;
 
@@ -49,6 +54,8 @@ public class RemotePlayerGhost : MonoBehaviour
             transform.position,
             target,
             Time.deltaTime * 12f);
+
+        _frameVelocity = (transform.position - prevPos) / Mathf.Max(Time.deltaTime, 0.0001f);
     }
 
     private void ApplyRemoteSkinIfChanged()
@@ -81,6 +88,29 @@ public class RemotePlayerGhost : MonoBehaviour
         if (animator != null)
             animator.TriggerAttack(0.14f);
         _appliedAttackSequence = attackSequence;
+    }
+
+    private void ApplyRemoteWeaponIfChanged()
+    {
+        if (OnlinePlayerSync.Instance == null) return;
+        string weaponColor = OnlinePlayerSync.Instance.RemoteWeaponColor;
+        if (string.Equals(weaponColor, _appliedWeaponColor)) return;
+        _appliedWeaponColor = weaponColor;
+
+        if (_weaponSr == null)
+        {
+            GameObject weaponObj = new GameObject("WeaponVisual");
+            weaponObj.transform.SetParent(transform, false);
+            weaponObj.transform.localPosition = new Vector3(0.28f, -0.1f, 0f);
+            weaponObj.transform.localScale = new Vector3(0.45f, 0.18f, 1f);
+            _weaponSr = weaponObj.AddComponent<SpriteRenderer>();
+            _weaponSr.sprite = SimpleSprite.Square;
+            _weaponSr.sortingOrder = _sr != null ? _sr.sortingOrder + 1 : 11;
+        }
+
+        Color col = PlayerLoadout.ParseWeaponColor(weaponColor, Color.white);
+        col.a = 0.9f;
+        _weaponSr.color = col;
     }
 
     private void ApplyRemoteHealth()

@@ -1085,6 +1085,7 @@ public class PlayerController : MonoBehaviour
         expansion.duration = Mathf.Max(0.01f, burstDuration);
         expansion.maxRadius = Mathf.Max(0.2f, burstRange * radiusMultiplier);
         expansion.pushMultiplier = Mathf.Max(0f, burstPushMultiplier);
+        expansion.ownerPlayerIndex = playerIndex;
         float scaledBurstDamage = GetWeaponDamage() * burstDamageMultiplier;
         expansion.damage = Mathf.Max(0f, scaledBurstDamage);
     }
@@ -1305,6 +1306,7 @@ public class PlayerController : MonoBehaviour
         gravityBomb.pullDuration = Mathf.Max(0.1f, gravityBombPullDuration);
         gravityBomb.pullStrength = Mathf.Max(0f, gravityBombPullStrength);
         gravityBomb.bombColor = GetAttackColor(1f);
+        gravityBomb.ownerPlayerIndex = playerIndex;
     }
 
     private void Attack(Vector2 direction, float damageMultiplier, float rangeMultiplier, float lifeOverride = -1f)

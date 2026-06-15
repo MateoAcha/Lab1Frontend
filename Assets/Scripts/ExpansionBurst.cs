@@ -7,9 +7,26 @@ public class ExpansionBurst : MonoBehaviour
     public float maxRadius = 3f;
     public float damage = 1;
     public float pushMultiplier = 2f;
+    public int ownerPlayerIndex;
 
     private float startAt;
     private readonly HashSet<int> hitIds = new HashSet<int>();
+
+    private void OnEnable()  => OnlineNetworkRegistry.Register(this);
+    private void OnDisable() => OnlineNetworkRegistry.Unregister(this);
+
+    public float RemainingLife => startAt > 0f
+        ? Mathf.Max(0f, startAt + Mathf.Max(0.01f, duration) - Time.time)
+        : duration;
+
+    public Color VisualColor
+    {
+        get
+        {
+            SpriteRenderer sr = GetComponent<SpriteRenderer>();
+            return sr != null ? sr.color : Color.white;
+        }
+    }
 
     private void Start()
     {

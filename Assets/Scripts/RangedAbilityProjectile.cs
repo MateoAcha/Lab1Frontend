@@ -17,6 +17,11 @@ public class RangedAbilityProjectile : MonoBehaviour
     private float _dieAt;
     private bool _finished;
 
+    public float RemainingLife => _dieAt > 0f ? Mathf.Max(0f, _dieAt - Time.time) : Mathf.Max(0f, life);
+
+    private void OnEnable()  => OnlineNetworkRegistry.Register(this);
+    private void OnDisable() => OnlineNetworkRegistry.Unregister(this);
+
     private void Start()
     {
         if (direction.sqrMagnitude < 0.001f)
