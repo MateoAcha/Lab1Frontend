@@ -14,6 +14,8 @@ public class OnlineMatchInputMessage
     public int chargeSeq;
     public int burstSeq;
     public int consumableSeq;
+    public int pickupSeq;
+    public int pickupId;
     public int weaponDamage = 1;
     public int weaponItemId;
     public string weaponType = "Spear";
@@ -62,6 +64,7 @@ public class OnlineMatchStateMessage
     public OnlineEnemyState[] enemies;
     public OnlineProjectileState[] projectiles;
     public OnlineEffectState[] effects;
+    public OnlineMaterialPickupState[] pickups;
 }
 
 public static class OnlineEffectType
@@ -139,6 +142,12 @@ public class OnlineProjectileState
     public float visualScaleX = 1f;
     public float visualScaleY = 1f;
     public float visualRotationZ;
+    public bool swordSwing;
+    public float swingDirectionX;
+    public float swingDirectionY;
+    public float swingDistance;
+    public float swingDuration;
+    public float swingArcDegrees;
     public float x;
     public float y;
     public float vx;
@@ -201,4 +210,17 @@ public class OnlineEffectState
     public float shadowScaleY = 0.35f;
     public int skinId;
     public string skinColor = "#FFFFFF";
+}
+
+[Serializable]
+public class OnlineMaterialPickupState
+{
+    public int id;
+    public float x;
+    public float y;
+    public string inventoryKey = "";
+    public string itemName = "";
+    public string rarity = "Rare";
+    public string color = "#FFFFFFFF";
+    public float size = 0.9f;
 }

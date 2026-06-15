@@ -13,6 +13,7 @@ public class FireTrailSegment : MonoBehaviour
     private SpriteRenderer _renderer;
     private readonly HashSet<int> _hitIds = new HashSet<int>();
     public float RemainingLife => _dieAt > 0f ? Mathf.Max(0f, _dieAt - Time.time) : Mathf.Max(0f, life);
+    public float Age => _spawnedAt > 0f ? Mathf.Max(0f, Time.time - _spawnedAt) : 0f;
 
     private void OnEnable()
     {
