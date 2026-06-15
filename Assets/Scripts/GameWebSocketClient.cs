@@ -65,9 +65,6 @@ public class GameWebSocketClient : IDisposable
     public void Dispose()
     {
         try { _cts?.Cancel(); } catch { }
-        try { _cts?.Dispose(); } catch { }
         try { _ws?.Dispose(); } catch { }
-        _cts = null;
-        _ws  = null;
     }
 }

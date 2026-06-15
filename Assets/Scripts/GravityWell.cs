@@ -22,10 +22,6 @@ public class GravityWell : MonoBehaviour
         OnlineNetworkRegistry.Unregister(this);
     }
 
-    private void OnEnable()  => OnlineNetworkRegistry.Register(this);
-    private void OnDisable() => OnlineNetworkRegistry.Unregister(this);
-    public float RemainingLife => _dieAt > 0f ? Mathf.Max(0f, _dieAt - Time.time) : Mathf.Max(0.1f, duration);
-
     private void Start()
     {
         _dieAt = Time.time + Mathf.Max(0.1f, duration);

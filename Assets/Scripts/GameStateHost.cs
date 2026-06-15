@@ -154,7 +154,6 @@ public class GameStateHost : MonoBehaviour
             chargeDown,
             burstDown,
             consumableDown);
-
     }
 
     private void MarkGuestReady()
@@ -393,46 +392,6 @@ public class GameStateHost : MonoBehaviour
                 vx = projectile.direction.x * projectile.speed,
                 vy = projectile.direction.y * projectile.speed,
                 life = projectile.RemainingLife
-            });
-        }
-
-        for (int i = OnlineNetworkRegistry.RangedAbilityProjectiles.Count - 1; i >= 0; i--)
-        {
-            RangedAbilityProjectile proj = OnlineNetworkRegistry.RangedAbilityProjectiles[i];
-            if (proj == null) { OnlineNetworkRegistry.RangedAbilityProjectiles.RemoveAt(i); continue; }
-            projectiles.Add(new OnlineProjectileState
-            {
-                id = GetOrAssignId(proj.gameObject),
-                fromPlayer = true,
-                ownerId = proj.ownerPlayerIndex,
-                color = "#" + ColorUtility.ToHtmlStringRGB(proj.projectileColor),
-                size = Mathf.Max(0.05f, proj.transform.localScale.x),
-                x = proj.transform.position.x,
-                y = proj.transform.position.y,
-                vx = proj.direction.x * proj.speed,
-                vy = proj.direction.y * proj.speed,
-                life = proj.RemainingLife
-            });
-        }
-
-        for (int i = OnlineNetworkRegistry.PlayerMinions.Count - 1; i >= 0; i--)
-        {
-            PlayerMinion minion = OnlineNetworkRegistry.PlayerMinions[i];
-            if (minion == null) { OnlineNetworkRegistry.PlayerMinions.RemoveAt(i); continue; }
-            Vector2 vel = minion.Velocity;
-            projectiles.Add(new OnlineProjectileState
-            {
-                id = GetOrAssignId(minion.gameObject),
-                fromPlayer = true,
-                ownerId = minion.ownerPlayerIndex,
-                isMinion = true,
-                color = "#" + ColorUtility.ToHtmlStringRGB(PlayerLoadout.WeaponColor),
-                size = Mathf.Max(0.1f, minion.transform.localScale.x),
-                x = minion.transform.position.x,
-                y = minion.transform.position.y,
-                vx = vel.x,
-                vy = vel.y,
-                life = 1f
             });
         }
 

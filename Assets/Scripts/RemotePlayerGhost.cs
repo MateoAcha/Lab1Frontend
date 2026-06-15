@@ -16,7 +16,7 @@ public class RemotePlayerGhost : MonoBehaviour
     private GameBootstrap _bootstrap;
 
     public int CurrentSkinId => OnlinePlayerSync.Instance != null ? OnlinePlayerSync.Instance.RemoteSkinId : 0;
-    public Vector3 CurrentVelocity => _frameVelocity;
+    public Vector3 CurrentVelocity => OnlinePlayerSync.Instance != null ? OnlinePlayerSync.Instance.RemotePlayerVelocity : Vector3.zero;
 
     private void Awake()
     {
@@ -46,11 +46,9 @@ public class RemotePlayerGhost : MonoBehaviour
 
         ApplyRemoteSkinIfChanged();
         ApplyRemoteAttackIfChanged();
-        ApplyRemoteWeaponIfChanged();
         ApplyRemoteHealth();
         UpdateRemoteWeaponVisual();
 
-        Vector3 prevPos = transform.position;
         Vector3 target = OnlinePlayerSync.Instance.RemotePlayerPosition
             + OnlinePlayerSync.Instance.RemotePlayerVelocity * 0.08f;
 
@@ -58,8 +56,6 @@ public class RemotePlayerGhost : MonoBehaviour
             transform.position,
             target,
             Time.deltaTime * 12f);
-
-        _frameVelocity = (transform.position - prevPos) / Mathf.Max(Time.deltaTime, 0.0001f);
     }
 
     private void ApplyRemoteSkinIfChanged()
