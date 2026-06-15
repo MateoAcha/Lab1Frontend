@@ -402,6 +402,8 @@ public class GameStateHost : MonoBehaviour
         AddGravityWellEffects(effects);
         AddPlayerMinionEffects(effects);
         AddFireTrailEffects(effects);
+        AddTemporaryWallEffects(effects);
+        AddPlayerDecoyEffects(effects);
 
         return effects.ToArray();
     }
@@ -418,6 +420,7 @@ public class GameStateHost : MonoBehaviour
             }
 
             Transform visual = FindWeaponVisual(weapon.transform);
+            Vector2 velocity = weapon.CurrentVelocity;
             effects.Add(new OnlineEffectState
             {
                 id = GetOrAssignId(weapon.gameObject),
@@ -425,6 +428,8 @@ public class GameStateHost : MonoBehaviour
                 ownerId = weapon.ownerPlayerIndex,
                 x = weapon.transform.position.x,
                 y = weapon.transform.position.y,
+                vx = velocity.x,
+                vy = velocity.y,
                 rotationZ = weapon.transform.eulerAngles.z,
                 scaleX = Mathf.Max(0.05f, weapon.transform.localScale.x),
                 scaleY = Mathf.Max(0.05f, weapon.transform.localScale.y),
@@ -515,6 +520,7 @@ public class GameStateHost : MonoBehaviour
 
             Vector3 visualScale = bomb.VisualLocalScale;
             Vector3 shadowScale = bomb.ShadowLocalScale;
+            Vector2 velocity = bomb.CurrentVelocity;
             effects.Add(new OnlineEffectState
             {
                 id = GetOrAssignId(bomb.gameObject),
@@ -522,6 +528,8 @@ public class GameStateHost : MonoBehaviour
                 ownerId = bomb.ownerPlayerIndex,
                 x = bomb.transform.position.x,
                 y = bomb.transform.position.y,
+                vx = velocity.x,
+                vy = velocity.y,
                 rotationZ = bomb.transform.eulerAngles.z,
                 scaleX = 1f,
                 scaleY = 1f,
@@ -616,6 +624,67 @@ public class GameStateHost : MonoBehaviour
                 scaleY = Mathf.Max(0.05f, fireTrail.transform.localScale.y),
                 color = "#" + ColorUtility.ToHtmlStringRGBA(fireTrail.fireColor),
                 life = fireTrail.RemainingLife
+            });
+        }
+    }
+
+    private void AddTemporaryWallEffects(List<OnlineEffectState> effects)
+    {
+        for (int i = OnlineNetworkRegistry.TemporaryWalls.Count - 1; i >= 0; i--)
+        {
+            TemporaryWall wall = OnlineNetworkRegistry.TemporaryWalls[i];
+            if (wall == null)
+            {
+                OnlineNetworkRegistry.TemporaryWalls.RemoveAt(i);
+                continue;
+            }
+
+            SpriteRenderer renderer = wall.GetComponentInChildren<SpriteRenderer>();
+            Color color = renderer != null ? renderer.color : new Color(0.58f, 0.94f, 1f, 0.62f);
+            effects.Add(new OnlineEffectState
+            {
+                id = GetOrAssignId(wall.gameObject),
+                type = OnlineEffectType.TemporaryWall,
+                ownerId = wall.ownerPlayerIndex,
+                x = wall.transform.position.x,
+                y = wall.transform.position.y,
+                rotationZ = wall.transform.eulerAngles.z,
+                scaleX = Mathf.Max(0.05f, wall.transform.localScale.x),
+                scaleY = Mathf.Max(0.05f, wall.transform.localScale.y),
+                color = "#" + ColorUtility.ToHtmlStringRGBA(color),
+                life = wall.RemainingLife
+            });
+        }
+    }
+
+    private void AddPlayerDecoyEffects(List<OnlineEffectState> effects)
+    {
+        for (int i = OnlineNetworkRegistry.PlayerDecoys.Count - 1; i >= 0; i--)
+        {
+            PlayerDecoy decoy = OnlineNetworkRegistry.PlayerDecoys[i];
+            if (decoy == null)
+            {
+                OnlineNetworkRegistry.PlayerDecoys.RemoveAt(i);
+                continue;
+            }
+
+            SpriteRenderer renderer = decoy.GetComponent<SpriteRenderer>();
+            Color color = renderer != null ? renderer.color : Color.white;
+            PlayerController owner = MultiplayerState.GetPlayerByIndex(decoy.ownerPlayerIndex);
+            effects.Add(new OnlineEffectState
+            {
+                id = GetOrAssignId(decoy.gameObject),
+                type = OnlineEffectType.PlayerDecoy,
+                ownerId = decoy.ownerPlayerIndex,
+                x = decoy.transform.position.x,
+                y = decoy.transform.position.y,
+                rotationZ = decoy.transform.eulerAngles.z,
+                scaleX = Mathf.Max(0.05f, decoy.transform.localScale.x),
+                scaleY = Mathf.Max(0.05f, decoy.transform.localScale.y),
+                color = "#" + ColorUtility.ToHtmlStringRGBA(color),
+                life = decoy.RemainingLife,
+                skinId = owner != null ? owner.NetworkSkinId : 0,
+                skinColor = owner != null ? owner.NetworkSkinColor : "#FFFFFF"
             });
         }
     }

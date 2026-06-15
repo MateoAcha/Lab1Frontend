@@ -100,10 +100,17 @@ public class RemotePlayerGhost : MonoBehaviour
         }
 
         WeaponKind weaponKind = PlayerLoadout.ParseWeaponKind(OnlinePlayerSync.Instance.RemoteWeaponType);
+        GameBootstrap bootstrap = ResolveBootstrap();
+        if (weaponKind == WeaponKind.Ranged)
+        {
+            UpdateRemoteRangedOrbVisual(bootstrap);
+            return;
+        }
+
         if (!OnlineWeaponVisuals.TryResolveCarriedVisual(
                 weaponKind,
                 OnlinePlayerSync.Instance.RemoteWeaponItemId,
-                _bootstrap != null ? _bootstrap : FindObjectOfType<GameBootstrap>(),
+                bootstrap,
                 out OnlineCarriedWeaponVisual visual))
         {
             SetWeaponVisible(false);
@@ -122,6 +129,7 @@ public class RemotePlayerGhost : MonoBehaviour
 
         float facingSign = _weaponFacingLeft ? -1f : 1f;
         _weaponRenderer.sprite = visual.sprite;
+        _weaponRenderer.color = Color.white;
         _weaponRenderer.enabled = true;
         _weaponRenderer.flipX = _weaponFacingLeft;
         _weaponRenderer.sortingOrder = _sr.sortingOrder + visual.sortingOrderOffset;
@@ -131,6 +139,57 @@ public class RemotePlayerGhost : MonoBehaviour
             Mathf.Approximately(visual.scale.x, 0f) ? 1f : visual.scale.x,
             Mathf.Approximately(visual.scale.y, 0f) ? 1f : visual.scale.y,
             1f);
+    }
+
+    private void UpdateRemoteRangedOrbVisual(GameBootstrap bootstrap)
+    {
+        EnsureWeaponVisual();
+        if (_weaponRenderer == null || _weaponTransform == null)
+            return;
+
+        Vector3 velocity = CurrentVelocity;
+        if (velocity.x < -0.001f)
+            _weaponFacingLeft = true;
+        else if (velocity.x > 0.001f)
+            _weaponFacingLeft = false;
+
+        Vector2 offset = bootstrap != null ? bootstrap.carriedRangedOrbOffset : new Vector2(0.22f, 0.08f);
+        Vector2 scale = bootstrap != null ? bootstrap.carriedRangedOrbScale : Vector2.one;
+        float size = ResolveRangedOrbSize();
+        int sortingOffset = bootstrap != null ? bootstrap.carriedRangedOrbSortingOrderOffset : 1;
+        float facingSign = _weaponFacingLeft ? -1f : 1f;
+
+        Color color = PlayerLoadout.ParseWeaponColor(OnlinePlayerSync.Instance.RemoteWeaponColor, Color.white);
+        color.a = 0.95f;
+
+        _weaponRenderer.sprite = SimpleSprite.Circle;
+        _weaponRenderer.color = color;
+        _weaponRenderer.enabled = true;
+        _weaponRenderer.flipX = false;
+        _weaponRenderer.sortingOrder = _sr.sortingOrder + sortingOffset;
+        _weaponTransform.localPosition = new Vector3(offset.x * facingSign, offset.y, 0f);
+        _weaponTransform.localRotation = Quaternion.identity;
+        _weaponTransform.localScale = new Vector3(
+            size * (Mathf.Approximately(scale.x, 0f) ? 1f : scale.x),
+            size * (Mathf.Approximately(scale.y, 0f) ? 1f : scale.y),
+            1f);
+    }
+
+    private GameBootstrap ResolveBootstrap()
+    {
+        if (_bootstrap == null)
+            _bootstrap = FindObjectOfType<GameBootstrap>();
+        return _bootstrap;
+    }
+
+    private float ResolveRangedOrbSize()
+    {
+        PlayerController localPlayer = PlayerController.main != null
+            ? PlayerController.main
+            : FindObjectOfType<PlayerController>();
+        return localPlayer != null
+            ? Mathf.Max(0.01f, localPlayer.rangedProjectileSize)
+            : 0.35f;
     }
 
     private void EnsureWeaponVisual()

@@ -857,11 +857,16 @@ public class GameStateGuest : MonoBehaviour
         if (go == null || effect == null)
             return;
 
-        go.transform.rotation = Quaternion.Euler(0f, 0f, effect.rotationZ);
-        go.transform.localScale = new Vector3(
+        if (!UsesLocalEffectRotation(effect))
+            go.transform.rotation = Quaternion.Euler(0f, 0f, effect.rotationZ);
+        Vector3 effectScale = new Vector3(
             Mathf.Approximately(effect.scaleX, 0f) ? 1f : effect.scaleX,
             Mathf.Approximately(effect.scaleY, 0f) ? 1f : effect.scaleY,
             1f);
+        if (UsesSmoothedEffectScale(effect.type))
+            SmoothScale(go.transform, effectScale, 24f);
+        else
+            go.transform.localScale = effectScale;
 
         OnlineEntityReplica replica = go.GetComponent<OnlineEntityReplica>();
         Vector3 position = new Vector3(effect.x, effect.y, 0f);
@@ -899,6 +904,18 @@ public class GameStateGuest : MonoBehaviour
             return;
         }
 
+        if (effect.type == OnlineEffectType.TemporaryWall)
+        {
+            EnsureTemporaryWallVisual(go, effect);
+            return;
+        }
+
+        if (effect.type == OnlineEffectType.PlayerDecoy)
+        {
+            EnsurePlayerDecoyVisual(go, effect);
+            return;
+        }
+
         SpriteRenderer renderer = go.GetComponent<SpriteRenderer>();
         if (renderer == null)
             renderer = go.AddComponent<SpriteRenderer>();
@@ -929,6 +946,18 @@ public class GameStateGuest : MonoBehaviour
             return;
         }
 
+        if (effect.type == OnlineEffectType.TemporaryWall)
+        {
+            UpdateTemporaryWallReplicaVisual(go, effect);
+            return;
+        }
+
+        if (effect.type == OnlineEffectType.PlayerDecoy)
+        {
+            UpdatePlayerDecoyReplicaVisual(go, effect);
+            return;
+        }
+
         SpriteRenderer renderer = go.GetComponent<SpriteRenderer>();
         if (renderer == null)
             return;
@@ -946,6 +975,8 @@ public class GameStateGuest : MonoBehaviour
 
     private void ApplyThrownWeaponReplicaVisual(GameObject go, OnlineEffectState effect)
     {
+        ConfigureSpin(go, effect.boomerang, 860f);
+
         SpriteRenderer rootRenderer = go.GetComponent<SpriteRenderer>();
         Transform weaponVisual = go.transform.Find("WeaponVisual");
 
@@ -1023,21 +1054,23 @@ public class GameStateGuest : MonoBehaviour
         Transform shadow = go.transform.Find("Shadow");
         if (shadow != null)
         {
-            shadow.localPosition = Vector3.zero;
-            shadow.localScale = new Vector3(
+            Vector3 shadowScale = new Vector3(
                 Mathf.Approximately(effect.shadowScaleX, 0f) ? 1f : effect.shadowScaleX,
                 Mathf.Approximately(effect.shadowScaleY, 0f) ? 0.35f : effect.shadowScaleY,
                 1f);
+            SmoothLocalTransform(shadow, Vector3.zero, shadowScale, 22f);
         }
 
         Transform visual = go.transform.Find("BombVisual");
         if (visual != null)
         {
-            visual.localPosition = new Vector3(0f, effect.visualOffsetY, 0f);
-            visual.localScale = new Vector3(
+            Vector3 visualPosition = new Vector3(0f, effect.visualOffsetY, 0f);
+            Vector3 visualScale = new Vector3(
                 Mathf.Approximately(effect.visualScaleX, 0f) ? 1f : effect.visualScaleX,
                 Mathf.Approximately(effect.visualScaleY, 0f) ? 1f : effect.visualScaleY,
                 1f);
+            SmoothLocalTransform(visual, visualPosition, visualScale, 22f);
+            ConfigureSpin(visual.gameObject, true, 540f);
             SpriteRenderer renderer = visual.GetComponent<SpriteRenderer>();
             if (renderer != null)
                 renderer.color = PlayerLoadout.ParseWeaponColor(effect.color, Color.white);
@@ -1083,13 +1116,129 @@ public class GameStateGuest : MonoBehaviour
             renderer.enabled = true;
     }
 
+    private void EnsureTemporaryWallVisual(GameObject go, OnlineEffectState effect)
+    {
+        if (go.transform.Find("GuardWallCore") != null)
+            return;
+
+        float wallLength = Mathf.Max(0.01f, Mathf.Abs(effect.scaleX));
+        float wallThickness = Mathf.Max(0.01f, Mathf.Abs(effect.scaleY));
+        float capDiameter = wallThickness * 2.7f;
+        float capScaleX = capDiameter / wallLength;
+
+        CreateReplicaGlowPiece(go.transform, "GuardWallOuterGlow", Vector2.zero, new Vector2(1.12f, 3.4f), new Color(0.30f, 0.82f, 1f, 0.22f), 7);
+        CreateReplicaGlowPiece(go.transform, "GuardWallInnerGlow", Vector2.zero, new Vector2(0.98f, 2.1f), new Color(0.84f, 1f, 1f, 0.28f), 8);
+        CreateReplicaGlowPiece(go.transform, "GuardWallCore", Vector2.zero, new Vector2(0.92f, 0.78f), new Color(0.58f, 0.94f, 1f, 0.62f), 9);
+        CreateReplicaGlowPiece(go.transform, "GuardWallEnergySpine", Vector2.zero, new Vector2(0.86f, 0.18f), new Color(0.94f, 1f, 1f, 0.72f), 10);
+        CreateReplicaGlowPiece(go.transform, "GuardWallLeftBloom", new Vector2(-0.5f, 0f), new Vector2(capScaleX, 2.7f), new Color(0.72f, 0.96f, 1f, 0.52f), 9, SimpleSprite.Circle);
+        CreateReplicaGlowPiece(go.transform, "GuardWallRightBloom", new Vector2(0.5f, 0f), new Vector2(capScaleX, 2.7f), new Color(0.72f, 0.96f, 1f, 0.52f), 9, SimpleSprite.Circle);
+    }
+
+    private void UpdateTemporaryWallReplicaVisual(GameObject go, OnlineEffectState effect)
+    {
+        EnsureTemporaryWallVisual(go, effect);
+    }
+
+    private void EnsurePlayerDecoyVisual(GameObject go, OnlineEffectState effect)
+    {
+        SpriteRenderer renderer = go.GetComponent<SpriteRenderer>();
+        if (renderer == null)
+            renderer = go.AddComponent<SpriteRenderer>();
+
+        renderer.sortingOrder = 4;
+        PlayerSkinVisuals.Apply(renderer, effect.skinId, effect.skinColor, null);
+        Color color = PlayerLoadout.ParseWeaponColor(effect.color, Color.white);
+        color.a = Mathf.Clamp01(color.a);
+        renderer.color = color;
+    }
+
+    private void UpdatePlayerDecoyReplicaVisual(GameObject go, OnlineEffectState effect)
+    {
+        EnsurePlayerDecoyVisual(go, effect);
+    }
+
+    private void CreateReplicaGlowPiece(
+        Transform parent,
+        string name,
+        Vector2 position,
+        Vector2 scale,
+        Color color,
+        int sortingOrder,
+        Sprite sprite = null)
+    {
+        GameObject piece = new GameObject(name);
+        piece.transform.SetParent(parent, false);
+        piece.transform.localPosition = new Vector3(position.x, position.y, 0f);
+        piece.transform.localRotation = Quaternion.identity;
+        piece.transform.localScale = new Vector3(scale.x, scale.y, 1f);
+
+        SpriteRenderer renderer = piece.AddComponent<SpriteRenderer>();
+        renderer.sprite = sprite != null ? sprite : SimpleSprite.Square;
+        renderer.color = color;
+        renderer.sortingOrder = sortingOrder;
+    }
+
+    private static void ConfigureSpin(GameObject go, bool active, float zDegreesPerSecond)
+    {
+        if (go == null)
+            return;
+
+        OnlineReplicaSpin spin = go.GetComponent<OnlineReplicaSpin>();
+        if (!active)
+        {
+            if (spin != null)
+                spin.zDegreesPerSecond = 0f;
+            return;
+        }
+
+        if (spin == null)
+            spin = go.AddComponent<OnlineReplicaSpin>();
+        spin.zDegreesPerSecond = zDegreesPerSecond;
+    }
+
+    private static void SmoothLocalTransform(Transform target, Vector3 localPosition, Vector3 localScale, float lerpSpeed)
+    {
+        if (target == null)
+            return;
+
+        OnlineLocalTransformSmoother smoother = target.GetComponent<OnlineLocalTransformSmoother>();
+        if (smoother == null)
+            smoother = target.gameObject.AddComponent<OnlineLocalTransformSmoother>();
+        smoother.SetTarget(localPosition, localScale, lerpSpeed);
+    }
+
+    private static void SmoothScale(Transform target, Vector3 scale, float lerpSpeed)
+    {
+        if (target == null)
+            return;
+
+        OnlineScaleSmoother smoother = target.GetComponent<OnlineScaleSmoother>();
+        if (smoother == null)
+            smoother = target.gameObject.AddComponent<OnlineScaleSmoother>();
+        smoother.SetTarget(scale, lerpSpeed);
+    }
+
     private static bool IsFastEffect(int effectType)
     {
         return effectType == OnlineEffectType.ExpansionBurst ||
             effectType == OnlineEffectType.GravityWell ||
             effectType == OnlineEffectType.FireTrail ||
-            effectType == OnlineEffectType.ThrownWeapon ||
-            effectType == OnlineEffectType.GravityBombProjectile;
+            effectType == OnlineEffectType.TemporaryWall ||
+            effectType == OnlineEffectType.PlayerDecoy;
+    }
+
+    private static bool UsesLocalEffectRotation(OnlineEffectState effect)
+    {
+        return effect != null &&
+            effect.type == OnlineEffectType.ThrownWeapon &&
+            effect.boomerang;
+    }
+
+    private static bool UsesSmoothedEffectScale(int effectType)
+    {
+        return effectType == OnlineEffectType.ExpansionBurst ||
+            effectType == OnlineEffectType.GravityWell ||
+            effectType == OnlineEffectType.FireTrail;
     }
 
     private static string GetEffectReplicaName(int effectType)
@@ -1103,6 +1252,8 @@ public class GameStateGuest : MonoBehaviour
             OnlineEffectType.GravityWell => "GravityWellReplica",
             OnlineEffectType.PlayerMinion => "PlayerMinionReplica",
             OnlineEffectType.FireTrail => "FireTrailReplica",
+            OnlineEffectType.TemporaryWall => "TemporaryWallReplica",
+            OnlineEffectType.PlayerDecoy => "PlayerDecoyReplica",
             _ => "OnlineEffectReplica"
         };
     }
@@ -1115,6 +1266,8 @@ public class GameStateGuest : MonoBehaviour
             OnlineEffectType.ExpansionBurst => 13,
             OnlineEffectType.GravityWell => 6,
             OnlineEffectType.FireTrail => 5,
+            OnlineEffectType.TemporaryWall => 9,
+            OnlineEffectType.PlayerDecoy => 4,
             _ => 9
         };
     }

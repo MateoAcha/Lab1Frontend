@@ -72,6 +72,8 @@ public static class OnlineEffectType
     public const int GravityWell = 5;
     public const int PlayerMinion = 6;
     public const int FireTrail = 7;
+    public const int TemporaryWall = 8;
+    public const int PlayerDecoy = 9;
 }
 
 [Serializable]
@@ -170,4 +172,6 @@ public class OnlineEffectState
     public float visualRotationZ;
     public float shadowScaleX = 1f;
     public float shadowScaleY = 0.35f;
+    public int skinId;
+    public string skinColor = "#FFFFFF";
 }

@@ -22,6 +22,7 @@ public class GravityBombProjectile : MonoBehaviour
     public float VisualLocalY => _visual != null ? _visual.localPosition.y : 0f;
     public Vector3 VisualLocalScale => _visual != null ? _visual.localScale : Vector3.one;
     public Vector3 ShadowLocalScale => _shadow != null ? _shadow.localScale : new Vector3(1f, 0.35f, 1f);
+    public Vector2 CurrentVelocity { get; private set; }
 
     private void OnEnable()
     {
@@ -50,9 +51,13 @@ public class GravityBombProjectile : MonoBehaviour
 
     private void Update()
     {
+        Vector2 before = transform.position;
         float t = Mathf.Clamp01((Time.time - _startAt) / Mathf.Max(0.1f, travelTime));
         Vector2 groundPosition = Vector2.Lerp(_start, _end, t);
         transform.position = groundPosition;
+        CurrentVelocity = Time.deltaTime > 0.0001f
+            ? (groundPosition - before) / Time.deltaTime
+            : Vector2.zero;
 
         float height = Mathf.Sin(t * Mathf.PI) * Mathf.Max(0f, arcHeight);
         if (_visual != null)

@@ -6,15 +6,18 @@ public class PlayerDecoy : MonoBehaviour
     public int ownerPlayerIndex = -1;
 
     private float _dieAt;
+    public float RemainingLife => _dieAt > 0f ? Mathf.Max(0f, _dieAt - Time.time) : Mathf.Max(0f, life);
 
     private void OnEnable()
     {
         MultiplayerState.RegisterEnemyTarget(transform);
+        OnlineNetworkRegistry.Register(this);
     }
 
     private void OnDisable()
     {
         MultiplayerState.UnregisterEnemyTarget(transform);
+        OnlineNetworkRegistry.Unregister(this);
     }
 
     private void Start()

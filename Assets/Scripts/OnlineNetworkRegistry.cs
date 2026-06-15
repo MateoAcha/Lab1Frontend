@@ -15,6 +15,8 @@ public static class OnlineNetworkRegistry
     public static readonly List<GravityWell> GravityWells = new List<GravityWell>();
     public static readonly List<PlayerMinion> PlayerMinions = new List<PlayerMinion>();
     public static readonly List<FireTrailSegment> FireTrails = new List<FireTrailSegment>();
+    public static readonly List<TemporaryWall> TemporaryWalls = new List<TemporaryWall>();
+    public static readonly List<PlayerDecoy> PlayerDecoys = new List<PlayerDecoy>();
 
     public static void Register(EnemyController enemy)
     {
@@ -157,5 +159,27 @@ public static class OnlineNetworkRegistry
     public static void Unregister(FireTrailSegment fireTrail)
     {
         FireTrails.Remove(fireTrail);
+    }
+
+    public static void Register(TemporaryWall wall)
+    {
+        if (wall != null && !TemporaryWalls.Contains(wall))
+            TemporaryWalls.Add(wall);
+    }
+
+    public static void Unregister(TemporaryWall wall)
+    {
+        TemporaryWalls.Remove(wall);
+    }
+
+    public static void Register(PlayerDecoy decoy)
+    {
+        if (decoy != null && !PlayerDecoys.Contains(decoy))
+            PlayerDecoys.Add(decoy);
+    }
+
+    public static void Unregister(PlayerDecoy decoy)
+    {
+        PlayerDecoys.Remove(decoy);
     }
 }
