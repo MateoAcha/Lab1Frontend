@@ -47,6 +47,7 @@ public class OnlineMatchStateMessage
     public bool matchEnding;
     public bool matchFinished;
     public bool pausedByHost;
+    public int endingPlayerId = -1;
     public int meleeKills;
     public int rangedKills;
     public int giantKills;
@@ -84,6 +85,9 @@ public class OnlinePlayerState
     public int skinId;
     public string skinColor = "#FFFFFF";
     public int attackSeq;
+    public int weaponItemId;
+    public string weaponType = "Spear";
+    public string weaponColor = "#FFFFFF";
 }
 
 [Serializable]
@@ -108,10 +112,18 @@ public class OnlineProjectileState
     public int ownerId;
     public bool isHitbox;
     public string color;
+    public bool hasWeaponVisual;
+    public int weaponItemId;
+    public string weaponType = "Spear";
     public float size;
     public float scaleX;
     public float scaleY;
     public float rotationZ;
+    public float visualOffsetX;
+    public float visualOffsetY;
+    public float visualScaleX = 1f;
+    public float visualScaleY = 1f;
+    public float visualRotationZ;
     public float x;
     public float y;
     public float vx;

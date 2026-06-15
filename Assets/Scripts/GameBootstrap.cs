@@ -206,10 +206,16 @@ public class GameBootstrap : MonoBehaviour
         GameObject ghost = new GameObject("RemotePlayerGhost");
         ghost.transform.localScale = new Vector3(playerSize, playerSize, 1f);
 
-        SpriteRenderer sr = ghost.AddComponent<SpriteRenderer>();
+        GameObject spriteObj = new GameObject("Sprite");
+        spriteObj.transform.SetParent(ghost.transform, false);
+        spriteObj.transform.localPosition = Vector3.zero;
+        spriteObj.transform.localRotation = Quaternion.identity;
+        spriteObj.transform.localScale = Vector3.one;
+
+        SpriteRenderer sr = spriteObj.AddComponent<SpriteRenderer>();
         PlayerSkinVisuals.Apply(sr, 0, "", playerMaterial);
         sr.sortingOrder = 5;
-        ghost.AddComponent<PlayerAnimator>();
+        spriteObj.AddComponent<PlayerAnimator>();
 
         Health health = ghost.AddComponent<Health>();
         health.hp = 10f;

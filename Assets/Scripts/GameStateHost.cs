@@ -175,6 +175,7 @@ public class GameStateHost : MonoBehaviour
             matchEnding = MatchExit.IsEnding,
             matchFinished = ended && GameStatsTracker.LastRunWasFinished,
             pausedByHost = PauseMenu.IsPaused,
+            endingPlayerId = MatchExit.EndingPlayerId,
             meleeKills = meleeKills,
             rangedKills = rangedKills,
             giantKills = giantKills,
@@ -222,7 +223,10 @@ public class GameStateHost : MonoBehaviour
             alive = alive,
             skinId = GetPlayerSkinId(id, player),
             skinColor = GetPlayerSkinColor(id, player),
-            attackSeq = GetPlayerAttackSequence(id, player)
+            attackSeq = GetPlayerAttackSequence(id, player),
+            weaponItemId = GetPlayerWeaponItemId(id, player),
+            weaponType = GetPlayerWeaponType(id, player),
+            weaponColor = GetPlayerWeaponColor(id, player)
         };
     }
 
@@ -245,6 +249,27 @@ public class GameStateHost : MonoBehaviour
         if (id == 1)
             return _lastAttackSeq;
         return player != null ? player.NetworkAttackSequence : 0;
+    }
+
+    private int GetPlayerWeaponItemId(int id, PlayerController player)
+    {
+        if (id == 0)
+            return PlayerLoadout.EquippedWeaponItemId;
+        return player != null ? player.NetworkWeaponItemId : 0;
+    }
+
+    private string GetPlayerWeaponType(int id, PlayerController player)
+    {
+        if (id == 0)
+            return PlayerLoadout.CurrentWeaponKind.ToString();
+        return player != null ? player.NetworkWeaponType : "Spear";
+    }
+
+    private string GetPlayerWeaponColor(int id, PlayerController player)
+    {
+        if (id == 0)
+            return PlayerLoadout.WeaponColorHex;
+        return player != null ? player.NetworkWeaponColor : "#FFFFFF";
     }
 
     private OnlineEnemyState[] BuildEnemies()
@@ -424,11 +449,19 @@ public class GameStateHost : MonoBehaviour
     private AttackVisualSnapshot BuildAttackVisualSnapshot(int id, HitBox hitBox, float expireAt)
     {
         Transform t = hitBox.transform;
+        Transform weaponVisual = FindWeaponVisual(t);
+        PlayerController owner = MultiplayerState.GetPlayerByIndex(hitBox.ownerPlayerIndex);
         return new AttackVisualSnapshot
         {
             id = id,
             ownerId = hitBox.ownerPlayerIndex,
             color = "#" + ColorUtility.ToHtmlStringRGBA(hitBox.visualColor),
+            weaponType = owner != null ? owner.NetworkWeaponType : "Spear",
+            weaponItemId = owner != null ? owner.NetworkWeaponItemId : 0,
+            hasWeaponVisual = weaponVisual != null,
+            visualOffset = weaponVisual != null ? (Vector2)weaponVisual.localPosition : Vector2.zero,
+            visualScale = weaponVisual != null ? (Vector2)weaponVisual.localScale : Vector2.one,
+            visualRotationZ = weaponVisual != null ? weaponVisual.localEulerAngles.z : 0f,
             x = t.position.x,
             y = t.position.y,
             rotationZ = t.eulerAngles.z,
@@ -436,6 +469,21 @@ public class GameStateHost : MonoBehaviour
             scaleY = Mathf.Max(0.05f, t.localScale.y),
             expireAt = expireAt
         };
+    }
+
+    private Transform FindWeaponVisual(Transform root)
+    {
+        if (root == null)
+            return null;
+
+        for (int i = 0; i < root.childCount; i++)
+        {
+            Transform child = root.GetChild(i);
+            if (child != null && child.GetComponent<SpriteRenderer>() != null && child.name == "WeaponVisual")
+                return child;
+        }
+
+        return null;
     }
 
     private int GetOrAssignId(GameObject obj)
@@ -485,6 +533,12 @@ public class GameStateHost : MonoBehaviour
         public int id;
         public int ownerId;
         public string color;
+        public string weaponType;
+        public int weaponItemId;
+        public bool hasWeaponVisual;
+        public Vector2 visualOffset;
+        public Vector2 visualScale = Vector2.one;
+        public float visualRotationZ;
         public float x;
         public float y;
         public float rotationZ;
@@ -501,10 +555,18 @@ public class GameStateHost : MonoBehaviour
                 ownerId = ownerId,
                 isHitbox = true,
                 color = color,
+                weaponType = weaponType,
+                weaponItemId = weaponItemId,
+                hasWeaponVisual = hasWeaponVisual,
                 size = Mathf.Max(scaleX, scaleY),
                 scaleX = scaleX,
                 scaleY = scaleY,
                 rotationZ = rotationZ,
+                visualOffsetX = visualOffset.x,
+                visualOffsetY = visualOffset.y,
+                visualScaleX = visualScale.x,
+                visualScaleY = visualScale.y,
+                visualRotationZ = visualRotationZ,
                 x = x,
                 y = y,
                 vx = 0f,

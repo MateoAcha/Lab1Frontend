@@ -8,6 +8,9 @@ public class OnlinePlayerSync : MonoBehaviour
     public int RemoteSkinId { get; private set; }
     public string RemoteSkinColor { get; private set; } = "#FFFFFF";
     public int RemoteAttackSequence { get; private set; }
+    public int RemoteWeaponItemId { get; private set; }
+    public string RemoteWeaponType { get; private set; } = "Spear";
+    public string RemoteWeaponColor { get; private set; } = "#FFFFFF";
     public float RemoteHp { get; private set; } = 10f;
     public float RemoteMaxHp { get; private set; } = 10f;
     public bool HasRemotePlayer { get; private set; }
@@ -24,16 +27,39 @@ public class OnlinePlayerSync : MonoBehaviour
 
     public void SetRemoteState(Vector3 pos, Vector3 velocity, int skinId, string skinColor)
     {
-        SetRemoteState(pos, velocity, skinId, skinColor, RemoteHp, RemoteMaxHp);
+        SetRemoteState(
+            pos,
+            velocity,
+            skinId,
+            skinColor,
+            RemoteHp,
+            RemoteMaxHp,
+            RemoteAttackSequence,
+            RemoteWeaponItemId,
+            RemoteWeaponType,
+            RemoteWeaponColor);
     }
 
-    public void SetRemoteState(Vector3 pos, Vector3 velocity, int skinId, string skinColor, float hp, float maxHp, int attackSequence = 0)
+    public void SetRemoteState(
+        Vector3 pos,
+        Vector3 velocity,
+        int skinId,
+        string skinColor,
+        float hp,
+        float maxHp,
+        int attackSequence = 0,
+        int weaponItemId = 0,
+        string weaponType = "Spear",
+        string weaponColor = "#FFFFFF")
     {
         RemotePlayerPosition = pos;
         RemotePlayerVelocity = velocity;
         RemoteSkinId = Mathf.Max(0, skinId);
         RemoteSkinColor = string.IsNullOrWhiteSpace(skinColor) ? "#FFFFFF" : skinColor;
         RemoteAttackSequence = Mathf.Max(0, attackSequence);
+        RemoteWeaponItemId = Mathf.Max(0, weaponItemId);
+        RemoteWeaponType = string.IsNullOrWhiteSpace(weaponType) ? "Spear" : weaponType;
+        RemoteWeaponColor = string.IsNullOrWhiteSpace(weaponColor) ? "#FFFFFF" : weaponColor;
         RemoteMaxHp = Mathf.Max(0.01f, maxHp);
         RemoteHp = Mathf.Clamp(hp, 0f, RemoteMaxHp);
         HasRemotePlayer = true;

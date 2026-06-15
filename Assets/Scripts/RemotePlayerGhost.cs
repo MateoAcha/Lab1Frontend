@@ -5,10 +5,15 @@ public class RemotePlayerGhost : MonoBehaviour
     public static RemotePlayerGhost Instance { get; private set; }
 
     private SpriteRenderer _sr;
+    private SpriteRenderer _weaponRenderer;
+    private Transform _weaponTransform;
     private Health _health;
     private int _appliedSkinId = -1;
     private string _appliedSkinColor = "";
     private int _appliedAttackSequence;
+    private bool _weaponFacingLeft;
+    private float _hideWeaponUntil;
+    private GameBootstrap _bootstrap;
 
     public int CurrentSkinId => OnlinePlayerSync.Instance != null ? OnlinePlayerSync.Instance.RemoteSkinId : 0;
     public Vector3 CurrentVelocity => OnlinePlayerSync.Instance != null ? OnlinePlayerSync.Instance.RemotePlayerVelocity : Vector3.zero;
@@ -20,8 +25,9 @@ public class RemotePlayerGhost : MonoBehaviour
 
     private void Start()
     {
-        _sr = GetComponent<SpriteRenderer>();
+        _sr = GetComponentInChildren<SpriteRenderer>();
         _health = GetComponent<Health>();
+        _bootstrap = FindObjectOfType<GameBootstrap>();
     }
 
     private void OnDestroy()
@@ -41,6 +47,7 @@ public class RemotePlayerGhost : MonoBehaviour
         ApplyRemoteSkinIfChanged();
         ApplyRemoteAttackIfChanged();
         ApplyRemoteHealth();
+        UpdateRemoteWeaponVisual();
 
         Vector3 target = OnlinePlayerSync.Instance.RemotePlayerPosition
             + OnlinePlayerSync.Instance.RemotePlayerVelocity * 0.08f;
@@ -80,7 +87,71 @@ public class RemotePlayerGhost : MonoBehaviour
         PlayerAnimator animator = _sr.GetComponent<PlayerAnimator>();
         if (animator != null)
             animator.TriggerAttack(0.14f);
+        _hideWeaponUntil = Time.time + 0.18f;
         _appliedAttackSequence = attackSequence;
+    }
+
+    private void UpdateRemoteWeaponVisual()
+    {
+        if (_sr == null || OnlinePlayerSync.Instance == null || Time.time < _hideWeaponUntil)
+        {
+            SetWeaponVisible(false);
+            return;
+        }
+
+        WeaponKind weaponKind = PlayerLoadout.ParseWeaponKind(OnlinePlayerSync.Instance.RemoteWeaponType);
+        if (!OnlineWeaponVisuals.TryResolveCarriedVisual(
+                weaponKind,
+                OnlinePlayerSync.Instance.RemoteWeaponItemId,
+                _bootstrap != null ? _bootstrap : FindObjectOfType<GameBootstrap>(),
+                out OnlineCarriedWeaponVisual visual))
+        {
+            SetWeaponVisible(false);
+            return;
+        }
+
+        EnsureWeaponVisual();
+        if (_weaponRenderer == null || _weaponTransform == null)
+            return;
+
+        Vector3 velocity = CurrentVelocity;
+        if (velocity.x < -0.001f)
+            _weaponFacingLeft = true;
+        else if (velocity.x > 0.001f)
+            _weaponFacingLeft = false;
+
+        float facingSign = _weaponFacingLeft ? -1f : 1f;
+        _weaponRenderer.sprite = visual.sprite;
+        _weaponRenderer.enabled = true;
+        _weaponRenderer.flipX = _weaponFacingLeft;
+        _weaponRenderer.sortingOrder = _sr.sortingOrder + visual.sortingOrderOffset;
+        _weaponTransform.localPosition = new Vector3(visual.offset.x * facingSign, visual.offset.y, 0f);
+        _weaponTransform.localRotation = Quaternion.Euler(0f, 0f, visual.rotationOffset * facingSign);
+        _weaponTransform.localScale = new Vector3(
+            Mathf.Approximately(visual.scale.x, 0f) ? 1f : visual.scale.x,
+            Mathf.Approximately(visual.scale.y, 0f) ? 1f : visual.scale.y,
+            1f);
+    }
+
+    private void EnsureWeaponVisual()
+    {
+        if (_weaponRenderer != null && _weaponTransform != null)
+            return;
+
+        Transform existing = transform.Find("RemoteCarriedWeaponVisual");
+        GameObject visual = existing != null ? existing.gameObject : new GameObject("RemoteCarriedWeaponVisual");
+        visual.transform.SetParent(transform, false);
+        _weaponTransform = visual.transform;
+        _weaponRenderer = visual.GetComponent<SpriteRenderer>();
+        if (_weaponRenderer == null)
+            _weaponRenderer = visual.AddComponent<SpriteRenderer>();
+        _weaponRenderer.color = Color.white;
+    }
+
+    private void SetWeaponVisible(bool visible)
+    {
+        if (_weaponRenderer != null)
+            _weaponRenderer.enabled = visible;
     }
 
     private void ApplyRemoteHealth()

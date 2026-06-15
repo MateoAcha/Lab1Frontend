@@ -23,11 +23,13 @@ public class GameStateGuest : MonoBehaviour
     private Texture2D _enemyAttackOrbTexture;
     private int _enemyAttackOrbFrameCount = 3;
     private float _enemyAttackOrbFps = 10f;
+    private GameBootstrap _bootstrap;
     private GameWebSocketClient _ws;
     private bool _matchCompleted;
     private bool _hostPaused;
     private bool _sentReady;
     private bool _matchStarted;
+    private bool _appliedMatchEndingVisual;
     private GameObject _hostPauseNotice;
     private OnlineMatchInputMessage _lastSentInput;
     private float _nextInputHeartbeatAt;
@@ -42,16 +44,16 @@ public class GameStateGuest : MonoBehaviour
 
         GameStatsTracker.StartMatch();
 
-        GameBootstrap bootstrap = FindObjectOfType<GameBootstrap>();
-        if (bootstrap != null)
+        _bootstrap = FindObjectOfType<GameBootstrap>();
+        if (_bootstrap != null)
         {
-            _meleeMat = bootstrap.meleeEnemyMaterial;
-            _rangedMat = bootstrap.rangedEnemyMaterial;
-            _projMat = bootstrap.enemyProjectileMaterial;
-            _enemyAttackOrbSprites = bootstrap.enemyAttackOrbSprites;
-            _enemyAttackOrbTexture = bootstrap.enemyAttackOrbTexture;
-            _enemyAttackOrbFrameCount = bootstrap.enemyAttackOrbFrameCount;
-            _enemyAttackOrbFps = bootstrap.enemyAttackOrbFps;
+            _meleeMat = _bootstrap.meleeEnemyMaterial;
+            _rangedMat = _bootstrap.rangedEnemyMaterial;
+            _projMat = _bootstrap.enemyProjectileMaterial;
+            _enemyAttackOrbSprites = _bootstrap.enemyAttackOrbSprites;
+            _enemyAttackOrbTexture = _bootstrap.enemyAttackOrbTexture;
+            _enemyAttackOrbFrameCount = _bootstrap.enemyAttackOrbFrameCount;
+            _enemyAttackOrbFps = _bootstrap.enemyAttackOrbFps;
         }
 
         BuildHostPauseNotice();
@@ -249,7 +251,7 @@ public class GameStateGuest : MonoBehaviour
         ApplyExitState(state);
         ApplyPlayerStates(state.players, state.matchEnded, state.matchStarted);
         ApplyHostPauseState(state.pausedByHost, state.matchEnded, state.matchStarted);
-        ApplyMatchEndingState(state.matchEnding, state.matchEnded);
+        ApplyMatchEndingState(state.matchEnding, state.matchEnded, state.endingPlayerId);
         ApplyEnemyState(state.enemies);
         ApplyProjectileState(state.projectiles);
 
@@ -336,7 +338,7 @@ public class GameStateGuest : MonoBehaviour
         }
     }
 
-    private void ApplyMatchEndingState(bool matchEnding, bool matchEnded)
+    private void ApplyMatchEndingState(bool matchEnding, bool matchEnded, int endingPlayerId)
     {
         if (!matchEnding || matchEnded)
         {
@@ -356,6 +358,75 @@ public class GameStateGuest : MonoBehaviour
         if (body != null)
         {
             body.linearVelocity = Vector2.zero;
+        }
+
+        if (!_appliedMatchEndingVisual)
+        {
+            _appliedMatchEndingVisual = true;
+            Transform target = ResolveEndingPlayerTransform(endingPlayerId);
+            if (target != null)
+                StartCoroutine(WarpSyncedPlayerVisual(target));
+        }
+    }
+
+    private Transform ResolveEndingPlayerTransform(int endingPlayerId)
+    {
+        if (endingPlayerId == 1 && PlayerController.main != null)
+            return PlayerController.main.transform;
+
+        if (endingPlayerId == 0 && RemotePlayerGhost.Instance != null)
+            return RemotePlayerGhost.Instance.transform;
+
+        PlayerController player = PlayerController.main;
+        if (player == null)
+            return RemotePlayerGhost.Instance != null ? RemotePlayerGhost.Instance.transform : null;
+
+        Vector2 exitPosition = MatchExit.Position;
+        Transform local = player.transform;
+        Transform remote = RemotePlayerGhost.Instance != null ? RemotePlayerGhost.Instance.transform : null;
+        if (remote == null)
+            return local;
+
+        float localDistance = ((Vector2)local.position - exitPosition).sqrMagnitude;
+        float remoteDistance = ((Vector2)remote.position - exitPosition).sqrMagnitude;
+        return localDistance <= remoteDistance ? local : remote;
+    }
+
+    private IEnumerator WarpSyncedPlayerVisual(Transform target)
+    {
+        Vector3 startScale = target.localScale;
+        Vector3 startPosition = target.position;
+        const float duration = 0.7f;
+        float elapsed = 0f;
+
+        while (elapsed < duration && target != null)
+        {
+            elapsed += Time.unscaledDeltaTime;
+            float t = Mathf.Clamp01(elapsed / duration);
+            float eased = t * t * (3f - 2f * t);
+            float width = Mathf.Lerp(1f, 0.08f, eased);
+            float height = Mathf.Lerp(1f, 2.4f, eased);
+            target.localScale = new Vector3(startScale.x * width, startScale.y * height, startScale.z);
+            target.position = startPosition + Vector3.up * Mathf.Lerp(0f, 1.1f, eased);
+            SetRenderersAlpha(target, Mathf.Lerp(1f, 0f, eased));
+            yield return null;
+        }
+
+        if (target != null)
+            target.gameObject.SetActive(false);
+    }
+
+    private static void SetRenderersAlpha(Transform target, float alpha)
+    {
+        SpriteRenderer[] renderers = target.GetComponentsInChildren<SpriteRenderer>();
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            if (renderers[i] == null)
+                continue;
+
+            Color color = renderers[i].color;
+            color.a = alpha;
+            renderers[i].color = color;
         }
     }
 
@@ -391,7 +462,10 @@ public class GameStateGuest : MonoBehaviour
             state.skinColor,
             state.hp,
             state.maxHp,
-            state.attackSeq);
+            state.attackSeq,
+            state.weaponItemId,
+            state.weaponType,
+            state.weaponColor);
     }
 
     private void ApplyLocalGuestPlayer(OnlinePlayerState state, bool matchEnded, bool matchStarted)
@@ -612,6 +686,7 @@ public class GameStateGuest : MonoBehaviour
                 if (_projectileReplicas.TryGetValue(projectile.id, out OnlineEntityReplica replica) && replica != null)
                 {
                     ApplyProjectileReplicaShape(replica.transform, projectile);
+                    ApplyProjectileReplicaVisual(replica.gameObject, projectile);
                     replica.SetTarget(
                         new Vector3(projectile.x, projectile.y, 0f),
                         new Vector3(projectile.vx, projectile.vy, 0f),
@@ -646,6 +721,7 @@ public class GameStateGuest : MonoBehaviour
                 : new Color(1f, 0.55f, 0.15f, 1f));
         sr.sortingOrder = 9;
         if (!projectile.fromPlayer && _projMat != null) { sr.sharedMaterial = _projMat; sr.color = Color.white; }
+        ApplyProjectileReplicaVisual(go, projectile);
         if (hasEnemyOrbSprite && enemyFrames.Length > 1)
         {
             EnemyProjectileAnimator animator = go.AddComponent<EnemyProjectileAnimator>();
@@ -656,6 +732,63 @@ public class GameStateGuest : MonoBehaviour
         OnlineEntityReplica replica = go.AddComponent<OnlineEntityReplica>();
         replica.SnapTo(go.transform.position);
         return replica;
+    }
+
+    private void ApplyProjectileReplicaVisual(GameObject go, OnlineProjectileState projectile)
+    {
+        if (go == null || projectile == null)
+            return;
+
+        SpriteRenderer rootRenderer = go.GetComponent<SpriteRenderer>();
+        Transform weaponVisual = go.transform.Find("WeaponVisual");
+
+        if (!projectile.isHitbox || !projectile.hasWeaponVisual)
+        {
+            if (rootRenderer != null)
+                rootRenderer.enabled = true;
+            if (weaponVisual != null)
+                weaponVisual.gameObject.SetActive(false);
+            return;
+        }
+
+        WeaponKind weaponKind = PlayerLoadout.ParseWeaponKind(projectile.weaponType);
+        Sprite weaponSprite = OnlineWeaponVisuals.ResolveAttackSprite(
+            weaponKind,
+            projectile.weaponItemId,
+            _bootstrap != null ? _bootstrap : FindObjectOfType<GameBootstrap>());
+        if (weaponSprite == null)
+        {
+            if (rootRenderer != null)
+                rootRenderer.enabled = true;
+            if (weaponVisual != null)
+                weaponVisual.gameObject.SetActive(false);
+            return;
+        }
+
+        if (rootRenderer != null)
+            rootRenderer.enabled = false;
+
+        if (weaponVisual == null)
+        {
+            GameObject visualObj = new GameObject("WeaponVisual");
+            visualObj.transform.SetParent(go.transform, false);
+            weaponVisual = visualObj.transform;
+        }
+
+        weaponVisual.gameObject.SetActive(true);
+        weaponVisual.localPosition = new Vector3(projectile.visualOffsetX, projectile.visualOffsetY, 0f);
+        weaponVisual.localRotation = Quaternion.Euler(0f, 0f, projectile.visualRotationZ);
+        weaponVisual.localScale = new Vector3(
+            Mathf.Approximately(projectile.visualScaleX, 0f) ? 1f : projectile.visualScaleX,
+            Mathf.Approximately(projectile.visualScaleY, 0f) ? 1f : projectile.visualScaleY,
+            1f);
+
+        SpriteRenderer weaponRenderer = weaponVisual.GetComponent<SpriteRenderer>();
+        if (weaponRenderer == null)
+            weaponRenderer = weaponVisual.gameObject.AddComponent<SpriteRenderer>();
+        weaponRenderer.sprite = weaponSprite;
+        weaponRenderer.color = Color.white;
+        weaponRenderer.sortingOrder = 10;
     }
 
     private void ApplyProjectileReplicaShape(Transform target, OnlineProjectileState projectile)

@@ -14,6 +14,7 @@ public class MatchExit : MonoBehaviour
         }
     }
     public static bool IsEnding { get; private set; }
+    public static int EndingPlayerId { get; private set; } = -1;
 
     public float warpDuration = 0.7f;
 
@@ -23,6 +24,7 @@ public class MatchExit : MonoBehaviour
     {
         Instance = this;
         IsEnding = false;
+        EndingPlayerId = -1;
     }
 
     private void OnDestroy()
@@ -31,6 +33,7 @@ public class MatchExit : MonoBehaviour
         {
             Instance = null;
             IsEnding = false;
+            EndingPlayerId = -1;
         }
     }
 
@@ -172,6 +175,7 @@ public class MatchExit : MonoBehaviour
         }
 
         triggered = true;
+        EndingPlayerId = player.playerIndex;
         GameAudio.PlayExitPortal();
         StartCoroutine(ExitRoutine(player, authoritative));
     }
@@ -244,13 +248,7 @@ public class MatchExit : MonoBehaviour
             target.localScale = new Vector3(startScale.x * width, startScale.y * height, startScale.z);
             target.position = startPosition + Vector3.up * Mathf.Lerp(0f, 1.1f, eased);
 
-            SpriteRenderer renderer = target.GetComponent<SpriteRenderer>();
-            if (renderer != null)
-            {
-                Color color = renderer.color;
-                color.a = Mathf.Lerp(1f, 0f, eased);
-                renderer.color = color;
-            }
+            SetRenderersAlpha(target, Mathf.Lerp(1f, 0f, eased));
 
             yield return null;
         }
@@ -258,6 +256,23 @@ public class MatchExit : MonoBehaviour
         if (target != null)
         {
             target.gameObject.SetActive(false);
+        }
+    }
+
+    private static void SetRenderersAlpha(Transform target, float alpha)
+    {
+        if (target == null)
+            return;
+
+        SpriteRenderer[] renderers = target.GetComponentsInChildren<SpriteRenderer>();
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            if (renderers[i] == null)
+                continue;
+
+            Color color = renderers[i].color;
+            color.a = alpha;
+            renderers[i].color = color;
         }
     }
 }

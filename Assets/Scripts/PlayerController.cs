@@ -214,6 +214,9 @@ public class PlayerController : MonoBehaviour
     public int NetworkConsumableSequence { get; private set; }
     public int NetworkSkinId => _hasNetworkLoadout ? _networkSkinId : PlayerLoadout.EquippedSkinId;
     public string NetworkSkinColor => _hasNetworkLoadout ? _networkSkinColor : PlayerSkinVisuals.GetEquippedSkinColorHex();
+    public int NetworkWeaponItemId => GetWeaponItemId();
+    public string NetworkWeaponType => GetWeaponKind().ToString();
+    public string NetworkWeaponColor => "#" + ColorUtility.ToHtmlStringRGB(_hasNetworkLoadout ? _networkWeaponColor : PlayerLoadout.WeaponColor);
     public bool EnemiesCanSee => Time.time >= _stealthUntil;
 
     public float ChargeCooldownProgress01
