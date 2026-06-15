@@ -23,15 +23,6 @@ public class ExpansionBurst : MonoBehaviour
         OnlineNetworkRegistry.Unregister(this);
     }
 
-    public Color VisualColor
-    {
-        get
-        {
-            SpriteRenderer sr = GetComponent<SpriteRenderer>();
-            return sr != null ? sr.color : Color.white;
-        }
-    }
-
     private void Start()
     {
         startAt = Time.time;

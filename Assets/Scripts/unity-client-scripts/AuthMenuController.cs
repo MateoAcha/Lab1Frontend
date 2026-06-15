@@ -172,6 +172,7 @@ public class AuthMenuController : MonoBehaviour
     private bool _mainMenuButtonsBuilt;
     private bool _sessionValidationInProgress;
     private string _sessionValidationMessage = "";
+    private readonly string _lobbyClientId = Guid.NewGuid().ToString("N");
 
     private enum LoginReturn { MainMenu, OnlineLobby, OnlineRoomList }
     private enum ServerAddressMode { JoinSession, AuthServer }
@@ -892,8 +893,7 @@ public class AuthMenuController : MonoBehaviour
 
         if (statusCode == 401 || statusCode == 403)
         {
-            if (errorPanel != null)
-                errorPanel.SetActive(false);
+            ShowError("Your saved login expired or was replaced. Please log in again.");
             yield break;
         }
 
@@ -2986,6 +2986,7 @@ public class AuthMenuController : MonoBehaviour
             bool created = false;
             string createError = null;
             yield return _apiClient.LobbyCreate(
+                _lobbyClientId,
                 onSuccess: room =>
                 {
                     _currentLobbyRoomNumber = room != null ? room.roomNumber : 0;
@@ -2995,6 +2996,7 @@ public class AuthMenuController : MonoBehaviour
 
             if (!created)
             {
+                RefreshSessionUI();
                 ShowError(string.IsNullOrWhiteSpace(createError) ? "Could not create lobby room." : createError);
                 OpenMultiplayer();
                 yield break;
@@ -3086,7 +3088,7 @@ public class AuthMenuController : MonoBehaviour
 
             bool shouldLaunch = false;
             string pingError = null;
-            yield return _apiClient.LobbyPing(_currentLobbyRoomNumber, weapon, armor, item, 0f, 0f,
+            yield return _apiClient.LobbyPing(_currentLobbyRoomNumber, _lobbyClientId, weapon, armor, item, 0f, 0f,
                 onSuccess: (players, started) =>
                 {
                     _lobbyPlayerCount = CountLobbyPlayers(players);
@@ -3115,13 +3117,18 @@ public class AuthMenuController : MonoBehaviour
             if (!string.IsNullOrWhiteSpace(pingError))
             {
                 Debug.LogWarning($"[AuthUI] Lobby ping failed: {pingError}");
+                RefreshSessionUI();
+                ShowError(pingError);
                 if (!_isHostSession)
                 {
-                    ShowError(pingError);
                     _currentLobbyRoomNumber = 0;
                     ShowRoomList();
                     yield break;
                 }
+
+                _currentLobbyRoomNumber = 0;
+                OpenMultiplayer();
+                yield break;
             }
             if (shouldLaunch) { PlayOnlineGame(); yield break; }
             yield return new WaitForSeconds(3f);
@@ -3156,11 +3163,13 @@ public class AuthMenuController : MonoBehaviour
         string startError = null;
         yield return _apiClient.LobbyStart(
             _currentLobbyRoomNumber,
+            _lobbyClientId,
             onSuccess: () => started = true,
             onError: error => startError = error);
 
         if (!started)
         {
+            RefreshSessionUI();
             ShowError(string.IsNullOrWhiteSpace(startError) ? "Could not start lobby." : startError);
             yield break;
         }
@@ -3202,7 +3211,7 @@ public class AuthMenuController : MonoBehaviour
     public void BackFromLobby()
     {
         if (_lobbyPollRoutine != null) { StopCoroutine(_lobbyPollRoutine); _lobbyPollRoutine = null; }
-        if (_currentLobbyRoomNumber > 0) StartCoroutine(_apiClient.LobbyLeave(_currentLobbyRoomNumber));
+        if (_currentLobbyRoomNumber > 0) StartCoroutine(_apiClient.LobbyLeave(_currentLobbyRoomNumber, _lobbyClientId));
         _currentLobbyRoomNumber = 0;
         OpenMultiplayer();
     }
@@ -3348,6 +3357,7 @@ public class AuthMenuController : MonoBehaviour
 
         if (!string.IsNullOrWhiteSpace(error))
         {
+            RefreshSessionUI();
             SetRoomListStatus(error);
             yield break;
         }
@@ -3369,6 +3379,12 @@ public class AuthMenuController : MonoBehaviour
     private void SelectRoom(LobbyRoomData room)
     {
         if (room == null) return;
+        if (RoomHasCurrentUser(room))
+        {
+            ShowError($"This account is already in Room #{room.roomNumber}.");
+            return;
+        }
+
         if (room.full || room.playerCount >= Mathf.Max(1, room.maxPlayers))
         {
             ShowError($"Room #{room.roomNumber} is full.");
@@ -3379,6 +3395,20 @@ public class AuthMenuController : MonoBehaviour
         _isHostSession = false;
         _loginReturn = LoginReturn.OnlineLobby;
         ContinueToLobbyOrLogin();
+    }
+
+    private bool RoomHasCurrentUser(LobbyRoomData room)
+    {
+        if (room == null || room.players == null || string.IsNullOrWhiteSpace(AuthSession.Username))
+            return false;
+
+        for (int i = 0; i < room.players.Length; i++)
+        {
+            LobbyPlayerData player = room.players[i];
+            if (player != null && string.Equals(player.username, AuthSession.Username, StringComparison.Ordinal))
+                return true;
+        }
+        return false;
     }
 
     private void SetRoomListStatus(string text)
@@ -3476,14 +3506,16 @@ public class AuthMenuController : MonoBehaviour
 
         Image image = row.AddComponent<Image>();
         bool full = room.full || room.playerCount >= Mathf.Max(1, room.maxPlayers);
-        image.color = full
+        bool currentUserAlreadyInRoom = RoomHasCurrentUser(room);
+        bool unavailable = full || currentUserAlreadyInRoom;
+        image.color = unavailable
             ? new Color(0.20f, 0.13f, 0.14f, 0.96f)
             : new Color(0.10f, 0.18f, 0.27f, 0.96f);
         GameUiThemeRuntime.ApplyBorder(row);
 
         Button button = row.AddComponent<Button>();
         button.targetGraphic = image;
-        button.interactable = !full;
+        button.interactable = !unavailable;
         LobbyRoomData captured = room;
         button.onClick.AddListener(() => SelectRoom(captured));
 
@@ -3499,10 +3531,11 @@ public class AuthMenuController : MonoBehaviour
         label.font = TMP_Settings.defaultFontAsset;
         label.fontSize = 22f;
         label.fontStyle = FontStyles.Bold;
-        label.color = full ? new Color(1f, 0.72f, 0.72f, 1f) : Color.white;
+        label.color = unavailable ? new Color(1f, 0.72f, 0.72f, 1f) : Color.white;
         label.alignment = TextAlignmentOptions.Left;
         label.raycastTarget = false;
-        label.text = $"Room #{room.roomNumber}   {room.playerCount}/{Mathf.Max(1, room.maxPlayers)}{(full ? "   FULL" : "")}\n{BuildRoomPlayerNames(room)}";
+        string status = currentUserAlreadyInRoom ? "   ACCOUNT IN ROOM" : full ? "   FULL" : "";
+        label.text = $"Room #{room.roomNumber}   {room.playerCount}/{Mathf.Max(1, room.maxPlayers)}{status}\n{BuildRoomPlayerNames(room)}";
     }
 
     private string BuildRoomPlayerNames(LobbyRoomData room)

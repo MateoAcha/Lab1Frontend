@@ -15,8 +15,6 @@ public class DroppedMaterialPickup : MonoBehaviour
     public Color PickupColor => materialDrop != null ? materialDrop.pickupColor : Color.white;
     public float PickupSize => materialDrop != null ? materialDrop.pickupSize : 0.9f;
 
-    public MapMaterialDefinition MaterialDrop => materialDrop;
-
     public static void SpawnForCurrentMap(Vector3 position)
     {
         GameBootstrap bootstrap = FindObjectOfType<GameBootstrap>();

@@ -6,6 +6,9 @@ using UnityEngine.Networking;
 
 public class AuthApiClient
 {
+    private const string LobbyClientIdHeader = "X-Lobby-Client-Id";
+    private const string SessionExpiredMessage = "Session expired or was replaced. Please log in again.";
+
     private readonly string _baseUrl;
 
     public AuthApiClient(string baseUrl)
@@ -38,7 +41,7 @@ public class AuthApiClient
             password = password
         };
 
-        yield return PostJson("/users/login", JsonUtility.ToJson(payload), onSuccess, onError);
+        yield return PostJson("/users/login", JsonUtility.ToJson(payload), onSuccess, onError, loginRequest: true);
     }
 
     public IEnumerator GoogleLogin(
@@ -117,7 +120,7 @@ public class AuthApiClient
         if (request.result != UnityWebRequest.Result.Success
             || request.responseCode < 200 || request.responseCode >= 300)
         {
-            onError?.Invoke(FormatError(request));
+            onError?.Invoke(FormatError(request, loginRequest: true));
             yield break;
         }
 
@@ -174,7 +177,6 @@ public class AuthApiClient
 
         var request = UnityWebRequest.Get(_baseUrl + $"/users/{userId}");
         request.SetRequestHeader("Authorization", $"Bearer {AuthSession.AccessToken}");
-        request.timeout = 7;
 
         Debug.Log($"[AuthApi] Validating stored session for userId={userId}");
         yield return request.SendWebRequest();
@@ -711,7 +713,8 @@ public class AuthApiClient
         string jsonBody,
         Action<AuthUserData> onSuccess,
         Action<string> onError,
-        bool requiresAuth = false)
+        bool requiresAuth = false,
+        bool loginRequest = false)
     {
         var request = new UnityWebRequest(_baseUrl + endpoint, "POST");
         byte[] bodyRaw = Encoding.UTF8.GetBytes(jsonBody);
@@ -732,7 +735,7 @@ public class AuthApiClient
 
         if (request.result != UnityWebRequest.Result.Success)
         {
-            string error = FormatError(request);
+            string error = FormatError(request, loginRequest);
             Debug.LogError($"[AuthApi] Network error: {error}");
             onError?.Invoke(error);
             yield break;
@@ -740,7 +743,7 @@ public class AuthApiClient
 
         if (request.responseCode < 200 || request.responseCode >= 300)
         {
-            string error = FormatError(request);
+            string error = FormatError(request, loginRequest);
             Debug.LogError($"[AuthApi] API error: {error}");
             onError?.Invoke(error);
             yield break;
@@ -835,9 +838,10 @@ public class AuthApiClient
     {
         if (string.IsNullOrWhiteSpace(AuthSession.AccessToken))
         {
-            const string authError = "Missing access token. Please log in again.";
-            Debug.LogError($"[AuthApi] {authError}");
-            onError?.Invoke(authError);
+            if (AuthSession.IsLoggedIn)
+                AuthSession.Logout();
+            Debug.LogError($"[AuthApi] {SessionExpiredMessage}");
+            onError?.Invoke(SessionExpiredMessage);
             return false;
         }
 
@@ -881,11 +885,18 @@ public class AuthApiClient
         onSuccess?.Invoke(status);
     }
 
-    private string FormatError(UnityWebRequest request)
+    private string FormatError(UnityWebRequest request, bool loginRequest = false)
     {
         string raw = request.downloadHandler != null ? request.downloadHandler.text : "";
         long code  = request.responseCode;
         Debug.Log($"[AuthApi] Error body (code={code}): {raw}");
+
+        if (!loginRequest && (code == 401 || code == 403))
+        {
+            if (AuthSession.IsLoggedIn)
+                AuthSession.Logout();
+            return SessionExpiredMessage;
+        }
 
         // Try to extract a message from the JSON body (works with both Spring Boot formats).
         if (!string.IsNullOrWhiteSpace(raw))
@@ -959,12 +970,13 @@ public class AuthApiClient
         onSuccess?.Invoke(data ?? new LobbyRoomListData());
     }
 
-    public IEnumerator LobbyCreate(Action<LobbyRoomData> onSuccess, Action<string> onError)
+    public IEnumerator LobbyCreate(string lobbyClientId, Action<LobbyRoomData> onSuccess, Action<string> onError)
     {
         var request = new UnityWebRequest(_baseUrl + "/lobby/create", "POST");
         request.uploadHandler   = new UploadHandlerRaw(new byte[0]);
         request.downloadHandler = new DownloadHandlerBuffer();
         request.SetRequestHeader("Content-Type", "application/json");
+        AttachLobbyClientId(request, lobbyClientId);
         if (!TryAttachAuthorization(request, onError))
         {
             yield break;
@@ -986,12 +998,13 @@ public class AuthApiClient
         onSuccess?.Invoke(room);
     }
 
-    public IEnumerator LobbyStart(int roomNumber, Action onSuccess, Action<string> onError)
+    public IEnumerator LobbyStart(int roomNumber, string lobbyClientId, Action onSuccess, Action<string> onError)
     {
         var request = new UnityWebRequest(_baseUrl + $"/lobby/start?roomNumber={Mathf.Max(1, roomNumber)}", "POST");
         request.uploadHandler   = new UploadHandlerRaw(new byte[0]);
         request.downloadHandler = new DownloadHandlerBuffer();
         request.SetRequestHeader("Content-Type", "application/json");
+        AttachLobbyClientId(request, lobbyClientId);
         if (!TryAttachAuthorization(request, onError))
         {
             yield break;
@@ -1005,7 +1018,7 @@ public class AuthApiClient
             onError?.Invoke(FormatError(request));
     }
 
-    public IEnumerator LobbyPing(int roomNumber, string weapon, string armor, string item, float x, float y,
+    public IEnumerator LobbyPing(int roomNumber, string lobbyClientId, string weapon, string armor, string item, float x, float y,
         Action<LobbyPlayerData[], bool> onSuccess, Action<string> onError)
     {
         string json = JsonUtility.ToJson(new LobbyPingRequest
@@ -1020,6 +1033,7 @@ public class AuthApiClient
         request.uploadHandler   = new UploadHandlerRaw(Encoding.UTF8.GetBytes(json));
         request.downloadHandler = new DownloadHandlerBuffer();
         request.SetRequestHeader("Content-Type", "application/json");
+        AttachLobbyClientId(request, lobbyClientId);
         if (!TryAttachAuthorization(request, onError))
         {
             yield break;
@@ -1041,14 +1055,21 @@ public class AuthApiClient
         onSuccess?.Invoke(wrapper?.players ?? new LobbyPlayerData[0], wrapper?.started ?? false);
     }
 
-    public IEnumerator LobbyLeave(int roomNumber)
+    public IEnumerator LobbyLeave(int roomNumber, string lobbyClientId)
     {
         var request = new UnityWebRequest(_baseUrl + $"/lobby/leave?roomNumber={Mathf.Max(1, roomNumber)}", "DELETE");
         request.uploadHandler   = new UploadHandlerRaw(new byte[0]);
         request.downloadHandler = new DownloadHandlerBuffer();
+        AttachLobbyClientId(request, lobbyClientId);
         if (!string.IsNullOrWhiteSpace(AuthSession.AccessToken))
             request.SetRequestHeader("Authorization", $"Bearer {AuthSession.AccessToken}");
         yield return request.SendWebRequest();
+    }
+
+    private void AttachLobbyClientId(UnityWebRequest request, string lobbyClientId)
+    {
+        if (!string.IsNullOrWhiteSpace(lobbyClientId))
+            request.SetRequestHeader(LobbyClientIdHeader, lobbyClientId);
     }
 
     [Serializable]

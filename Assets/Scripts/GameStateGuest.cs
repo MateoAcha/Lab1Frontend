@@ -348,7 +348,6 @@ public class GameStateGuest : MonoBehaviour
         {
             GameMapSelection.Select(mapIndex);
         }
-
     }
 
     private void ApplyMatchEndingState(bool matchEnding, bool matchEnded, int endingPlayerId)
@@ -703,7 +702,7 @@ public class GameStateGuest : MonoBehaviour
             foreach (OnlineProjectileState projectile in projectiles)
             {
                 if (projectile == null || projectile.life <= 0f) continue;
-                if (projectile.fromPlayer && projectile.ownerId == 1 && !projectile.isMinion) continue;
+                if (projectile.fromPlayer && projectile.ownerId == 1) continue;
                 activeIds.Add(projectile.id);
 
                 if (_projectileReplicas.TryGetValue(projectile.id, out OnlineEntityReplica replica) && replica != null)
@@ -739,20 +738,9 @@ public class GameStateGuest : MonoBehaviour
 
     private OnlineEntityReplica SpawnProjectileReplica(OnlineProjectileState projectile)
     {
-        GameObject go = new GameObject(projectile.isMinion ? "MinionReplica" : projectile.fromPlayer ? "PlayerProjectileReplica" : "ProjectileReplica");
+        GameObject go = new GameObject(projectile.fromPlayer ? "PlayerProjectileReplica" : "ProjectileReplica");
         go.transform.position = new Vector3(projectile.x, projectile.y, 0f);
         ApplyProjectileReplicaShape(go.transform, projectile);
-
-        if (projectile.isMinion)
-        {
-            SpriteRenderer msr = go.AddComponent<SpriteRenderer>();
-            msr.sprite = SimpleSprite.Circle;
-            msr.color = PlayerLoadout.ParseWeaponColor(projectile.color, new Color(0.8f, 0.6f, 1f, 1f));
-            msr.sortingOrder = 9;
-            OnlineEntityReplica mr = go.AddComponent<OnlineEntityReplica>();
-            mr.SnapTo(go.transform.position);
-            return mr;
-        }
 
         SpriteRenderer sr = go.AddComponent<SpriteRenderer>();
         Sprite[] enemyFrames = projectile.fromPlayer || projectile.isHitbox
