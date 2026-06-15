@@ -306,6 +306,14 @@ public class PlayerController : MonoBehaviour
 
     private void Update()
     {
+        if (OnlineMatchStartGate.IsWaiting)
+        {
+            LastMoveInput = Vector2.zero;
+            if (body != null)
+                body.linearVelocity = Vector2.zero;
+            return;
+        }
+
         bool chargeDown = ReadChargeDown();
         if (!_useExternalInput && chargeDown) NetworkChargeSequence++;
         if (chargeDown && Time.time >= nextChargeReady)

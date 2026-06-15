@@ -51,6 +51,12 @@ public class EnemySpawner : MonoBehaviour
 
     private void Update()
     {
+        if (OnlineMatchStartGate.IsWaiting)
+        {
+            ElapsedTime = 0f;
+            return;
+        }
+
         ElapsedTime = Time.time - startAt;
 
         if (MultiplayerState.GetNearestPlayer(Vector3.zero) == null)

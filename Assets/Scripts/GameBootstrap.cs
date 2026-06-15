@@ -123,6 +123,10 @@ public class GameBootstrap : MonoBehaviour
         MultiplayerState.Reset();
         MultiplayerState.SetMultiplayer(isMultiplayer || isOnline);
         if (isOnline) { MultiplayerState.SetOnline(true); MultiplayerState.SetHost(isHost); MultiplayerState.SetOnlineRoomNumber(onlineRoom); }
+        if (isOnline)
+            OnlineMatchStartGate.Show(isHost ? "Waiting for guest..." : "Syncing online match...");
+        else
+            OnlineMatchStartGate.Reset();
         SkinVisualDatabase.Register(skinVisualDatabase);
         WeaponVisualDatabase.Register(weaponVisualDatabase);
         ApplySelectedMapDefinition(false);
@@ -156,7 +160,10 @@ public class GameBootstrap : MonoBehaviour
         SetupSpawner();
         SetupGameOverScreen();
         SetupPauseMenu();
-        GameAudio.EnsureMusic();
+        if (isOnline)
+            GameAudio.StopMusic();
+        else
+            GameAudio.EnsureMusic();
         GameAudio.ConfigureSoundEffects(
             giantAttackStompSound,
             menuButtonClickSound,

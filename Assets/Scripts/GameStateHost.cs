@@ -19,9 +19,13 @@ public class GameStateHost : MonoBehaviour
     private int _nextEntityId = 1;
     private int _tick;
     private bool _sawRunActive;
+    private bool _guestReady;
+    private bool _matchStarted;
 
     private void Start()
     {
+        OnlineMatchStartGate.Show("Waiting for guest...");
+        GameAudio.StopMusic();
         HitBox.Spawned += HandleHitBoxSpawned;
         _remotePlayer = FindRemotePlayer();
         StartCoroutine(ConnectThenSync());
@@ -38,6 +42,7 @@ public class GameStateHost : MonoBehaviour
         if (connectTask.IsFaulted || !_ws.IsConnected)
         {
             Debug.LogWarning("GameStateHost: WebSocket connect failed - " + connectTask.Exception?.GetBaseException()?.Message);
+            OnlineMatchStartGate.SetMessage("Could not connect to match server.");
             yield break;
         }
 
@@ -63,7 +68,12 @@ public class GameStateHost : MonoBehaviour
 
     private void HandleGuestMessage(string json)
     {
-        if (string.IsNullOrWhiteSpace(json) || !json.Contains("\"input\""))
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return;
+        }
+
+        if (!json.Contains("\"input\""))
         {
             return;
         }
@@ -110,6 +120,15 @@ public class GameStateHost : MonoBehaviour
             input.rangedPassiveSkillLevel,
             input.weaponItemId);
 
+        if (input.ready && input.readyMapIndex == GameMapSelection.SelectedMapIndex)
+            MarkGuestReady();
+
+        if (!_matchStarted)
+        {
+            _remotePlayer.ApplyExternalInput(Vector2.zero, Vector2.down, false, false, false, false);
+            return;
+        }
+
         bool attackDown = input.attackSeq > 0 && input.attackSeq != _lastAttackSeq;
         bool chargeDown = input.chargeSeq > 0 && input.chargeSeq != _lastChargeSeq;
         bool burstDown = input.burstSeq > 0 && input.burstSeq != _lastBurstSeq;
@@ -129,6 +148,17 @@ public class GameStateHost : MonoBehaviour
             consumableDown);
     }
 
+    private void MarkGuestReady()
+    {
+        if (_guestReady)
+            return;
+
+        _guestReady = true;
+        _matchStarted = true;
+        OnlineMatchStartGate.Hide();
+        GameAudio.EnsureMatchMusic(GameMapSelection.SelectedMapIndex);
+    }
+
     private OnlineMatchStateMessage BuildState()
     {
         bool ended = _sawRunActive && !GameStatsTracker.IsRunActive;
@@ -140,6 +170,7 @@ public class GameStateHost : MonoBehaviour
         return new OnlineMatchStateMessage
         {
             tick = ++_tick,
+            matchStarted = _matchStarted,
             matchEnded = ended,
             matchEnding = MatchExit.IsEnding,
             matchFinished = ended && GameStatsTracker.LastRunWasFinished,
@@ -444,6 +475,8 @@ public class GameStateHost : MonoBehaviour
     private void OnDestroy()
     {
         HitBox.Spawned -= HandleHitBoxSpawned;
+        if (OnlineMatchStartGate.IsWaiting)
+            OnlineMatchStartGate.Reset();
         _ws?.Dispose();
     }
 

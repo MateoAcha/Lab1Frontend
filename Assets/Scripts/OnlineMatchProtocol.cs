@@ -8,6 +8,8 @@ public class OnlineMatchInputMessage
     public float moveY;
     public float aimX;
     public float aimY = -1f;
+    public bool ready;
+    public int readyMapIndex = -1;
     public int attackSeq;
     public int chargeSeq;
     public int burstSeq;
@@ -40,6 +42,7 @@ public class OnlineMatchStateMessage
 {
     public string type = "state";
     public int tick;
+    public bool matchStarted = true;
     public bool matchEnded;
     public bool matchEnding;
     public bool matchFinished;

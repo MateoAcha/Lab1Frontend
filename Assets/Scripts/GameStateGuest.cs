@@ -26,12 +26,17 @@ public class GameStateGuest : MonoBehaviour
     private GameWebSocketClient _ws;
     private bool _matchCompleted;
     private bool _hostPaused;
+    private bool _sentReady;
+    private bool _matchStarted;
     private GameObject _hostPauseNotice;
     private OnlineMatchInputMessage _lastSentInput;
     private float _nextInputHeartbeatAt;
 
     private void Start()
     {
+        OnlineMatchStartGate.Show("Syncing online match...");
+        GameAudio.StopMusic();
+
         EnemySpawner spawner = FindObjectOfType<EnemySpawner>();
         if (spawner != null) spawner.enabled = false;
 
@@ -64,6 +69,7 @@ public class GameStateGuest : MonoBehaviour
         if (connectTask.IsFaulted || !_ws.IsConnected)
         {
             Debug.LogWarning("GameStateGuest: WebSocket connect failed - " + connectTask.Exception?.GetBaseException()?.Message);
+            OnlineMatchStartGate.SetMessage("Could not connect to host.");
             yield break;
         }
 
@@ -237,11 +243,12 @@ public class GameStateGuest : MonoBehaviour
 
     private void ApplyState(OnlineMatchStateMessage state)
     {
-        EnemySpawner.SetNetworkElapsedTime(state.elapsedSeconds);
+        EnemySpawner.SetNetworkElapsedTime(state.matchStarted ? state.elapsedSeconds : 0f);
         ApplyMapState(state.mapIndex);
+        ApplyStartState(state);
         ApplyExitState(state);
-        ApplyPlayerStates(state.players, state.matchEnded);
-        ApplyHostPauseState(state.pausedByHost, state.matchEnded);
+        ApplyPlayerStates(state.players, state.matchEnded, state.matchStarted);
+        ApplyHostPauseState(state.pausedByHost, state.matchEnded, state.matchStarted);
         ApplyMatchEndingState(state.matchEnding, state.matchEnded);
         ApplyEnemyState(state.enemies);
         ApplyProjectileState(state.projectiles);
@@ -261,6 +268,38 @@ public class GameStateGuest : MonoBehaviour
                 Mathf.Max(0, state.elapsedSeconds),
                 state.matchFinished);
         }
+    }
+
+    private void ApplyStartState(OnlineMatchStateMessage state)
+    {
+        if (state == null)
+        {
+            return;
+        }
+
+        if (!_sentReady && state.mapIndex >= 0)
+        {
+            _sentReady = true;
+            OnlineMatchStartGate.SetMessage("Waiting for host...");
+            OnlineMatchInputMessage readyInput = BuildInput();
+            readyInput.ready = true;
+            readyInput.readyMapIndex = state.mapIndex;
+            StartCoroutine(Send(JsonUtility.ToJson(readyInput)));
+        }
+
+        if (state.matchStarted)
+        {
+            if (!_matchStarted)
+            {
+                _matchStarted = true;
+                OnlineMatchStartGate.Hide();
+            }
+
+            GameAudio.EnsureMatchMusic(state.mapIndex);
+            return;
+        }
+
+        OnlineMatchStartGate.Show(_sentReady ? "Waiting for host..." : "Syncing online match...");
     }
 
     private void ApplyExitState(OnlineMatchStateMessage state)
@@ -320,7 +359,7 @@ public class GameStateGuest : MonoBehaviour
         }
     }
 
-    private void ApplyPlayerStates(OnlinePlayerState[] players, bool matchEnded)
+    private void ApplyPlayerStates(OnlinePlayerState[] players, bool matchEnded, bool matchStarted)
     {
         if (players == null) return;
 
@@ -331,7 +370,7 @@ public class GameStateGuest : MonoBehaviour
             if (player.id == 0)
                 ApplyRemoteHostPlayer(player);
             else if (player.id == 1)
-                ApplyLocalGuestPlayer(player, matchEnded);
+                ApplyLocalGuestPlayer(player, matchEnded, matchStarted);
         }
     }
 
@@ -355,7 +394,7 @@ public class GameStateGuest : MonoBehaviour
             state.attackSeq);
     }
 
-    private void ApplyLocalGuestPlayer(OnlinePlayerState state, bool matchEnded)
+    private void ApplyLocalGuestPlayer(OnlinePlayerState state, bool matchEnded, bool matchStarted)
     {
         PlayerController player = PlayerController.main;
         if (player == null) return;
@@ -373,7 +412,7 @@ public class GameStateGuest : MonoBehaviour
             ? authoritative
             : Vector3.Lerp(player.transform.position, authoritative, 0.18f);
 
-        SetLocalPlayerVisibleAndControllable(state.alive && !matchEnded);
+        SetLocalPlayerVisibleAndControllable(matchStarted && state.alive && !matchEnded);
     }
 
     private void SetLocalPlayerVisibleAndControllable(bool alive)
@@ -393,7 +432,7 @@ public class GameStateGuest : MonoBehaviour
         if (body != null && !alive) body.linearVelocity = Vector2.zero;
     }
 
-    private void ApplyHostPauseState(bool paused, bool matchEnded)
+    private void ApplyHostPauseState(bool paused, bool matchEnded, bool matchStarted)
     {
         _hostPaused = paused && !matchEnded;
         if (_hostPauseNotice != null)
@@ -401,6 +440,15 @@ public class GameStateGuest : MonoBehaviour
 
         PlayerController player = PlayerController.main;
         if (player == null || matchEnded) return;
+
+        if (!matchStarted)
+        {
+            player.enabled = false;
+            Rigidbody2D waitingBody = player.GetComponent<Rigidbody2D>();
+            if (waitingBody != null)
+                waitingBody.linearVelocity = Vector2.zero;
+            return;
+        }
 
         Health health = player.GetComponent<Health>();
         bool alive = health == null || health.hp > 0f;
@@ -421,6 +469,7 @@ public class GameStateGuest : MonoBehaviour
     {
         if (_matchCompleted) return;
         _matchCompleted = true;
+        OnlineMatchStartGate.Reset();
         Time.timeScale = 1f;
         MultiplayerState.RequestReturnToOnlineMenu();
         SceneManager.LoadScene("Menu");
@@ -662,6 +711,8 @@ public class GameStateGuest : MonoBehaviour
 
     private void OnDestroy()
     {
+        if (OnlineMatchStartGate.IsWaiting)
+            OnlineMatchStartGate.Reset();
         _ws?.Dispose();
     }
 }
