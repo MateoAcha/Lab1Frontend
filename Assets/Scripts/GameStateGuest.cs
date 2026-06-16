@@ -12,8 +12,10 @@ public class GameStateGuest : MonoBehaviour
     private const float SendInterval = 0.05f;
     private const float InputHeartbeatInterval = 0.5f;
     private const float InputChangeThreshold = 0.001f;
+    private const float EnemyReplicaGraceSeconds = 1.25f;
 
     private readonly Dictionary<int, OnlineEntityReplica> _enemyReplicas = new Dictionary<int, OnlineEntityReplica>();
+    private readonly Dictionary<int, float> _enemyReplicaExpiresAt = new Dictionary<int, float>();
     private readonly Dictionary<int, OnlineEntityReplica> _projectileReplicas = new Dictionary<int, OnlineEntityReplica>();
     private readonly Dictionary<int, OnlineEntityReplica> _effectReplicas = new Dictionary<int, OnlineEntityReplica>();
     private readonly Dictionary<int, float> _effectReplicaExpiresAt = new Dictionary<int, float>();
@@ -610,6 +612,7 @@ public class GameStateGuest : MonoBehaviour
             {
                 if (enemy == null || enemy.hp <= 0f) continue;
                 activeIds.Add(enemy.id);
+                _enemyReplicaExpiresAt[enemy.id] = Time.time + EnemyReplicaGraceSeconds;
 
                 if (_enemyReplicas.TryGetValue(enemy.id, out OnlineEntityReplica replica) && replica != null)
                 {
@@ -622,7 +625,7 @@ public class GameStateGuest : MonoBehaviour
             }
         }
 
-        RemoveInactive(_enemyReplicas, activeIds);
+        RemoveInactiveEnemies(activeIds);
     }
 
     private OnlineEntityReplica SpawnEnemyReplica(OnlineEnemyState enemy)
@@ -1412,6 +1415,31 @@ public class GameStateGuest : MonoBehaviour
 
         foreach (int id in dead)
             replicas.Remove(id);
+    }
+
+    private void RemoveInactiveEnemies(HashSet<int> activeIds)
+    {
+        var dead = new List<int>();
+        foreach (var kv in _enemyReplicas)
+        {
+            bool active = activeIds.Contains(kv.Key);
+            bool keepUntilExpiry = false;
+            if (!active && _enemyReplicaExpiresAt.TryGetValue(kv.Key, out float expireAt))
+                keepUntilExpiry = Time.time < expireAt;
+
+            if ((active || keepUntilExpiry) && kv.Value != null)
+                continue;
+
+            if (kv.Value != null)
+                Destroy(kv.Value.gameObject);
+            dead.Add(kv.Key);
+        }
+
+        foreach (int id in dead)
+        {
+            _enemyReplicas.Remove(id);
+            _enemyReplicaExpiresAt.Remove(id);
+        }
     }
 
     private void RemoveInactiveEffects(HashSet<int> activeIds)
