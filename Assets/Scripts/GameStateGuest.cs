@@ -39,6 +39,8 @@ public class GameStateGuest : MonoBehaviour
     private bool _matchStarted;
     private bool _appliedMatchEndingVisual;
     private GameObject _hostPauseNotice;
+    private GameObject _reconnectNoticeCanvas;
+    private TextMeshProUGUI _reconnectNoticeText;
     private OnlineMatchInputMessage _lastSentInput;
     private float _nextInputHeartbeatAt;
     private int _pickupCollectSeq;
@@ -67,6 +69,7 @@ public class GameStateGuest : MonoBehaviour
         }
 
         BuildHostPauseNotice();
+        BuildReconnectNotice();
         StartCoroutine(ConnectThenRun());
     }
 
@@ -82,11 +85,14 @@ public class GameStateGuest : MonoBehaviour
 
             if (_matchStarted)
             {
-                OnlineMatchStartGate.Show("Connection lagging... reconnecting");
+                if (OnlineMatchStartGate.IsWaiting)
+                    OnlineMatchStartGate.Hide();
+                ShowReconnectNotice("Connection lagging... reconnecting");
                 SetLocalPlayerControlOnly(false);
             }
             else
             {
+                HideReconnectNotice();
                 OnlineMatchStartGate.Show("Syncing online match...");
             }
 
@@ -101,9 +107,21 @@ public class GameStateGuest : MonoBehaviour
                 continue;
             }
 
-            yield return Send("{\"type\":\"register\",\"role\":\"guest\"}");
             _lastSentInput = null;
             _nextInputHeartbeatAt = 0f;
+            yield return Send("{\"type\":\"register\",\"role\":\"guest\"}");
+            if (_matchStarted && _ws != null && _ws.IsConnected)
+            {
+                OnlineMatchInputMessage reconnectInput = BuildInput();
+                reconnectInput.ready = true;
+                reconnectInput.readyMapIndex = GameMapSelection.SelectedMapIndex;
+                yield return Send(JsonUtility.ToJson(reconnectInput));
+                if (_ws != null && _ws.IsConnected)
+                {
+                    _lastSentInput = reconnectInput;
+                    _nextInputHeartbeatAt = Time.time + InputHeartbeatInterval;
+                }
+            }
             reconnectDelay = ReconnectInitialDelay;
 
             yield return ConnectedLoop();
@@ -270,7 +288,9 @@ public class GameStateGuest : MonoBehaviour
             {
                 Debug.LogWarning("GameStateGuest: host connection dropped; holding match and reconnecting.");
                 _ws?.Dispose();
-                OnlineMatchStartGate.Show("Host connection lagging... reconnecting");
+                if (OnlineMatchStartGate.IsWaiting)
+                    OnlineMatchStartGate.Hide();
+                ShowReconnectNotice("Host connection lagging... reconnecting");
                 SetLocalPlayerControlOnly(false);
                 return;
             }
@@ -296,6 +316,9 @@ public class GameStateGuest : MonoBehaviour
 
     private void ApplyState(OnlineMatchStateMessage state)
     {
+        if (state.matchStarted)
+            HideReconnectNotice();
+
         EnemySpawner.SetNetworkElapsedTime(state.matchStarted ? state.elapsedSeconds : 0f);
         ApplyMapState(state.mapIndex);
         ApplyStartState(state);
@@ -345,15 +368,16 @@ public class GameStateGuest : MonoBehaviour
         if (state.matchStarted)
         {
             if (!_matchStarted)
-            {
                 _matchStarted = true;
-                OnlineMatchStartGate.Hide();
-            }
 
+            HideReconnectNotice();
+            if (OnlineMatchStartGate.IsWaiting)
+                OnlineMatchStartGate.Hide();
             GameAudio.EnsureMatchMusic(state.mapIndex);
             return;
         }
 
+        HideReconnectNotice();
         OnlineMatchStartGate.Show(_sentReady ? "Waiting for host..." : "Syncing online match...");
     }
 
@@ -650,6 +674,56 @@ public class GameStateGuest : MonoBehaviour
         text.raycastTarget = false;
 
         _hostPauseNotice.SetActive(false);
+    }
+
+    private void BuildReconnectNotice()
+    {
+        if (_reconnectNoticeCanvas != null)
+            return;
+
+        _reconnectNoticeCanvas = new GameObject("ReconnectNoticeCanvas");
+        Canvas canvas = _reconnectNoticeCanvas.AddComponent<Canvas>();
+        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        canvas.sortingOrder = 46;
+
+        CanvasScaler scaler = _reconnectNoticeCanvas.AddComponent<CanvasScaler>();
+        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        scaler.referenceResolution = new Vector2(1920f, 1080f);
+
+        GameObject reconnectNotice = new GameObject("ReconnectNotice");
+        reconnectNotice.transform.SetParent(_reconnectNoticeCanvas.transform, false);
+        RectTransform rect = reconnectNotice.AddComponent<RectTransform>();
+        rect.anchorMin = new Vector2(0.5f, 1f);
+        rect.anchorMax = new Vector2(0.5f, 1f);
+        rect.pivot = new Vector2(0.5f, 1f);
+        rect.sizeDelta = new Vector2(760f, 48f);
+        rect.anchoredPosition = new Vector2(0f, -88f);
+
+        _reconnectNoticeText = reconnectNotice.AddComponent<TextMeshProUGUI>();
+        _reconnectNoticeText.text = "Connection lagging... reconnecting";
+        _reconnectNoticeText.font = TMP_Settings.defaultFontAsset;
+        _reconnectNoticeText.fontSize = 22f;
+        _reconnectNoticeText.fontStyle = FontStyles.Bold;
+        _reconnectNoticeText.alignment = TextAlignmentOptions.Center;
+        _reconnectNoticeText.color = new Color(1f, 0.92f, 0.45f, 1f);
+        _reconnectNoticeText.raycastTarget = false;
+
+        _reconnectNoticeCanvas.SetActive(false);
+    }
+
+    private void ShowReconnectNotice(string message)
+    {
+        BuildReconnectNotice();
+        if (_reconnectNoticeText != null)
+            _reconnectNoticeText.text = string.IsNullOrWhiteSpace(message) ? "Connection lagging... reconnecting" : message;
+        if (_reconnectNoticeCanvas != null)
+            _reconnectNoticeCanvas.SetActive(true);
+    }
+
+    private void HideReconnectNotice()
+    {
+        if (_reconnectNoticeCanvas != null)
+            _reconnectNoticeCanvas.SetActive(false);
     }
 
     private void ApplyEnemyState(OnlineEnemyState[] enemies)
@@ -1568,6 +1642,8 @@ public class GameStateGuest : MonoBehaviour
     {
         if (OnlineMatchStartGate.IsWaiting)
             OnlineMatchStartGate.Reset();
+        if (_reconnectNoticeCanvas != null)
+            Destroy(_reconnectNoticeCanvas);
         _ws?.Dispose();
     }
 }

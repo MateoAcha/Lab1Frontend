@@ -12,7 +12,7 @@ using UnityEngine;
 public class GameWebSocketClient : IDisposable
 {
     private const int ReceiveBufferSize = 256 * 1024;
-    private const int SendTimeoutMilliseconds = 3000;
+    private const int SendTimeoutMilliseconds = 8000;
 
     private ClientWebSocket          _ws;
     private CancellationTokenSource  _cts;
@@ -100,6 +100,8 @@ public class GameWebSocketClient : IDisposable
         _faulted = true;
         if (ex != null)
             _lastError = ex.Message;
+        else if (string.IsNullOrWhiteSpace(_lastError))
+            _lastError = "socket closed";
 
         try { _ws?.Abort(); } catch { }
     }
