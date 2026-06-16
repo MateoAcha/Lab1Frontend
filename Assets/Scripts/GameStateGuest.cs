@@ -13,6 +13,8 @@ public class GameStateGuest : MonoBehaviour
     private const float InputHeartbeatInterval = 0.5f;
     private const float InputChangeThreshold = 0.001f;
     private const float EnemyReplicaGraceSeconds = 1.25f;
+    private const float ReconnectInitialDelay = 0.4f;
+    private const float ReconnectMaxDelay = 4f;
 
     private readonly Dictionary<int, OnlineEntityReplica> _enemyReplicas = new Dictionary<int, OnlineEntityReplica>();
     private readonly Dictionary<int, float> _enemyReplicaExpiresAt = new Dictionary<int, float>();
@@ -71,51 +73,79 @@ public class GameStateGuest : MonoBehaviour
     private IEnumerator ConnectThenRun()
     {
         string wsUrl = BuildWsUrl();
-        _ws = new GameWebSocketClient();
+        float reconnectDelay = ReconnectInitialDelay;
 
-        Task connectTask = _ws.ConnectAsync(wsUrl);
-        yield return new WaitUntil(() => connectTask.IsCompleted);
-
-        if (connectTask.IsFaulted || !_ws.IsConnected)
+        while (!_matchCompleted)
         {
-            Debug.LogWarning("GameStateGuest: WebSocket connect failed - " + connectTask.Exception?.GetBaseException()?.Message);
-            OnlineMatchStartGate.SetMessage("Could not connect to host.");
-            yield break;
-        }
+            _ws?.Dispose();
+            _ws = new GameWebSocketClient();
 
-        yield return Send("{\"type\":\"register\",\"role\":\"guest\"}");
-        StartCoroutine(ReceiveLoop());
-        StartCoroutine(SendLoop());
+            if (_matchStarted)
+            {
+                OnlineMatchStartGate.Show("Connection lagging... reconnecting");
+                SetLocalPlayerControlOnly(false);
+            }
+            else
+            {
+                OnlineMatchStartGate.Show("Syncing online match...");
+            }
+
+            Task connectTask = _ws.ConnectAsync(wsUrl);
+            yield return new WaitUntil(() => connectTask.IsCompleted);
+
+            if (connectTask.IsFaulted || !_ws.IsConnected)
+            {
+                Debug.LogWarning("GameStateGuest: WebSocket reconnect failed - " + connectTask.Exception?.GetBaseException()?.Message);
+                yield return new WaitForSecondsRealtime(reconnectDelay);
+                reconnectDelay = Mathf.Min(ReconnectMaxDelay, reconnectDelay * 1.6f);
+                continue;
+            }
+
+            yield return Send("{\"type\":\"register\",\"role\":\"guest\"}");
+            _lastSentInput = null;
+            _nextInputHeartbeatAt = 0f;
+            reconnectDelay = ReconnectInitialDelay;
+
+            yield return ConnectedLoop();
+
+            if (!_matchCompleted)
+            {
+                string reason = _ws != null && !string.IsNullOrWhiteSpace(_ws.LastError)
+                    ? _ws.LastError
+                    : "socket closed";
+                Debug.LogWarning("GameStateGuest: connection interrupted, will reconnect: " + reason);
+                yield return new WaitForSecondsRealtime(reconnectDelay);
+                reconnectDelay = Mathf.Min(ReconnectMaxDelay, reconnectDelay * 1.6f);
+            }
+        }
     }
 
-    private IEnumerator ReceiveLoop()
+    private IEnumerator ConnectedLoop()
     {
-        while (_ws.IsConnected)
+        float nextSendAt = 0f;
+        while (_ws != null && _ws.IsConnected && !_matchCompleted)
         {
             string msg;
             while (_ws.TryReceive(out msg))
                 HandleHostMessage(msg);
 
-            yield return null;
-        }
-
-        if (!_matchCompleted)
-            HandleHostLeft();
-    }
-
-    private IEnumerator SendLoop()
-    {
-        while (_ws.IsConnected)
-        {
-            OnlineMatchInputMessage input = BuildInput();
-            if (ShouldSendInput(input))
+            if (Time.unscaledTime >= nextSendAt)
             {
-                yield return Send(JsonUtility.ToJson(input));
-                _lastSentInput = input;
-                _nextInputHeartbeatAt = Time.time + InputHeartbeatInterval;
+                OnlineMatchInputMessage input = BuildInput();
+                if (ShouldSendInput(input))
+                {
+                    yield return Send(JsonUtility.ToJson(input));
+                    if (_ws != null && _ws.IsConnected)
+                    {
+                        _lastSentInput = input;
+                        _nextInputHeartbeatAt = Time.time + InputHeartbeatInterval;
+                    }
+                }
+
+                nextSendAt = Time.unscaledTime + SendInterval;
             }
 
-            yield return new WaitForSeconds(SendInterval);
+            yield return null;
         }
     }
 
@@ -236,6 +266,15 @@ public class GameStateGuest : MonoBehaviour
 
         if (json.Contains("\"host_left\""))
         {
+            if (_matchStarted && !_matchCompleted)
+            {
+                Debug.LogWarning("GameStateGuest: host connection dropped; holding match and reconnecting.");
+                _ws?.Dispose();
+                OnlineMatchStartGate.Show("Host connection lagging... reconnecting");
+                SetLocalPlayerControlOnly(false);
+                return;
+            }
+
             HandleHostLeft();
             return;
         }
@@ -518,6 +557,17 @@ public class GameStateGuest : MonoBehaviour
 
         Rigidbody2D body = player.GetComponent<Rigidbody2D>();
         if (body != null && !alive) body.linearVelocity = Vector2.zero;
+    }
+
+    private void SetLocalPlayerControlOnly(bool enabled)
+    {
+        PlayerController player = PlayerController.main;
+        if (player == null) return;
+
+        player.enabled = enabled;
+        Rigidbody2D body = player.GetComponent<Rigidbody2D>();
+        if (body != null && !enabled)
+            body.linearVelocity = Vector2.zero;
     }
 
     private void ApplyHostPauseState(bool paused, bool matchEnded, bool matchStarted)

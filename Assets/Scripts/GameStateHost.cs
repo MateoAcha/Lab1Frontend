@@ -21,6 +21,8 @@ public class GameStateHost : MonoBehaviour
     private const float GiantEnemyPriorityBoost = 100000f;
     private const float PlayerCombatPriorityBoost = 50000f;
     private const float ImportantEffectPriorityBoost = 45000f;
+    private const float ReconnectInitialDelay = 0.4f;
+    private const float ReconnectMaxDelay = 4f;
 
     private GameWebSocketClient _ws;
     private PlayerController _remotePlayer;
@@ -48,20 +50,42 @@ public class GameStateHost : MonoBehaviour
     private IEnumerator ConnectThenSync()
     {
         string wsUrl = BuildWsUrl();
-        _ws = new GameWebSocketClient();
+        float reconnectDelay = ReconnectInitialDelay;
 
-        Task connectTask = _ws.ConnectAsync(wsUrl);
-        yield return new WaitUntil(() => connectTask.IsCompleted);
-
-        if (connectTask.IsFaulted || !_ws.IsConnected)
+        while (true)
         {
-            Debug.LogWarning("GameStateHost: WebSocket connect failed - " + connectTask.Exception?.GetBaseException()?.Message);
-            OnlineMatchStartGate.SetMessage("Could not connect to match server.");
-            yield break;
-        }
+            _ws?.Dispose();
+            _ws = new GameWebSocketClient();
 
-        yield return Send("{\"type\":\"register\",\"role\":\"host\"}");
-        StartCoroutine(SyncLoop());
+            if (!_matchStarted)
+                OnlineMatchStartGate.SetMessage("Connecting to match server...");
+
+            Task connectTask = _ws.ConnectAsync(wsUrl);
+            yield return new WaitUntil(() => connectTask.IsCompleted);
+
+            if (connectTask.IsFaulted || !_ws.IsConnected)
+            {
+                Debug.LogWarning("GameStateHost: WebSocket reconnect failed - " + connectTask.Exception?.GetBaseException()?.Message);
+                if (!_matchStarted)
+                    OnlineMatchStartGate.SetMessage("Connection lagging... retrying");
+                yield return new WaitForSecondsRealtime(reconnectDelay);
+                reconnectDelay = Mathf.Min(ReconnectMaxDelay, reconnectDelay * 1.6f);
+                continue;
+            }
+
+            yield return Send("{\"type\":\"register\",\"role\":\"host\"}");
+            reconnectDelay = ReconnectInitialDelay;
+            yield return SyncLoop();
+
+            string reason = _ws != null && !string.IsNullOrWhiteSpace(_ws.LastError)
+                ? _ws.LastError
+                : "socket closed";
+            Debug.LogWarning("GameStateHost: connection interrupted, will reconnect: " + reason);
+            if (!_matchStarted)
+                OnlineMatchStartGate.SetMessage("Connection lagging... retrying");
+            yield return new WaitForSecondsRealtime(reconnectDelay);
+            reconnectDelay = Mathf.Min(ReconnectMaxDelay, reconnectDelay * 1.6f);
+        }
     }
 
     private IEnumerator SyncLoop()
