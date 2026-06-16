@@ -218,6 +218,7 @@ public class PlayerController : MonoBehaviour
     public string NetworkWeaponType => GetWeaponKind().ToString();
     public string NetworkWeaponColor => "#" + ColorUtility.ToHtmlStringRGB(_hasNetworkLoadout ? _networkWeaponColor : PlayerLoadout.WeaponColor);
     public bool EnemiesCanSee => Time.time >= _stealthUntil;
+    public bool OwnsRuntimeHud => playerIndex == 0 && !_useExternalInput;
 
     public float ChargeCooldownProgress01
     {
@@ -268,26 +269,6 @@ public class PlayerController : MonoBehaviour
             gameObject.AddComponent<Health>();
         }
 
-        if (GetComponent<ChargeAbilityUI>() == null)
-        {
-            gameObject.AddComponent<ChargeAbilityUI>();
-        }
-
-        if (GetComponent<BurstAbilityUI>() == null)
-        {
-            gameObject.AddComponent<BurstAbilityUI>();
-        }
-
-        if (GetComponent<GameTimerUI>() == null)
-        {
-            gameObject.AddComponent<GameTimerUI>();
-        }
-
-        if (GetComponent<ConsumableUI>() == null)
-        {
-            gameObject.AddComponent<ConsumableUI>();
-        }
-
         _playerRenderer = GetComponentInChildren<SpriteRenderer>();
         if (_playerRenderer != null)
         {
@@ -299,6 +280,7 @@ public class PlayerController : MonoBehaviour
     {
         if (playerIndex == 0) main = this;
         MultiplayerState.RegisterPlayer(this);
+        EnsureRuntimeHudComponents();
     }
 
     private void OnDestroy()
@@ -373,6 +355,37 @@ public class PlayerController : MonoBehaviour
         UpdateCarriedSwordVisual();
         UpdateCarriedSpearVisual();
         UpdateCarriedRangedOrbVisual();
+    }
+
+    private void EnsureRuntimeHudComponents()
+    {
+        if (!OwnsRuntimeHud)
+        {
+            DisableRuntimeHudComponent<ChargeAbilityUI>();
+            DisableRuntimeHudComponent<BurstAbilityUI>();
+            DisableRuntimeHudComponent<GameTimerUI>();
+            DisableRuntimeHudComponent<ConsumableUI>();
+            return;
+        }
+
+        if (GetComponent<ChargeAbilityUI>() == null)
+            gameObject.AddComponent<ChargeAbilityUI>();
+
+        if (GetComponent<BurstAbilityUI>() == null)
+            gameObject.AddComponent<BurstAbilityUI>();
+
+        if (GetComponent<GameTimerUI>() == null)
+            gameObject.AddComponent<GameTimerUI>();
+
+        if (GetComponent<ConsumableUI>() == null)
+            gameObject.AddComponent<ConsumableUI>();
+    }
+
+    private void DisableRuntimeHudComponent<T>() where T : Behaviour
+    {
+        T component = GetComponent<T>();
+        if (component != null)
+            component.enabled = false;
     }
 
     public void SetExternalInputEnabled(bool enabled)

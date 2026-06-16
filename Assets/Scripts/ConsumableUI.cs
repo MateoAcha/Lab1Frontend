@@ -27,7 +27,8 @@ public class ConsumableUI : MonoBehaviour
 
     private void LateUpdate()
     {
-        if (_dimImage == null || _fillImage == null || _iconImage == null || _quantityText == null)
+        if (_player == null || !_player.OwnsRuntimeHud ||
+            _dimImage == null || _fillImage == null || _iconImage == null || _quantityText == null)
         {
             return;
         }
