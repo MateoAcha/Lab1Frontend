@@ -159,6 +159,7 @@ public class PlayerController : MonoBehaviour
     private bool _externalChargeDown;
     private bool _externalBurstDown;
     private bool _externalConsumableDown;
+    private bool _externalReviveHeld;
     private bool _hasNetworkLoadout;
     private int _networkWeaponDamage = 1;
     private int _networkWeaponItemId;
@@ -202,6 +203,8 @@ public class PlayerController : MonoBehaviour
     private Transform _carriedRangedOrbTransform;
     private bool _carriedRangedOrbFacingLeft;
     private float _hideCarriedRangedOrbUntil;
+    private PlayerReviveState _reviveState;
+    private PlayerReviveState _activeReviveTarget;
     private static Texture2D _chargeHitboxGlowTexture;
     private static Sprite _chargeHitboxGlowSprite;
 
@@ -217,8 +220,10 @@ public class PlayerController : MonoBehaviour
     public int NetworkWeaponItemId => GetWeaponItemId();
     public string NetworkWeaponType => GetWeaponKind().ToString();
     public string NetworkWeaponColor => "#" + ColorUtility.ToHtmlStringRGB(_hasNetworkLoadout ? _networkWeaponColor : PlayerLoadout.WeaponColor);
-    public bool EnemiesCanSee => Time.time >= _stealthUntil;
+    public bool EnemiesCanSee => !IsDowned && Time.time >= _stealthUntil;
     public bool OwnsRuntimeHud => playerIndex == 0 && !_useExternalInput;
+    public bool IsDowned => _reviveState != null && _reviveState.IsDowned;
+    public bool ReviveInputHeldForNetwork => !IsDowned && ReadReviveHeldRaw();
 
     public float ChargeCooldownProgress01
     {
@@ -269,6 +274,10 @@ public class PlayerController : MonoBehaviour
             gameObject.AddComponent<Health>();
         }
 
+        _reviveState = GetComponent<PlayerReviveState>();
+        if (_reviveState == null)
+            _reviveState = gameObject.AddComponent<PlayerReviveState>();
+
         _playerRenderer = GetComponentInChildren<SpriteRenderer>();
         if (_playerRenderer != null)
         {
@@ -298,6 +307,19 @@ public class PlayerController : MonoBehaviour
                 body.linearVelocity = Vector2.zero;
             return;
         }
+
+        if (IsDowned)
+        {
+            LastMoveInput = Vector2.zero;
+            if (body != null)
+                body.linearVelocity = Vector2.zero;
+            ClearExternalActionInputs();
+            CancelActiveActionsForDowned();
+            HideCarriedWeaponVisuals();
+            return;
+        }
+
+        UpdateRevive(ReadReviveHeld());
 
         bool chargeDown = ReadChargeDown();
         if (!_useExternalInput && chargeDown) NetworkChargeSequence++;
@@ -388,6 +410,77 @@ public class PlayerController : MonoBehaviour
             component.enabled = false;
     }
 
+    private void UpdateRevive(bool reviveHeld)
+    {
+        PlayerReviveState target = reviveHeld ? FindReviveTarget() : null;
+        if (_activeReviveTarget != null && _activeReviveTarget != target)
+            _activeReviveTarget.SetReviveProgress01(0f);
+
+        _activeReviveTarget = target;
+        if (_activeReviveTarget != null)
+            _activeReviveTarget.ReceiveRevive(this, true, Time.deltaTime);
+    }
+
+    private PlayerReviveState FindReviveTarget()
+    {
+        if (!MultiplayerState.IsMultiplayer && !MultiplayerState.IsOnline)
+            return null;
+
+        if (MultiplayerState.IsOnline && !MultiplayerState.IsHost)
+            return null;
+
+        PlayerReviveState[] candidates = FindObjectsOfType<PlayerReviveState>();
+        PlayerReviveState best = null;
+        float bestDistance = float.MaxValue;
+        for (int i = 0; i < candidates.Length; i++)
+        {
+            PlayerReviveState candidate = candidates[i];
+            if (candidate == null || !candidate.CanBeRevivedBy(this))
+                continue;
+
+            float distance = Vector2.Distance(transform.position, candidate.transform.position);
+            if (distance < bestDistance)
+            {
+                bestDistance = distance;
+                best = candidate;
+            }
+        }
+
+        return best;
+    }
+
+    private void ClearExternalActionInputs()
+    {
+        _externalAttackDown = false;
+        _externalChargeDown = false;
+        _externalBurstDown = false;
+        _externalConsumableDown = false;
+        _externalReviveHeld = false;
+    }
+
+    private void HideCarriedWeaponVisuals()
+    {
+        if (_carriedSwordRenderer != null)
+            _carriedSwordRenderer.enabled = false;
+        if (_carriedSpearRenderer != null)
+            _carriedSpearRenderer.enabled = false;
+        if (_carriedRangedOrbRenderer != null)
+            _carriedRangedOrbRenderer.enabled = false;
+    }
+
+    private void CancelActiveActionsForDowned()
+    {
+        chargeUntil = 0f;
+        _fireTrailBoostUntil = 0f;
+        _nextFireTrailAt = 0f;
+        _activeChargeSpeedMultiplier = 1f;
+        if (_quickBurstRoutine != null)
+        {
+            StopCoroutine(_quickBurstRoutine);
+            _quickBurstRoutine = null;
+        }
+    }
+
     public void SetExternalInputEnabled(bool enabled)
     {
         _useExternalInput = enabled;
@@ -404,7 +497,8 @@ public class PlayerController : MonoBehaviour
         bool attackDown,
         bool chargeDown,
         bool burstDown,
-        bool consumableDown)
+        bool consumableDown,
+        bool reviveHeld = false)
     {
         _useExternalInput = true;
         _externalMove = Vector2.ClampMagnitude(move, 1f);
@@ -418,6 +512,7 @@ public class PlayerController : MonoBehaviour
         _externalChargeDown |= chargeDown;
         _externalBurstDown |= burstDown;
         _externalConsumableDown |= consumableDown;
+        _externalReviveHeld = reviveHeld;
     }
 
     public Vector2 GetAimDirectionForNetwork()
@@ -631,6 +726,35 @@ public class PlayerController : MonoBehaviour
         return Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame;
 #else
         return Input.GetKeyDown(KeyCode.Space);
+#endif
+    }
+
+    private bool ReadReviveHeld()
+    {
+        if (_useExternalInput)
+        {
+            return _externalReviveHeld;
+        }
+
+        return ReadReviveHeldRaw();
+    }
+
+    private bool ReadReviveHeldRaw()
+    {
+        if (playerIndex == 1)
+        {
+#if ENABLE_INPUT_SYSTEM
+            Gamepad pad = GetGamepad();
+            return pad != null && pad.buttonSouth.isPressed;
+#else
+            return false;
+#endif
+        }
+
+#if ENABLE_INPUT_SYSTEM
+        return Keyboard.current != null && Keyboard.current.fKey.isPressed;
+#else
+        return Input.GetKey(KeyCode.F);
 #endif
     }
 

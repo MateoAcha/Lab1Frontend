@@ -14,6 +14,7 @@ public class OnlineMatchInputMessage
     public int chargeSeq;
     public int burstSeq;
     public int consumableSeq;
+    public bool reviveHeld;
     public int pickupSeq;
     public int pickupId;
     public int weaponDamage = 1;
@@ -98,7 +99,10 @@ public class OnlinePlayerState
     public float vy;
     public float hp;
     public float maxHp;
+    public bool present = true;
     public bool alive;
+    public bool downed;
+    public float reviveProgress;
     public int skinId;
     public string skinColor = "#FFFFFF";
     public int attackSeq;

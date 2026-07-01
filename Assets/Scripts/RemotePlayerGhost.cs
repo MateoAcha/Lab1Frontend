@@ -8,6 +8,7 @@ public class RemotePlayerGhost : MonoBehaviour
     private SpriteRenderer _weaponRenderer;
     private Transform _weaponTransform;
     private Health _health;
+    private PlayerReviveState _reviveState;
     private int _appliedSkinId = -1;
     private string _appliedSkinColor = "";
     private int _appliedAttackSequence;
@@ -27,6 +28,9 @@ public class RemotePlayerGhost : MonoBehaviour
     {
         _sr = GetComponentInChildren<SpriteRenderer>();
         _health = GetComponent<Health>();
+        _reviveState = GetComponent<PlayerReviveState>();
+        if (_reviveState == null)
+            _reviveState = gameObject.AddComponent<PlayerReviveState>();
         _bootstrap = FindObjectOfType<GameBootstrap>();
     }
 
@@ -42,12 +46,17 @@ public class RemotePlayerGhost : MonoBehaviour
         if (_sr != null) _sr.enabled = visible;
         SetHealthBarVisible(visible);
         if (_health == null) _health = GetComponent<Health>();
-        if (!visible) return;
+        if (!visible)
+        {
+            SetWeaponVisible(false);
+            if (_reviveState != null)
+                _reviveState.ApplySyncedState(false, 0f);
+            return;
+        }
 
         ApplyRemoteSkinIfChanged();
-        ApplyRemoteAttackIfChanged();
         ApplyRemoteHealth();
-        UpdateRemoteWeaponVisual();
+        ApplyRemoteDownedState();
 
         Vector3 target = OnlinePlayerSync.Instance.RemotePlayerPosition
             + OnlinePlayerSync.Instance.RemotePlayerVelocity * 0.08f;
@@ -56,6 +65,15 @@ public class RemotePlayerGhost : MonoBehaviour
             transform.position,
             target,
             Time.deltaTime * 12f);
+
+        if (OnlinePlayerSync.Instance.RemoteDowned)
+        {
+            SetWeaponVisible(false);
+            return;
+        }
+
+        ApplyRemoteAttackIfChanged();
+        UpdateRemoteWeaponVisual();
     }
 
     private void ApplyRemoteSkinIfChanged()
@@ -217,8 +235,18 @@ public class RemotePlayerGhost : MonoBehaviour
     {
         if (_health == null || OnlinePlayerSync.Instance == null) return;
 
-        _health.maxHp = Mathf.Max(0.01f, OnlinePlayerSync.Instance.RemoteMaxHp);
-        _health.hp = Mathf.Clamp(OnlinePlayerSync.Instance.RemoteHp, 0f, _health.maxHp);
+        _health.SetHealthSilently(
+            OnlinePlayerSync.Instance.RemoteHp,
+            Mathf.Max(0.01f, OnlinePlayerSync.Instance.RemoteMaxHp));
+    }
+
+    private void ApplyRemoteDownedState()
+    {
+        if (_reviveState == null || OnlinePlayerSync.Instance == null) return;
+
+        _reviveState.ApplySyncedState(
+            OnlinePlayerSync.Instance.RemoteDowned,
+            OnlinePlayerSync.Instance.RemoteReviveProgress);
     }
 
     private void SetHealthBarVisible(bool visible)

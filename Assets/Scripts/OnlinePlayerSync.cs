@@ -13,6 +13,8 @@ public class OnlinePlayerSync : MonoBehaviour
     public string RemoteWeaponColor { get; private set; } = "#FFFFFF";
     public float RemoteHp { get; private set; } = 10f;
     public float RemoteMaxHp { get; private set; } = 10f;
+    public bool RemoteDowned { get; private set; }
+    public float RemoteReviveProgress { get; private set; }
     public bool HasRemotePlayer { get; private set; }
 
     public void SetRemotePosition(Vector3 pos)
@@ -37,7 +39,9 @@ public class OnlinePlayerSync : MonoBehaviour
             RemoteAttackSequence,
             RemoteWeaponItemId,
             RemoteWeaponType,
-            RemoteWeaponColor);
+            RemoteWeaponColor,
+            RemoteDowned,
+            RemoteReviveProgress);
     }
 
     public void SetRemoteState(
@@ -50,10 +54,12 @@ public class OnlinePlayerSync : MonoBehaviour
         int attackSequence = 0,
         int weaponItemId = 0,
         string weaponType = "Spear",
-        string weaponColor = "#FFFFFF")
+        string weaponColor = "#FFFFFF",
+        bool downed = false,
+        float reviveProgress = 0f)
     {
         RemotePlayerPosition = pos;
-        RemotePlayerVelocity = velocity;
+        RemotePlayerVelocity = downed ? Vector3.zero : velocity;
         RemoteSkinId = Mathf.Max(0, skinId);
         RemoteSkinColor = string.IsNullOrWhiteSpace(skinColor) ? "#FFFFFF" : skinColor;
         RemoteAttackSequence = Mathf.Max(0, attackSequence);
@@ -62,12 +68,16 @@ public class OnlinePlayerSync : MonoBehaviour
         RemoteWeaponColor = string.IsNullOrWhiteSpace(weaponColor) ? "#FFFFFF" : weaponColor;
         RemoteMaxHp = Mathf.Max(0.01f, maxHp);
         RemoteHp = Mathf.Clamp(hp, 0f, RemoteMaxHp);
+        RemoteDowned = downed;
+        RemoteReviveProgress = Mathf.Clamp01(reviveProgress);
         HasRemotePlayer = true;
     }
 
     public void ClearRemotePlayer()
     {
         HasRemotePlayer = false;
+        RemoteDowned = false;
+        RemoteReviveProgress = 0f;
         RemotePlayerVelocity = Vector3.zero;
     }
 

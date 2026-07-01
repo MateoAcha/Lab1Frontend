@@ -31,6 +31,12 @@ public class Health : MonoBehaviour
 
     public void Hit(float damage)
     {
+        PlayerReviveState reviveState = GetComponent<PlayerReviveState>();
+        if (damage > 0f && reviveState != null && reviveState.IsDowned)
+        {
+            return;
+        }
+
         if (deathHandled)
         {
             return;
@@ -54,6 +60,15 @@ public class Health : MonoBehaviour
             PlayerController pc = GetComponent<PlayerController>();
             if (pc != null)
             {
+                if (MultiplayerState.IsMultiplayer || MultiplayerState.IsOnline)
+                {
+                    if (reviveState == null)
+                        reviveState = gameObject.AddComponent<PlayerReviveState>();
+                    reviveState.Down();
+                    MultiplayerState.RegisterPlayerDeath(pc);
+                    return;
+                }
+
                 MultiplayerState.RegisterPlayerDeath(pc);
             }
             else if (GetComponent<RangedEnemyController>() != null)
@@ -72,5 +87,20 @@ public class Health : MonoBehaviour
 
             Destroy(gameObject);
         }
+    }
+
+    public void ReviveWithHealth(float revivedHp)
+    {
+        maxHp = Mathf.Max(maxHp, 1f);
+        hp = Mathf.Clamp(revivedHp, 1f, maxHp);
+        deathHandled = false;
+    }
+
+    public void SetHealthSilently(float value, float maxValue)
+    {
+        maxHp = Mathf.Max(maxValue, 0.01f);
+        hp = Mathf.Clamp(value, 0f, maxHp);
+        if (hp > 0f)
+            deathHandled = false;
     }
 }

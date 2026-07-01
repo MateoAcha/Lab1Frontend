@@ -37,6 +37,7 @@ public class GameStateHost : MonoBehaviour
     private bool _sawRunActive;
     private bool _guestReady;
     private bool _matchStarted;
+    private bool _guestConnected;
 
     private void Start()
     {
@@ -44,6 +45,7 @@ public class GameStateHost : MonoBehaviour
         GameAudio.StopMusic();
         HitBox.Spawned += HandleHitBoxSpawned;
         _remotePlayer = FindRemotePlayer();
+        SetRemotePlayerPresent(false);
         StartCoroutine(ConnectThenSync());
     }
 
@@ -111,6 +113,12 @@ public class GameStateHost : MonoBehaviour
             return;
         }
 
+        if (json.Contains("\"guest_left\""))
+        {
+            HandleGuestLeft();
+            return;
+        }
+
         if (!json.Contains("\"input\""))
         {
             return;
@@ -134,6 +142,8 @@ public class GameStateHost : MonoBehaviour
             _remotePlayer = FindRemotePlayer();
         if (_remotePlayer == null)
             return;
+
+        SetRemotePlayerPresent(true);
 
         _remotePlayer.ConfigureNetworkLoadout(
             input.weaponDamage,
@@ -169,7 +179,7 @@ public class GameStateHost : MonoBehaviour
 
         if (!_matchStarted)
         {
-            _remotePlayer.ApplyExternalInput(Vector2.zero, Vector2.down, false, false, false, false);
+            _remotePlayer.ApplyExternalInput(Vector2.zero, Vector2.down, false, false, false, false, input.reviveHeld);
             return;
         }
 
@@ -189,7 +199,34 @@ public class GameStateHost : MonoBehaviour
             attackDown,
             chargeDown,
             burstDown,
-            consumableDown);
+            consumableDown,
+            input.reviveHeld);
+    }
+
+    private void HandleGuestLeft()
+    {
+        _guestConnected = false;
+        _guestReady = false;
+        SetRemotePlayerPresent(false);
+        if (MultiplayerState.AreAllActivePlayersDowned())
+            GameStatsTracker.RegisterPlayerDied();
+    }
+
+    private void SetRemotePlayerPresent(bool present)
+    {
+        if (_remotePlayer == null)
+            return;
+
+        _guestConnected = present;
+        if (!present)
+        {
+            Rigidbody2D body = _remotePlayer.GetComponent<Rigidbody2D>();
+            if (body != null)
+                body.linearVelocity = Vector2.zero;
+        }
+
+        if (_remotePlayer.gameObject.activeSelf != present)
+            _remotePlayer.gameObject.SetActive(present);
     }
 
     private void MarkGuestReady()
@@ -275,17 +312,20 @@ public class GameStateHost : MonoBehaviour
         return new[]
         {
             BuildPlayerState(0, PlayerController.main),
-            BuildPlayerState(1, _remotePlayer)
+            BuildPlayerState(1, _remotePlayer, _guestConnected)
         };
     }
 
-    private OnlinePlayerState BuildPlayerState(int id, PlayerController player)
+    private OnlinePlayerState BuildPlayerState(int id, PlayerController player, bool presentOverride = true)
     {
         Health health = player != null ? player.GetComponent<Health>() : null;
-        bool alive = player != null && health != null && health.hp > 0f;
+        PlayerReviveState reviveState = player != null ? player.GetComponent<PlayerReviveState>() : null;
+        bool present = presentOverride && player != null;
+        bool downed = present && reviveState != null && reviveState.IsDowned;
+        bool alive = present && health != null && health.hp > 0f && !downed;
         Vector3 pos = player != null ? player.transform.position : Vector3.zero;
         Rigidbody2D body = player != null ? player.GetComponent<Rigidbody2D>() : null;
-        Vector2 velocity = body != null ? body.linearVelocity : Vector2.zero;
+        Vector2 velocity = body != null && !downed ? body.linearVelocity : Vector2.zero;
 
         return new OnlinePlayerState
         {
@@ -296,7 +336,10 @@ public class GameStateHost : MonoBehaviour
             vy = velocity.y,
             hp = health != null ? health.hp : 0f,
             maxHp = health != null ? Mathf.Max(health.maxHp, health.hp) : 0f,
+            present = present,
             alive = alive,
+            downed = downed,
+            reviveProgress = reviveState != null ? reviveState.ReviveProgress01 : 0f,
             skinId = GetPlayerSkinId(id, player),
             skinColor = GetPlayerSkinColor(id, player),
             attackSeq = GetPlayerAttackSequence(id, player),
