@@ -52,10 +52,14 @@ public class PlayerController : MonoBehaviour
     public Texture2D healthConsumableIconTexture;
     public Sprite speedConsumableIcon;
     public Texture2D speedConsumableIconTexture;
-    [Header("Quickchat")]
+    [Header("Quick Chat Icons (R Wheel)")]
+    [Tooltip("Icon shown for the greet quick chat emote.")]
     public Sprite quickChatGreetIcon;
+    [Tooltip("Icon shown for the thumbs up quick chat emote.")]
     public Sprite quickChatThumbsUpIcon;
+    [Tooltip("Icon shown for the danger quick chat emote.")]
     public Sprite quickChatDangerIcon;
+    [Tooltip("Icon shown for the angry quick chat emote.")]
     public Sprite quickChatAngryIcon;
     [Header("Carried Ranged Orb Visual")]
     public Vector2 carriedRangedOrbOffset = new Vector2(0.18f, 0.08f);

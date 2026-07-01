@@ -31,6 +31,7 @@ public class PlayerQuickChatBubble : MonoBehaviour
         _iconRenderer.sprite = icon != null ? icon : SimpleSprite.Circle;
         _iconRenderer.color = icon != null ? Color.white : info.color;
         _iconRenderer.enabled = true;
+        ApplyIconScale(icon != null ? 0.5f : 0.42f);
         _label.text = icon != null ? "" : info.label;
         MeshRenderer labelRenderer = _label.GetComponent<MeshRenderer>();
         if (labelRenderer != null)
@@ -60,6 +61,7 @@ public class PlayerQuickChatBubble : MonoBehaviour
             _iconRenderer = root.AddComponent<SpriteRenderer>();
         _iconRenderer.sprite = SimpleSprite.Circle;
         _iconRenderer.sortingOrder = 42;
+        ApplyIconScale(0.42f);
 
         Transform labelTransform = root.transform.Find("Label");
         GameObject labelObj = labelTransform != null ? labelTransform.gameObject : new GameObject("Label");
@@ -92,6 +94,17 @@ public class PlayerQuickChatBubble : MonoBehaviour
             root.gameObject.SetActive(visible);
         if (!visible)
             _hideAt = 0f;
+    }
+
+    private void ApplyIconScale(float targetDiameter)
+    {
+        if (_iconRenderer == null || _iconRenderer.sprite == null)
+            return;
+
+        Vector2 size = _iconRenderer.sprite.bounds.size;
+        float maxDimension = Mathf.Max(0.001f, Mathf.Max(size.x, size.y));
+        float scale = Mathf.Max(0.01f, targetDiameter) / maxDimension;
+        _iconRenderer.transform.localScale = new Vector3(scale, scale, 1f);
     }
 }
 

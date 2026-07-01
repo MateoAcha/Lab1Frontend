@@ -44,6 +44,10 @@ public class GameBootstrapEditor : Editor
     private SerializedProperty healthConsumableIconTexture;
     private SerializedProperty speedConsumableIcon;
     private SerializedProperty speedConsumableIconTexture;
+    private SerializedProperty quickChatGreetIcon;
+    private SerializedProperty quickChatThumbsUpIcon;
+    private SerializedProperty quickChatDangerIcon;
+    private SerializedProperty quickChatAngryIcon;
     private SerializedProperty enemyAttackOrbSprites;
     private SerializedProperty enemyAttackOrbTexture;
     private SerializedProperty enemyAttackOrbFrameCount;
@@ -99,6 +103,7 @@ public class GameBootstrapEditor : Editor
     private bool showMaterials = true;
     private bool showSoundEffects = true;
     private bool showConsumableUI = true;
+    private bool showQuickChatIcons = true;
     private bool showEnemyAttackOrbVisual = true;
     private bool showSwordVisual = true;
     private bool showCarriedSwordVisual = true;
@@ -149,6 +154,10 @@ public class GameBootstrapEditor : Editor
         healthConsumableIconTexture = serializedObject.FindProperty("healthConsumableIconTexture");
         speedConsumableIcon = serializedObject.FindProperty("speedConsumableIcon");
         speedConsumableIconTexture = serializedObject.FindProperty("speedConsumableIconTexture");
+        quickChatGreetIcon = serializedObject.FindProperty("quickChatGreetIcon");
+        quickChatThumbsUpIcon = serializedObject.FindProperty("quickChatThumbsUpIcon");
+        quickChatDangerIcon = serializedObject.FindProperty("quickChatDangerIcon");
+        quickChatAngryIcon = serializedObject.FindProperty("quickChatAngryIcon");
         enemyAttackOrbSprites = serializedObject.FindProperty("enemyAttackOrbSprites");
         enemyAttackOrbTexture = serializedObject.FindProperty("enemyAttackOrbTexture");
         enemyAttackOrbFrameCount = serializedObject.FindProperty("enemyAttackOrbFrameCount");
@@ -293,6 +302,17 @@ public class GameBootstrapEditor : Editor
             EditorGUILayout.PropertyField(healthConsumableIconTexture, new GUIContent("Health Potion Icon Texture"));
             EditorGUILayout.PropertyField(speedConsumableIcon, new GUIContent("Speed Potion Icon Sprite"));
             EditorGUILayout.PropertyField(speedConsumableIconTexture, new GUIContent("Speed Potion Icon Texture"));
+            EditorGUI.indentLevel--;
+        }
+
+        showQuickChatIcons = EditorGUILayout.Foldout(showQuickChatIcons, "Quick Chat Icons (R Wheel)", true);
+        if (showQuickChatIcons)
+        {
+            EditorGUI.indentLevel++;
+            EditorGUILayout.PropertyField(quickChatGreetIcon, new GUIContent("Greet Icon"));
+            EditorGUILayout.PropertyField(quickChatThumbsUpIcon, new GUIContent("Thumbs Up Icon"));
+            EditorGUILayout.PropertyField(quickChatDangerIcon, new GUIContent("Danger Icon"));
+            EditorGUILayout.PropertyField(quickChatAngryIcon, new GUIContent("Angry Icon"));
             EditorGUI.indentLevel--;
         }
 
