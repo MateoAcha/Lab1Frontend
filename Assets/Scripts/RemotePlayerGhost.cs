@@ -9,9 +9,12 @@ public class RemotePlayerGhost : MonoBehaviour
     private Transform _weaponTransform;
     private Health _health;
     private PlayerReviveState _reviveState;
+    private PlayerNameTag _nameTag;
+    private PlayerQuickChatBubble _quickChatBubble;
     private int _appliedSkinId = -1;
     private string _appliedSkinColor = "";
     private int _appliedAttackSequence;
+    private int _appliedQuickChatSequence;
     private bool _weaponFacingLeft;
     private float _hideWeaponUntil;
     private GameBootstrap _bootstrap;
@@ -31,6 +34,12 @@ public class RemotePlayerGhost : MonoBehaviour
         _reviveState = GetComponent<PlayerReviveState>();
         if (_reviveState == null)
             _reviveState = gameObject.AddComponent<PlayerReviveState>();
+        _nameTag = GetComponent<PlayerNameTag>();
+        if (_nameTag == null)
+            _nameTag = gameObject.AddComponent<PlayerNameTag>();
+        _quickChatBubble = GetComponent<PlayerQuickChatBubble>();
+        if (_quickChatBubble == null)
+            _quickChatBubble = gameObject.AddComponent<PlayerQuickChatBubble>();
         _bootstrap = FindObjectOfType<GameBootstrap>();
     }
 
@@ -49,14 +58,20 @@ public class RemotePlayerGhost : MonoBehaviour
         if (!visible)
         {
             SetWeaponVisible(false);
+            if (_nameTag != null)
+                _nameTag.SetAvailable(false);
+            if (_quickChatBubble != null)
+                _quickChatBubble.Hide();
             if (_reviveState != null)
                 _reviveState.ApplySyncedState(false, 0f);
             return;
         }
 
+        UpdateRemoteNameTag();
         ApplyRemoteSkinIfChanged();
         ApplyRemoteHealth();
         ApplyRemoteDownedState();
+        ApplyRemoteQuickChatIfChanged();
 
         Vector3 target = OnlinePlayerSync.Instance.RemotePlayerPosition
             + OnlinePlayerSync.Instance.RemotePlayerVelocity * 0.08f;
@@ -107,6 +122,25 @@ public class RemotePlayerGhost : MonoBehaviour
             animator.TriggerAttack(0.14f);
         _hideWeaponUntil = Time.time + 0.18f;
         _appliedAttackSequence = attackSequence;
+    }
+
+    private void ApplyRemoteQuickChatIfChanged()
+    {
+        if (OnlinePlayerSync.Instance == null)
+            return;
+
+        int sequence = OnlinePlayerSync.Instance.RemoteQuickChatSequence;
+        if (sequence <= 0 || sequence == _appliedQuickChatSequence)
+            return;
+
+        if (_quickChatBubble == null)
+            _quickChatBubble = GetComponent<PlayerQuickChatBubble>();
+        if (_quickChatBubble == null)
+            _quickChatBubble = gameObject.AddComponent<PlayerQuickChatBubble>();
+
+        string emoteId = OnlinePlayerSync.Instance.RemoteQuickChatEmote;
+        _quickChatBubble.Show(emoteId, ResolveRemoteQuickChatIcon(emoteId), true);
+        _appliedQuickChatSequence = sequence;
     }
 
     private void UpdateRemoteWeaponVisual()
@@ -198,6 +232,35 @@ public class RemotePlayerGhost : MonoBehaviour
         if (_bootstrap == null)
             _bootstrap = FindObjectOfType<GameBootstrap>();
         return _bootstrap;
+    }
+
+    private void UpdateRemoteNameTag()
+    {
+        if (_nameTag == null || OnlinePlayerSync.Instance == null)
+            return;
+
+        _nameTag.SetAvailable(true);
+        _nameTag.SetDisplayName(OnlinePlayerSync.Instance.RemoteUsername);
+    }
+
+    private Sprite ResolveRemoteQuickChatIcon(string emoteId)
+    {
+        GameBootstrap bootstrap = ResolveBootstrap();
+        if (bootstrap == null)
+            return null;
+
+        switch (QuickChatEmotes.NormalizeId(emoteId))
+        {
+            case QuickChatEmotes.ThumbsUp:
+                return bootstrap.quickChatThumbsUpIcon;
+            case QuickChatEmotes.Danger:
+                return bootstrap.quickChatDangerIcon;
+            case QuickChatEmotes.Angry:
+                return bootstrap.quickChatAngryIcon;
+            case QuickChatEmotes.Greet:
+            default:
+                return bootstrap.quickChatGreetIcon;
+        }
     }
 
     private float ResolveRangedOrbSize()

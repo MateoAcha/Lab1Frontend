@@ -94,7 +94,10 @@ public class PlayerPointer : MonoBehaviour
 
         _pivot.gameObject.SetActive(true);
         if (_arrowRenderer != null)
+        {
+            _arrowRenderer.enabled = true;
             _arrowRenderer.color = targetDowned ? DownedColor : NormalColor;
+        }
 
         Vector2 dir = (otherPos - (Vector2)transform.position).normalized;
         float angle = Mathf.Atan2(dir.x, dir.y) * Mathf.Rad2Deg;

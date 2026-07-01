@@ -36,6 +36,12 @@ public class CameraFollow : MonoBehaviour
 
     private void LateUpdate()
     {
+        if (MultiplayerState.IsOnline && MultiplayerState.IsHost && !GameStateHost.HasConnectedGuest)
+        {
+            FollowSingle();
+            return;
+        }
+
         if (!MultiplayerState.IsMultiplayer)
         {
             FollowSingle();

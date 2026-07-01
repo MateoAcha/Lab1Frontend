@@ -174,32 +174,8 @@ public class RangedEnemyController : MonoBehaviour
 
         body.linearVelocity = push * (recoilSpeed * Mathf.Max(0f, pushMultiplier));
         recoilUntil = Time.time + recoilTime;
-        SpawnSparkles();
-    }
-
-    private void SpawnSparkles()
-    {
-        for (int i = 0; i < 5; i++)
-        {
-            GameObject sparkle = new GameObject("Sparkle");
-            sparkle.transform.position = transform.position + (Vector3)(Random.insideUnitCircle * 0.2f);
-            sparkle.transform.localScale = new Vector3(0.12f, 0.12f, 1f);
-
-            SpriteRenderer renderer = sparkle.AddComponent<SpriteRenderer>();
-            renderer.sprite = SimpleSprite.Square;
-            renderer.color = new Color(1f, 1f, 0.8f, 1f);
-            renderer.sortingOrder = 30;
-
-            SparkleFx fx = sparkle.AddComponent<SparkleFx>();
-            Vector2 dir = Random.insideUnitCircle.normalized;
-            if (dir.sqrMagnitude < 0.001f)
-            {
-                dir = Vector2.up;
-            }
-
-            fx.velocity = dir * Random.Range(2f, 4f);
-            fx.life = 0.2f;
-        }
+        float effectScale = Mathf.Max(Mathf.Abs(transform.lossyScale.x), Mathf.Abs(transform.lossyScale.y));
+        BloodBurst.Spawn(transform.position, hitPoint, effectScale);
     }
 
     private void OnCollisionEnter2D(Collision2D collision)

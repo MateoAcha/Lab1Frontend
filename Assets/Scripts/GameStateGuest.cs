@@ -49,6 +49,7 @@ public class GameStateGuest : MonoBehaviour
     private GameObject _reconnectDisconnectButton;
     private float _reconnectNoticeShownAt;
     private bool _reconnectDisconnectImmediate;
+    private bool _sentLeaveNotice;
     private OnlineMatchInputMessage _lastSentInput;
     private float _nextInputHeartbeatAt;
     private int _pickupCollectSeq;
@@ -194,6 +195,7 @@ public class GameStateGuest : MonoBehaviour
 
         OnlineMatchInputMessage input = new OnlineMatchInputMessage
         {
+            username = PlayerDisplayNames.LocalUsernameOrFallback("Guest"),
             moveX = move.x,
             moveY = move.y,
             aimX = aim.x,
@@ -202,6 +204,8 @@ public class GameStateGuest : MonoBehaviour
             chargeSeq = player != null ? player.NetworkChargeSequence : 0,
             burstSeq = player != null ? player.NetworkBurstSequence : 0,
             consumableSeq = player != null ? player.NetworkConsumableSequence : 0,
+            quickChatSeq = player != null ? player.NetworkQuickChatSequence : 0,
+            quickChatEmote = player != null ? player.NetworkQuickChatEmote : "",
             reviveHeld = player != null && player.ReviveInputHeldForNetwork,
             pickupSeq = _pickupCollectSeq,
             pickupId = _pendingPickupCollectId,
@@ -276,6 +280,8 @@ public class GameStateGuest : MonoBehaviour
         if (input.chargeSeq != _lastSentInput.chargeSeq) return true;
         if (input.burstSeq != _lastSentInput.burstSeq) return true;
         if (input.consumableSeq != _lastSentInput.consumableSeq) return true;
+        if (input.quickChatSeq != _lastSentInput.quickChatSeq) return true;
+        if (!string.Equals(input.quickChatEmote, _lastSentInput.quickChatEmote, StringComparison.Ordinal)) return true;
         if (input.reviveHeld != _lastSentInput.reviveHeld) return true;
         if (input.pickupSeq != _lastSentInput.pickupSeq) return true;
         if (input.pickupId != _lastSentInput.pickupId) return true;
@@ -284,6 +290,7 @@ public class GameStateGuest : MonoBehaviour
         if (!string.Equals(input.weaponColor, _lastSentInput.weaponColor, StringComparison.Ordinal)) return true;
         if (input.skinId != _lastSentInput.skinId) return true;
         if (!string.Equals(input.skinColor, _lastSentInput.skinColor, StringComparison.Ordinal)) return true;
+        if (!string.Equals(input.username, _lastSentInput.username, StringComparison.Ordinal)) return true;
         if (!string.Equals(input.swordSpearActiveSkillId, _lastSentInput.swordSpearActiveSkillId, StringComparison.Ordinal)) return true;
         if (input.swordSpearActiveSkillLevel != _lastSentInput.swordSpearActiveSkillLevel) return true;
         if (!string.Equals(input.swordSpearPassiveSkillId, _lastSentInput.swordSpearPassiveSkillId, StringComparison.Ordinal)) return true;
@@ -544,24 +551,28 @@ public class GameStateGuest : MonoBehaviour
         }
 
         OnlinePlayerSync.Instance.SetRemoteState(
-            new Vector3(state.x, state.y, 0f),
-            new Vector3(state.vx, state.vy, 0f),
-            state.skinId,
-            state.skinColor,
-            state.hp,
-            state.maxHp,
-            state.attackSeq,
-            state.weaponItemId,
-            state.weaponType,
-            state.weaponColor,
-            state.downed,
-            state.reviveProgress);
+            pos: new Vector3(state.x, state.y, 0f),
+            velocity: new Vector3(state.vx, state.vy, 0f),
+            skinId: state.skinId,
+            skinColor: state.skinColor,
+            hp: state.hp,
+            maxHp: state.maxHp,
+            attackSequence: state.attackSeq,
+            quickChatSequence: state.quickChatSeq,
+            quickChatEmote: state.quickChatEmote,
+            weaponItemId: state.weaponItemId,
+            weaponType: state.weaponType,
+            weaponColor: state.weaponColor,
+            downed: state.downed,
+            reviveProgress: state.reviveProgress,
+            username: state.username);
     }
 
     private void ApplyLocalGuestPlayer(OnlinePlayerState state, bool matchEnded, bool matchStarted)
     {
         PlayerController player = PlayerController.main;
         if (player == null) return;
+        player.ConfigureNetworkIdentity(PlayerDisplayNames.LocalUsernameOrFallback("Guest"));
 
         Health health = player.GetComponent<Health>();
         if (health != null)
@@ -590,9 +601,16 @@ public class GameStateGuest : MonoBehaviour
         if (player == null) return;
 
         player.enabled = visible && !downed;
+        PlayerNameTag nameTag = player.GetComponent<PlayerNameTag>();
+        if (nameTag != null)
+            nameTag.SetAvailable(visible);
 
         if (!visible)
         {
+            PlayerQuickChatBubble bubble = player.GetComponent<PlayerQuickChatBubble>();
+            if (bubble != null)
+                bubble.Hide();
+
             SpriteRenderer[] renderers = player.GetComponentsInChildren<SpriteRenderer>(true);
             for (int i = 0; i < renderers.Length; i++)
             {
@@ -706,8 +724,12 @@ public class GameStateGuest : MonoBehaviour
         if (_matchCompleted && _reconnectNoticeCanvas == null)
             return;
 
+        bool shouldNotifyLeave = !_matchCompleted;
         _matchCompleted = true;
-        _ws?.Dispose();
+        if (shouldNotifyLeave)
+            NotifyGuestLeaving();
+        else
+            _ws?.Dispose();
         if (OnlinePlayerSync.Instance != null)
             OnlinePlayerSync.Instance.ClearRemotePlayer();
         OnlineMatchStartGate.Reset();
@@ -753,12 +775,13 @@ public class GameStateGuest : MonoBehaviour
         _reconnectNoticeCanvas = new GameObject("ReconnectNoticeCanvas");
         Canvas canvas = _reconnectNoticeCanvas.AddComponent<Canvas>();
         canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-        canvas.sortingOrder = 46;
+        canvas.sortingOrder = 120;
         EnsureEventSystem();
 
         CanvasScaler scaler = _reconnectNoticeCanvas.AddComponent<CanvasScaler>();
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
         scaler.referenceResolution = new Vector2(1920f, 1080f);
+        _reconnectNoticeCanvas.AddComponent<GraphicRaycaster>();
 
         GameObject reconnectNotice = new GameObject("ReconnectNotice");
         reconnectNotice.transform.SetParent(_reconnectNoticeCanvas.transform, false);
@@ -815,15 +838,19 @@ public class GameStateGuest : MonoBehaviour
 
     private void EnsureEventSystem()
     {
-        if (FindObjectOfType<EventSystem>() != null)
-            return;
+        EventSystem eventSystem = FindObjectOfType<EventSystem>();
+        GameObject eventSystemObj = eventSystem != null
+            ? eventSystem.gameObject
+            : new GameObject("EventSystem");
+        if (eventSystem == null)
+            eventSystemObj.AddComponent<EventSystem>();
 
-        GameObject eventSystemObj = new GameObject("EventSystem");
-        eventSystemObj.AddComponent<EventSystem>();
 #if ENABLE_INPUT_SYSTEM
-        eventSystemObj.AddComponent<InputSystemUIInputModule>();
+        if (eventSystemObj.GetComponent<InputSystemUIInputModule>() == null)
+            eventSystemObj.AddComponent<InputSystemUIInputModule>();
 #else
-        eventSystemObj.AddComponent<StandaloneInputModule>();
+        if (eventSystemObj.GetComponent<StandaloneInputModule>() == null)
+            eventSystemObj.AddComponent<StandaloneInputModule>();
 #endif
     }
 
@@ -940,8 +967,15 @@ public class GameStateGuest : MonoBehaviour
         Health health = replica.GetComponent<Health>();
         if (health != null)
         {
+            float previousHp = health.hp;
+            float nextHp = Mathf.Clamp(enemy.hp, 0.01f, Mathf.Max(0.1f, enemy.maxHp));
+            if (nextHp < previousHp - 0.01f)
+            {
+                Vector2 hitPoint = (Vector2)replica.transform.position - UnityEngine.Random.insideUnitCircle.normalized * 0.2f;
+                BloodBurst.Spawn(replica.transform.position, hitPoint, Mathf.Max(0.2f, enemy.size));
+            }
             health.maxHp = Mathf.Max(0.1f, enemy.maxHp);
-            health.hp = Mathf.Clamp(enemy.hp, 0.01f, health.maxHp);
+            health.hp = nextHp;
         }
     }
 
@@ -1769,6 +1803,36 @@ public class GameStateGuest : MonoBehaviour
             OnlineMatchStartGate.Reset();
         if (_reconnectNoticeCanvas != null)
             Destroy(_reconnectNoticeCanvas);
-        _ws?.Dispose();
+        if (!_matchCompleted)
+            NotifyGuestLeaving();
+        else
+            _ws?.Dispose();
+    }
+
+    private void NotifyGuestLeaving()
+    {
+        if (_sentLeaveNotice)
+            return;
+
+        _sentLeaveNotice = true;
+        GameWebSocketClient leavingSocket = _ws;
+        _ws = null;
+        if (leavingSocket == null)
+            return;
+
+        _ = SendLeaveThenDispose(leavingSocket, "{\"type\":\"guest_left\"}");
+    }
+
+    private static async Task SendLeaveThenDispose(GameWebSocketClient socket, string message)
+    {
+        try
+        {
+            if (socket != null && socket.IsConnected)
+                await socket.SendAsync(message);
+        }
+        finally
+        {
+            socket?.Dispose();
+        }
     }
 }

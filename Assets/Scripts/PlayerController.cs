@@ -52,6 +52,11 @@ public class PlayerController : MonoBehaviour
     public Texture2D healthConsumableIconTexture;
     public Sprite speedConsumableIcon;
     public Texture2D speedConsumableIconTexture;
+    [Header("Quickchat")]
+    public Sprite quickChatGreetIcon;
+    public Sprite quickChatThumbsUpIcon;
+    public Sprite quickChatDangerIcon;
+    public Sprite quickChatAngryIcon;
     [Header("Carried Ranged Orb Visual")]
     public Vector2 carriedRangedOrbOffset = new Vector2(0.18f, 0.08f);
     public Vector2 carriedRangedOrbScale = Vector2.one;
@@ -165,6 +170,7 @@ public class PlayerController : MonoBehaviour
     private int _networkWeaponItemId;
     private WeaponKind _networkWeaponKind = WeaponKind.Spear;
     private Color _networkWeaponColor = Color.white;
+    private string _networkUsername = "";
     private int _networkSkinId;
     private string _networkSkinColor = "#FFFFFF";
     private int _networkConsumableQuantity;
@@ -205,6 +211,8 @@ public class PlayerController : MonoBehaviour
     private float _hideCarriedRangedOrbUntil;
     private PlayerReviveState _reviveState;
     private PlayerReviveState _activeReviveTarget;
+    private PlayerQuickChatBubble _quickChatBubble;
+    private PlayerNameTag _nameTag;
     private static Texture2D _chargeHitboxGlowTexture;
     private static Sprite _chargeHitboxGlowSprite;
 
@@ -215,6 +223,12 @@ public class PlayerController : MonoBehaviour
     public int NetworkChargeSequence { get; private set; }
     public int NetworkBurstSequence { get; private set; }
     public int NetworkConsumableSequence { get; private set; }
+    public int NetworkQuickChatSequence { get; private set; }
+    public string NetworkQuickChatEmote { get; private set; } = "";
+    public string NetworkUsername => PlayerDisplayNames.Normalize(_networkUsername, playerIndex == 1 ? "Guest" : "Player");
+    public string DisplayName => _useExternalInput
+        ? NetworkUsername
+        : PlayerDisplayNames.LocalUsernameOrFallback(playerIndex == 1 ? "Player 2" : "Player");
     public int NetworkSkinId => _hasNetworkLoadout ? _networkSkinId : PlayerLoadout.EquippedSkinId;
     public string NetworkSkinColor => _hasNetworkLoadout ? _networkSkinColor : PlayerSkinVisuals.GetEquippedSkinColorHex();
     public int NetworkWeaponItemId => GetWeaponItemId();
@@ -289,6 +303,7 @@ public class PlayerController : MonoBehaviour
     {
         if (playerIndex == 0) main = this;
         MultiplayerState.RegisterPlayer(this);
+        EnsureWorldPlayerHudComponents();
         EnsureRuntimeHudComponents();
     }
 
@@ -387,6 +402,7 @@ public class PlayerController : MonoBehaviour
             DisableRuntimeHudComponent<BurstAbilityUI>();
             DisableRuntimeHudComponent<GameTimerUI>();
             DisableRuntimeHudComponent<ConsumableUI>();
+            DisableRuntimeHudComponent<QuickChatWheel>();
             return;
         }
 
@@ -401,6 +417,23 @@ public class PlayerController : MonoBehaviour
 
         if (GetComponent<ConsumableUI>() == null)
             gameObject.AddComponent<ConsumableUI>();
+
+        if ((MultiplayerState.IsMultiplayer || MultiplayerState.IsOnline) &&
+            GetComponent<QuickChatWheel>() == null)
+        {
+            gameObject.AddComponent<QuickChatWheel>();
+        }
+    }
+
+    private void EnsureWorldPlayerHudComponents()
+    {
+        _nameTag = GetComponent<PlayerNameTag>();
+        if (_nameTag == null)
+            _nameTag = gameObject.AddComponent<PlayerNameTag>();
+
+        _quickChatBubble = GetComponent<PlayerQuickChatBubble>();
+        if (_quickChatBubble == null)
+            _quickChatBubble = gameObject.AddComponent<PlayerQuickChatBubble>();
     }
 
     private void DisableRuntimeHudComponent<T>() where T : Behaviour
@@ -584,6 +617,52 @@ public class PlayerController : MonoBehaviour
             bool wasFull = health.maxHp <= 0f || health.hp >= health.maxHp - 0.01f;
             health.maxHp = maxHp;
             health.hp = wasFull ? health.maxHp : Mathf.Min(health.hp, health.maxHp);
+        }
+    }
+
+    public void ConfigureNetworkIdentity(string username)
+    {
+        _networkUsername = PlayerDisplayNames.Normalize(username, playerIndex == 1 ? "Guest" : "Player");
+        if (_nameTag == null)
+            _nameTag = GetComponent<PlayerNameTag>();
+        if (_nameTag != null)
+            _nameTag.SetDisplayName(_networkUsername);
+    }
+
+    public void TriggerQuickChat(string emoteId)
+    {
+        if (_useExternalInput)
+            return;
+
+        NetworkQuickChatSequence++;
+        NetworkQuickChatEmote = QuickChatEmotes.NormalizeId(emoteId);
+        ShowQuickChatEmote(NetworkQuickChatEmote, true);
+    }
+
+    public void ShowQuickChatEmote(string emoteId, bool playSound)
+    {
+        if (_quickChatBubble == null)
+            _quickChatBubble = GetComponent<PlayerQuickChatBubble>();
+        if (_quickChatBubble == null)
+            _quickChatBubble = gameObject.AddComponent<PlayerQuickChatBubble>();
+
+        string normalized = QuickChatEmotes.NormalizeId(emoteId);
+        _quickChatBubble.Show(normalized, GetQuickChatIcon(normalized), playSound);
+    }
+
+    public Sprite GetQuickChatIcon(string emoteId)
+    {
+        switch (QuickChatEmotes.NormalizeId(emoteId))
+        {
+            case QuickChatEmotes.ThumbsUp:
+                return quickChatThumbsUpIcon;
+            case QuickChatEmotes.Danger:
+                return quickChatDangerIcon;
+            case QuickChatEmotes.Angry:
+                return quickChatAngryIcon;
+            case QuickChatEmotes.Greet:
+            default:
+                return quickChatGreetIcon;
         }
     }
 

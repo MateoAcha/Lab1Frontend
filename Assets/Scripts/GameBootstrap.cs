@@ -51,6 +51,11 @@ public class GameBootstrap : MonoBehaviour
     public Texture2D healthConsumableIconTexture;
     public Sprite speedConsumableIcon;
     public Texture2D speedConsumableIconTexture;
+    [Header("Quickchat")]
+    public Sprite quickChatGreetIcon;
+    public Sprite quickChatThumbsUpIcon;
+    public Sprite quickChatDangerIcon;
+    public Sprite quickChatAngryIcon;
     [Header("Enemy Attack Orb Visual")]
     public Sprite[] enemyAttackOrbSprites;
     public Texture2D enemyAttackOrbTexture;
@@ -302,6 +307,10 @@ public class GameBootstrap : MonoBehaviour
         player.healthConsumableIconTexture = healthConsumableIconTexture;
         player.speedConsumableIcon = speedConsumableIcon;
         player.speedConsumableIconTexture = speedConsumableIconTexture;
+        player.quickChatGreetIcon = quickChatGreetIcon;
+        player.quickChatThumbsUpIcon = quickChatThumbsUpIcon;
+        player.quickChatDangerIcon = quickChatDangerIcon;
+        player.quickChatAngryIcon = quickChatAngryIcon;
         player.minionMoveSprites = minionMoveSprites;
         player.minionMoveTexture = minionMoveTexture;
         player.minionMoveResource = minionMoveResource;

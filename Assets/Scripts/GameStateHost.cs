@@ -31,13 +31,19 @@ public class GameStateHost : MonoBehaviour
     private int _lastChargeSeq;
     private int _lastBurstSeq;
     private int _lastConsumableSeq;
+    private int _lastQuickChatSeq;
+    private string _lastQuickChatEmote = "";
     private int _lastPickupSeq;
+    private string _guestUsername = "Guest";
     private int _nextEntityId = 1;
     private int _tick;
     private bool _sawRunActive;
     private bool _guestReady;
     private bool _matchStarted;
     private bool _guestConnected;
+    private bool _sentLeaveNotice;
+
+    public static bool HasConnectedGuest { get; private set; }
 
     private void Start()
     {
@@ -144,6 +150,8 @@ public class GameStateHost : MonoBehaviour
             return;
 
         SetRemotePlayerPresent(true);
+        _guestUsername = PlayerDisplayNames.Normalize(input.username, "Guest");
+        _remotePlayer.ConfigureNetworkIdentity(_guestUsername);
 
         _remotePlayer.ConfigureNetworkLoadout(
             input.weaponDamage,
@@ -187,11 +195,18 @@ public class GameStateHost : MonoBehaviour
         bool chargeDown = input.chargeSeq > 0 && input.chargeSeq != _lastChargeSeq;
         bool burstDown = input.burstSeq > 0 && input.burstSeq != _lastBurstSeq;
         bool consumableDown = input.consumableSeq > 0 && input.consumableSeq != _lastConsumableSeq;
+        bool quickChatTriggered = input.quickChatSeq > 0 && input.quickChatSeq != _lastQuickChatSeq;
 
         _lastAttackSeq = input.attackSeq;
         _lastChargeSeq = input.chargeSeq;
         _lastBurstSeq = input.burstSeq;
         _lastConsumableSeq = input.consumableSeq;
+        if (quickChatTriggered)
+        {
+            _lastQuickChatSeq = input.quickChatSeq;
+            _lastQuickChatEmote = QuickChatEmotes.NormalizeId(input.quickChatEmote);
+            _remotePlayer.ShowQuickChatEmote(_lastQuickChatEmote, true);
+        }
 
         _remotePlayer.ApplyExternalInput(
             new Vector2(input.moveX, input.moveY),
@@ -207,6 +222,9 @@ public class GameStateHost : MonoBehaviour
     {
         _guestConnected = false;
         _guestReady = false;
+        _lastQuickChatSeq = 0;
+        _lastQuickChatEmote = "";
+        _guestUsername = "Guest";
         SetRemotePlayerPresent(false);
         if (MultiplayerState.AreAllActivePlayersDowned())
             GameStatsTracker.RegisterPlayerDied();
@@ -214,10 +232,12 @@ public class GameStateHost : MonoBehaviour
 
     private void SetRemotePlayerPresent(bool present)
     {
+        _guestConnected = present;
+        HasConnectedGuest = present;
+
         if (_remotePlayer == null)
             return;
 
-        _guestConnected = present;
         if (!present)
         {
             Rigidbody2D body = _remotePlayer.GetComponent<Rigidbody2D>();
@@ -343,10 +363,20 @@ public class GameStateHost : MonoBehaviour
             skinId = GetPlayerSkinId(id, player),
             skinColor = GetPlayerSkinColor(id, player),
             attackSeq = GetPlayerAttackSequence(id, player),
+            quickChatSeq = GetPlayerQuickChatSequence(id, player),
+            quickChatEmote = GetPlayerQuickChatEmote(id, player),
             weaponItemId = GetPlayerWeaponItemId(id, player),
             weaponType = GetPlayerWeaponType(id, player),
-            weaponColor = GetPlayerWeaponColor(id, player)
+            weaponColor = GetPlayerWeaponColor(id, player),
+            username = GetPlayerUsername(id, player)
         };
+    }
+
+    private string GetPlayerUsername(int id, PlayerController player)
+    {
+        if (id == 0)
+            return PlayerDisplayNames.LocalUsernameOrFallback("Host");
+        return player != null ? player.NetworkUsername : _guestUsername;
     }
 
     private int GetPlayerSkinId(int id, PlayerController player)
@@ -368,6 +398,20 @@ public class GameStateHost : MonoBehaviour
         if (id == 1)
             return _lastAttackSeq;
         return player != null ? player.NetworkAttackSequence : 0;
+    }
+
+    private int GetPlayerQuickChatSequence(int id, PlayerController player)
+    {
+        if (id == 1)
+            return _lastQuickChatSeq;
+        return player != null ? player.NetworkQuickChatSequence : 0;
+    }
+
+    private string GetPlayerQuickChatEmote(int id, PlayerController player)
+    {
+        if (id == 1)
+            return _lastQuickChatEmote;
+        return player != null ? player.NetworkQuickChatEmote : "";
     }
 
     private int GetPlayerWeaponItemId(int id, PlayerController player)
@@ -1128,7 +1172,35 @@ public class GameStateHost : MonoBehaviour
         HitBox.Spawned -= HandleHitBoxSpawned;
         if (OnlineMatchStartGate.IsWaiting)
             OnlineMatchStartGate.Reset();
-        _ws?.Dispose();
+        NotifyHostLeaving();
+        HasConnectedGuest = false;
+    }
+
+    private void NotifyHostLeaving()
+    {
+        if (_sentLeaveNotice)
+            return;
+
+        _sentLeaveNotice = true;
+        GameWebSocketClient leavingSocket = _ws;
+        _ws = null;
+        if (leavingSocket == null)
+            return;
+
+        _ = SendLeaveThenDispose(leavingSocket, "{\"type\":\"host_left\"}");
+    }
+
+    private static async Task SendLeaveThenDispose(GameWebSocketClient socket, string message)
+    {
+        try
+        {
+            if (socket != null && socket.IsConnected)
+                await socket.SendAsync(message);
+        }
+        finally
+        {
+            socket?.Dispose();
+        }
     }
 
     private class EnemySyncCandidate
