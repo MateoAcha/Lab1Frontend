@@ -175,7 +175,7 @@ public class RangedEnemyController : MonoBehaviour
         body.linearVelocity = push * (recoilSpeed * Mathf.Max(0f, pushMultiplier));
         recoilUntil = Time.time + recoilTime;
         float effectScale = Mathf.Max(Mathf.Abs(transform.lossyScale.x), Mathf.Abs(transform.lossyScale.y));
-        BloodBurst.Spawn(transform.position, hitPoint, effectScale);
+        BloodBurst.SpawnNetworked(transform.position, hitPoint, effectScale);
     }
 
     private void OnCollisionEnter2D(Collision2D collision)

@@ -81,6 +81,7 @@ public static class OnlineEffectType
     public const int FireTrail = 7;
     public const int TemporaryWall = 8;
     public const int PlayerDecoy = 9;
+    public const int BloodBurst = 10;
 }
 
 [Serializable]

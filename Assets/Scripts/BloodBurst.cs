@@ -2,6 +2,12 @@ using UnityEngine;
 
 public static class BloodBurst
 {
+    public static void SpawnNetworked(Vector2 position, Vector2 hitPoint, float sizeMultiplier = 1f)
+    {
+        Spawn(position, hitPoint, sizeMultiplier);
+        NetworkedBloodBurst.Spawn(position, hitPoint, sizeMultiplier);
+    }
+
     public static void Spawn(Vector2 position, Vector2 hitPoint, float sizeMultiplier = 1f)
     {
         float scale = Mathf.Clamp(sizeMultiplier, 0.7f, 2.6f);

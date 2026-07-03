@@ -583,6 +583,7 @@ public class GameStateHost : MonoBehaviour
         AddFireTrailEffects(effects);
         AddTemporaryWallEffects(effects);
         AddPlayerDecoyEffects(effects);
+        AddBloodBurstEffects(effects);
 
         TrimEffectsByPriority(effects);
         return effects.ToArray();
@@ -691,6 +692,7 @@ public class GameStateHost : MonoBehaviour
             case OnlineEffectType.TemporaryWall:
             case OnlineEffectType.PlayerDecoy:
             case OnlineEffectType.PlayerMinion:
+            case OnlineEffectType.BloodBurst:
                 boost = ImportantEffectPriorityBoost;
                 break;
             case OnlineEffectType.ExpansionBurst:
@@ -1019,6 +1021,38 @@ public class GameStateHost : MonoBehaviour
                 life = decoy.RemainingLife,
                 skinId = owner != null ? owner.NetworkSkinId : 0,
                 skinColor = owner != null ? owner.NetworkSkinColor : "#FFFFFF"
+            });
+        }
+    }
+
+    private void AddBloodBurstEffects(List<OnlineEffectState> effects)
+    {
+        for (int i = NetworkedBloodBurst.Active.Count - 1; i >= 0; i--)
+        {
+            NetworkedBloodBurst burst = NetworkedBloodBurst.Active[i];
+            if (burst == null)
+            {
+                NetworkedBloodBurst.Active.RemoveAt(i);
+                continue;
+            }
+
+            float remainingLife = burst.RemainingLife;
+            if (remainingLife <= 0f)
+                continue;
+
+            Vector3 position = burst.transform.position;
+            effects.Add(new OnlineEffectState
+            {
+                id = GetOrAssignId(burst.gameObject),
+                type = OnlineEffectType.BloodBurst,
+                ownerId = 0,
+                x = position.x,
+                y = position.y,
+                vx = burst.HitPoint.x,
+                vy = burst.HitPoint.y,
+                scaleX = Mathf.Max(0.2f, burst.SizeMultiplier),
+                scaleY = Mathf.Max(0.2f, burst.SizeMultiplier),
+                life = remainingLife
             });
         }
     }

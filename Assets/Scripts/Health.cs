@@ -4,7 +4,9 @@ public class Health : MonoBehaviour
 {
     public float hp = 3f;
     public float maxHp;
+    public float playerHitImmunitySeconds = 0.55f;
     private bool deathHandled;
+    private float playerDamageImmuneUntil;
 
     private void Start()
     {
@@ -31,8 +33,15 @@ public class Health : MonoBehaviour
 
     public void Hit(float damage)
     {
+        bool isDamage = damage > 0f;
+        PlayerController pc = GetComponent<PlayerController>();
         PlayerReviveState reviveState = GetComponent<PlayerReviveState>();
-        if (damage > 0f && reviveState != null && reviveState.IsDowned)
+        if (isDamage && reviveState != null && reviveState.IsDowned)
+        {
+            return;
+        }
+
+        if (isDamage && pc != null && Time.time < playerDamageImmuneUntil)
         {
             return;
         }
@@ -42,6 +51,7 @@ public class Health : MonoBehaviour
             return;
         }
 
+        float previousHp = hp;
         hp -= damage;
         if (hp < 0f)
         {
@@ -53,11 +63,16 @@ public class Health : MonoBehaviour
             hp = maxHp;
         }
 
+        if (isDamage && pc != null && hp < previousHp - 0.001f)
+        {
+            playerDamageImmuneUntil = Time.time + Mathf.Max(0f, playerHitImmunitySeconds);
+            PlayPlayerHitFeedback();
+        }
+
         if (hp <= 0f)
         {
             deathHandled = true;
 
-            PlayerController pc = GetComponent<PlayerController>();
             if (pc != null)
             {
                 if (MultiplayerState.IsMultiplayer || MultiplayerState.IsOnline)
@@ -102,5 +117,13 @@ public class Health : MonoBehaviour
         hp = Mathf.Clamp(value, 0f, maxHp);
         if (hp > 0f)
             deathHandled = false;
+    }
+
+    public void PlayPlayerHitFeedback()
+    {
+        PlayerHitFeedback feedback = GetComponent<PlayerHitFeedback>();
+        if (feedback == null)
+            feedback = gameObject.AddComponent<PlayerHitFeedback>();
+        feedback.Play();
     }
 }

@@ -26,6 +26,7 @@ public class GameStateGuest : MonoBehaviour
     private readonly Dictionary<int, OnlineEntityReplica> _projectileReplicas = new Dictionary<int, OnlineEntityReplica>();
     private readonly Dictionary<int, OnlineEntityReplica> _effectReplicas = new Dictionary<int, OnlineEntityReplica>();
     private readonly Dictionary<int, float> _effectReplicaExpiresAt = new Dictionary<int, float>();
+    private readonly HashSet<int> _playedBloodBurstIds = new HashSet<int>();
     private readonly Dictionary<int, DroppedMaterialPickup> _pickupReplicas = new Dictionary<int, DroppedMaterialPickup>();
     private readonly HashSet<int> _locallyCollectedPickupIds = new HashSet<int>();
 
@@ -577,9 +578,12 @@ public class GameStateGuest : MonoBehaviour
         Health health = player.GetComponent<Health>();
         if (health != null)
         {
+            float previousHp = health.hp;
             health.SetHealthSilently(
                 state.hp,
                 Mathf.Max(state.maxHp, state.hp, 0.01f));
+            if (state.hp < previousHp - 0.001f)
+                health.PlayPlayerHitFeedback();
         }
 
         PlayerReviveState reviveState = player.GetComponent<PlayerReviveState>();
@@ -967,13 +971,7 @@ public class GameStateGuest : MonoBehaviour
         Health health = replica.GetComponent<Health>();
         if (health != null)
         {
-            float previousHp = health.hp;
             float nextHp = Mathf.Clamp(enemy.hp, 0.01f, Mathf.Max(0.1f, enemy.maxHp));
-            if (nextHp < previousHp - 0.01f)
-            {
-                Vector2 hitPoint = (Vector2)replica.transform.position - UnityEngine.Random.insideUnitCircle.normalized * 0.2f;
-                BloodBurst.Spawn(replica.transform.position, hitPoint, Mathf.Max(0.2f, enemy.size));
-            }
             health.maxHp = Mathf.Max(0.1f, enemy.maxHp);
             health.hp = nextHp;
         }
@@ -1187,6 +1185,7 @@ public class GameStateGuest : MonoBehaviour
     private void ApplyEffectState(OnlineEffectState[] effects)
     {
         var activeIds = new HashSet<int>();
+        var activeBloodIds = new HashSet<int>();
 
         if (effects != null)
         {
@@ -1194,6 +1193,13 @@ public class GameStateGuest : MonoBehaviour
             {
                 if (effect == null || effect.life <= 0f) continue;
                 if (effect.ownerId == 1) continue;
+
+                if (effect.type == OnlineEffectType.BloodBurst)
+                {
+                    activeBloodIds.Add(effect.id);
+                    PlayBloodBurstEffectOnce(effect);
+                    continue;
+                }
 
                 activeIds.Add(effect.id);
                 if (effect.type == OnlineEffectType.FireTrail)
@@ -1210,6 +1216,35 @@ public class GameStateGuest : MonoBehaviour
         }
 
         RemoveInactiveEffects(activeIds);
+        ForgetInactiveBloodBursts(activeBloodIds);
+    }
+
+    private void PlayBloodBurstEffectOnce(OnlineEffectState effect)
+    {
+        if (effect == null || effect.id <= 0 || _playedBloodBurstIds.Contains(effect.id))
+            return;
+
+        _playedBloodBurstIds.Add(effect.id);
+        BloodBurst.Spawn(
+            new Vector2(effect.x, effect.y),
+            new Vector2(effect.vx, effect.vy),
+            Mathf.Max(0.2f, Mathf.Max(effect.scaleX, effect.scaleY)));
+    }
+
+    private void ForgetInactiveBloodBursts(HashSet<int> activeBloodIds)
+    {
+        if (_playedBloodBurstIds.Count == 0)
+            return;
+
+        var expired = new List<int>();
+        foreach (int id in _playedBloodBurstIds)
+        {
+            if (!activeBloodIds.Contains(id))
+                expired.Add(id);
+        }
+
+        for (int i = 0; i < expired.Count; i++)
+            _playedBloodBurstIds.Remove(expired[i]);
     }
 
     private void ApplyMaterialPickupState(OnlineMaterialPickupState[] pickups)

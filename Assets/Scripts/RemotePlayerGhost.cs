@@ -298,9 +298,12 @@ public class RemotePlayerGhost : MonoBehaviour
     {
         if (_health == null || OnlinePlayerSync.Instance == null) return;
 
+        float previousHp = _health.hp;
         _health.SetHealthSilently(
             OnlinePlayerSync.Instance.RemoteHp,
             Mathf.Max(0.01f, OnlinePlayerSync.Instance.RemoteMaxHp));
+        if (OnlinePlayerSync.Instance.RemoteHp < previousHp - 0.001f)
+            _health.PlayPlayerHitFeedback();
     }
 
     private void ApplyRemoteDownedState()

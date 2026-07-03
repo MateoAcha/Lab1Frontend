@@ -166,6 +166,17 @@ public class AuthApiClient
         yield return GetJson($"/users/{userId}", onSuccess, onError, requiresAuth: false);
     }
 
+    public IEnumerator GetProfileByUsername(string username, Action<UserProfileSummaryResponse> onSuccess, Action<string> onError)
+    {
+        string safeUsername = UnityWebRequest.EscapeURL(username ?? "");
+        yield return GetJsonTyped($"/users/profile/{safeUsername}", onSuccess, onError, requiresAuth: true, context: "profile");
+    }
+
+    public IEnumerator GetProfileByUserId(int userId, Action<UserProfileSummaryResponse> onSuccess, Action<string> onError)
+    {
+        yield return GetJsonTyped($"/users/{Mathf.Max(1, userId)}/profile-summary", onSuccess, onError, requiresAuth: true, context: "profile");
+    }
+
     public IEnumerator ValidateCurrentSession(int userId, Action<AuthUserData> onSuccess, Action<long, string> onError)
     {
         if (string.IsNullOrWhiteSpace(AuthSession.AccessToken))
@@ -236,6 +247,120 @@ public class AuthApiClient
         Debug.Log($"[AuthApi] POST {_baseUrl}/users/me/daily-coins/claim");
         yield return request.SendWebRequest();
         HandleDailyCoinsResponse(request, onSuccess, onError, "daily coins claim");
+    }
+
+    public IEnumerator GetSocialSummary(Action<SocialSummaryResponse> onSuccess, Action<string> onError)
+    {
+        yield return GetJsonTyped("/social/summary", onSuccess, onError, requiresAuth: true, context: "social summary");
+    }
+
+    public IEnumerator SendFriendRequest(string username, Action<SocialActionResponse> onSuccess, Action<string> onError)
+    {
+        var payload = new SocialUsernameRequest
+        {
+            username = username ?? "",
+            recipientUsername = username ?? ""
+        };
+
+        yield return SendJsonTyped(
+            "/friends/requests",
+            "POST",
+            JsonUtility.ToJson(payload),
+            onSuccess,
+            onError,
+            requiresAuth: true,
+            context: "friend request");
+    }
+
+    public IEnumerator AcceptFriendRequest(int requestId, Action<SocialActionResponse> onSuccess, Action<string> onError)
+    {
+        yield return SendJsonTyped(
+            $"/friends/requests/{Mathf.Max(1, requestId)}/accept",
+            "POST",
+            "",
+            onSuccess,
+            onError,
+            requiresAuth: true,
+            context: "friend request accept");
+    }
+
+    public IEnumerator DeclineFriendRequest(int requestId, Action<SocialActionResponse> onSuccess, Action<string> onError)
+    {
+        yield return SendJsonTyped(
+            $"/friends/requests/{Mathf.Max(1, requestId)}/decline",
+            "POST",
+            "",
+            onSuccess,
+            onError,
+            requiresAuth: true,
+            context: "friend request decline");
+    }
+
+    public IEnumerator CancelFriendRequest(int requestId, Action<SocialActionResponse> onSuccess, Action<string> onError)
+    {
+        yield return SendJsonTyped(
+            $"/friends/requests/{Mathf.Max(1, requestId)}",
+            "DELETE",
+            "",
+            onSuccess,
+            onError,
+            requiresAuth: true,
+            context: "friend request cancel");
+    }
+
+    public IEnumerator RemoveFriend(int friendUserId, Action<SocialActionResponse> onSuccess, Action<string> onError)
+    {
+        yield return SendJsonTyped(
+            $"/friends/{Mathf.Max(1, friendUserId)}",
+            "DELETE",
+            "",
+            onSuccess,
+            onError,
+            requiresAuth: true,
+            context: "remove friend");
+    }
+
+    public IEnumerator SendLobbyInvite(string username, int roomNumber, Action<SocialActionResponse> onSuccess, Action<string> onError)
+    {
+        var payload = new LobbyInviteCreateRequest
+        {
+            username = username ?? "",
+            recipientUsername = username ?? "",
+            roomNumber = Mathf.Max(1, roomNumber)
+        };
+
+        yield return SendJsonTyped(
+            "/lobby/invites",
+            "POST",
+            JsonUtility.ToJson(payload),
+            onSuccess,
+            onError,
+            requiresAuth: true,
+            context: "lobby invite");
+    }
+
+    public IEnumerator AcceptLobbyInvite(int inviteId, Action<GameInviteActionResponse> onSuccess, Action<string> onError)
+    {
+        yield return SendJsonTyped(
+            $"/lobby/invites/{Mathf.Max(1, inviteId)}/accept",
+            "POST",
+            "",
+            onSuccess,
+            onError,
+            requiresAuth: true,
+            context: "lobby invite accept");
+    }
+
+    public IEnumerator DeclineLobbyInvite(int inviteId, Action<SocialActionResponse> onSuccess, Action<string> onError)
+    {
+        yield return SendJsonTyped(
+            $"/lobby/invites/{Mathf.Max(1, inviteId)}/decline",
+            "POST",
+            "",
+            onSuccess,
+            onError,
+            requiresAuth: true,
+            context: "lobby invite decline");
     }
 
     public IEnumerator AddCoins(int userId, int quantity, Action onSuccess, Action<string> onError)
@@ -937,6 +1062,81 @@ public class AuthApiClient
         return sb.ToString();
     }
 
+    private IEnumerator GetJsonTyped<T>(
+        string endpoint,
+        Action<T> onSuccess,
+        Action<string> onError,
+        bool requiresAuth,
+        string context) where T : new()
+    {
+        var request = UnityWebRequest.Get(_baseUrl + endpoint);
+        if (requiresAuth && !TryAttachAuthorization(request, onError))
+            yield break;
+
+        yield return SendAndParseJson(request, endpoint, onSuccess, onError, context);
+    }
+
+    private IEnumerator SendJsonTyped<T>(
+        string endpoint,
+        string method,
+        string jsonBody,
+        Action<T> onSuccess,
+        Action<string> onError,
+        bool requiresAuth,
+        string context) where T : new()
+    {
+        var request = new UnityWebRequest(_baseUrl + endpoint, method);
+        string body = jsonBody ?? "";
+        request.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(body));
+        request.downloadHandler = new DownloadHandlerBuffer();
+        request.SetRequestHeader("Content-Type", "application/json");
+        if (requiresAuth && !TryAttachAuthorization(request, onError))
+            yield break;
+
+        yield return SendAndParseJson(request, endpoint, onSuccess, onError, context);
+    }
+
+    private IEnumerator SendAndParseJson<T>(
+        UnityWebRequest request,
+        string endpoint,
+        Action<T> onSuccess,
+        Action<string> onError,
+        string context) where T : new()
+    {
+        Debug.Log($"[AuthApi] {request.method} {_baseUrl + endpoint}");
+        yield return request.SendWebRequest();
+        Debug.Log($"[AuthApi] Response {(long)request.responseCode} from {endpoint}");
+
+        if (request.result != UnityWebRequest.Result.Success
+            || request.responseCode < 200
+            || request.responseCode >= 300)
+        {
+            onError?.Invoke(FormatError(request));
+            yield break;
+        }
+
+        string raw = request.downloadHandler != null ? request.downloadHandler.text : "";
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            onSuccess?.Invoke(new T());
+            yield break;
+        }
+
+        T data;
+        try
+        {
+            data = JsonUtility.FromJson<T>(raw);
+        }
+        catch
+        {
+            Debug.LogError($"[AuthApi] Unexpected {context} response: {raw}");
+            onError?.Invoke($"Unexpected {context} response.");
+            yield break;
+        }
+
+        onSuccess?.Invoke(data == null ? new T() : data);
+    }
+
     public IEnumerator GetLobbyRooms(Action<LobbyRoomListData> onSuccess, Action<string> onError)
     {
         var request = UnityWebRequest.Get(_baseUrl + "/lobby/rooms");
@@ -1122,6 +1322,21 @@ public class AuthApiClient
     }
 
     [Serializable]
+    private class SocialUsernameRequest
+    {
+        public string username;
+        public string recipientUsername;
+    }
+
+    [Serializable]
+    private class LobbyInviteCreateRequest
+    {
+        public string username;
+        public string recipientUsername;
+        public int roomNumber;
+    }
+
+    [Serializable]
     private class LobbyPingRequest
     {
         public int roomNumber;
@@ -1204,4 +1419,135 @@ public class ChallengeClaimData
     public string challengeKey;
     public int rewardCoins;
     public string claimedAt;
+}
+
+[Serializable]
+public class SocialSummaryResponse
+{
+    public FriendSummaryResponse[] friends;
+    public FriendRequestResponse[] incomingFriendRequests;
+    public FriendRequestResponse[] sentFriendRequests;
+    public GameInviteResponse[] gameInvites;
+}
+
+[Serializable]
+public class FriendSummaryResponse
+{
+    public int userId;
+    public int id;
+    public string username;
+    public string displayName;
+    public int level;
+}
+
+[Serializable]
+public class FriendRequestResponse
+{
+    public int requestId;
+    public int id;
+    public int requesterUserId;
+    public int senderUserId;
+    public int recipientUserId;
+    public string requesterUsername;
+    public string senderUsername;
+    public string recipientUsername;
+    public string createdAt;
+    public string status;
+}
+
+[Serializable]
+public class GameInviteResponse
+{
+    public int inviteId;
+    public int id;
+    public int hostUserId;
+    public int senderUserId;
+    public int recipientUserId;
+    public string hostUsername;
+    public string senderUsername;
+    public string recipientUsername;
+    public int roomNumber;
+    public string createdAt;
+    public string expiresAt;
+    public string status;
+}
+
+[Serializable]
+public class SocialActionResponse
+{
+    public string result;
+    public SocialSummaryResponse summary;
+    public FriendSummaryResponse friend;
+    public FriendRequestResponse request;
+    public GameInviteResponse invite;
+}
+
+[Serializable]
+public class GameInviteActionResponse
+{
+    public string result;
+    public SocialSummaryResponse summary;
+    public GameInviteResponse invite;
+    public int roomNumber;
+}
+
+[Serializable]
+public class UserProfileSummaryResponse
+{
+    public int userId;
+    public int id;
+    public string username;
+    public string displayName;
+    public int level;
+    public SocialStatsSummary stats;
+    public SocialStatsSummary playerStats;
+    public SocialLoadoutSummary loadout;
+    public SocialLoadoutSummary equippedLoadout;
+    public SocialLoadoutSummary equipped;
+}
+
+[Serializable]
+public class SocialStatsSummary
+{
+    public int gamesPlayed;
+    public int runsPlayed;
+    public int matchesPlayed;
+    public int wins;
+    public int gamesWon;
+    public int losses;
+    public int kills;
+    public int totalKills;
+    public int enemiesKilled;
+    public int meleeKills;
+    public int rangedKills;
+    public int giantKills;
+    public int bossKills;
+    public int deaths;
+    public int revives;
+    public int level;
+    public int xp;
+    public int experience;
+    public float bestTimeSeconds;
+    public float bestRunTimeSeconds;
+    public float fastestWinSeconds;
+    public float totalTimeSeconds;
+}
+
+[Serializable]
+public class SocialLoadoutSummary
+{
+    public int skinId;
+    public int equippedSkinId;
+    public string skinColor;
+    public int weaponItemId;
+    public int equippedWeaponItemId;
+    public int weaponId;
+    public string weaponType;
+    public string weaponName;
+    public string weaponItemName;
+    public string weaponColor;
+    public string armorName;
+    public string armorItemName;
+    public string consumableName;
+    public string itemName;
 }
