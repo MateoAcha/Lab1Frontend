@@ -8,7 +8,7 @@ using UnityEngine.UI;
 
 public class SocialPanelController : MonoBehaviour
 {
-    private const float RefreshIntervalSeconds = 8f;
+    private const float RefreshIntervalSeconds = 30f;
     private const float PanelWidth = 390f;
     private const float PanelHeight = 620f;
 
@@ -296,6 +296,7 @@ public class SocialPanelController : MonoBehaviour
         if (!string.IsNullOrWhiteSpace(error))
         {
             SetStatus(error);
+            _summary = _summary ?? new SocialSummaryResponse();
             Render();
             yield break;
         }
