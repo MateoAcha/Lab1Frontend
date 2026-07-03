@@ -6,9 +6,23 @@ using UnityEngine;
 
 public class GameStateHost : MonoBehaviour
 {
-    private const float SyncInterval = 1f / 15f;
+    private const float SyncInterval = 1f / 12f;
     private const float AttackVisualMinLife = 0.22f;
     private const float FireTrailAnnounceWindow = 0.45f;
+    private const int MaxSyncedEnemies = 72;
+    private const int MaxSyncedProjectiles = 56;
+    private const int MaxSyncedEffects = 72;
+    private const int MaxSyncedPickups = 24;
+    private const int MaxStatePayloadChars = 48000;
+    private const int EmergencySyncedEnemies = 48;
+    private const int EmergencySyncedProjectiles = 36;
+    private const int EmergencySyncedEffects = 48;
+    private const int EmergencySyncedPickups = 12;
+    private const float GiantEnemyPriorityBoost = 100000f;
+    private const float PlayerCombatPriorityBoost = 50000f;
+    private const float ImportantEffectPriorityBoost = 45000f;
+    private const float ReconnectInitialDelay = 0.4f;
+    private const float ReconnectMaxDelay = 4f;
 
     private GameWebSocketClient _ws;
     private PlayerController _remotePlayer;
@@ -17,12 +31,19 @@ public class GameStateHost : MonoBehaviour
     private int _lastChargeSeq;
     private int _lastBurstSeq;
     private int _lastConsumableSeq;
+    private int _lastQuickChatSeq;
+    private string _lastQuickChatEmote = "";
     private int _lastPickupSeq;
+    private string _guestUsername = "Guest";
     private int _nextEntityId = 1;
     private int _tick;
     private bool _sawRunActive;
     private bool _guestReady;
     private bool _matchStarted;
+    private bool _guestConnected;
+    private bool _sentLeaveNotice;
+
+    public static bool HasConnectedGuest { get; private set; }
 
     private void Start()
     {
@@ -30,26 +51,49 @@ public class GameStateHost : MonoBehaviour
         GameAudio.StopMusic();
         HitBox.Spawned += HandleHitBoxSpawned;
         _remotePlayer = FindRemotePlayer();
+        SetRemotePlayerPresent(false);
         StartCoroutine(ConnectThenSync());
     }
 
     private IEnumerator ConnectThenSync()
     {
         string wsUrl = BuildWsUrl();
-        _ws = new GameWebSocketClient();
+        float reconnectDelay = ReconnectInitialDelay;
 
-        Task connectTask = _ws.ConnectAsync(wsUrl);
-        yield return new WaitUntil(() => connectTask.IsCompleted);
-
-        if (connectTask.IsFaulted || !_ws.IsConnected)
+        while (true)
         {
-            Debug.LogWarning("GameStateHost: WebSocket connect failed - " + connectTask.Exception?.GetBaseException()?.Message);
-            OnlineMatchStartGate.SetMessage("Could not connect to match server.");
-            yield break;
-        }
+            _ws?.Dispose();
+            _ws = new GameWebSocketClient();
 
-        yield return Send("{\"type\":\"register\",\"role\":\"host\"}");
-        StartCoroutine(SyncLoop());
+            if (!_matchStarted)
+                OnlineMatchStartGate.SetMessage("Connecting to match server...");
+
+            Task connectTask = _ws.ConnectAsync(wsUrl);
+            yield return new WaitUntil(() => connectTask.IsCompleted);
+
+            if (connectTask.IsFaulted || !_ws.IsConnected)
+            {
+                Debug.LogWarning("GameStateHost: WebSocket reconnect failed - " + connectTask.Exception?.GetBaseException()?.Message);
+                if (!_matchStarted)
+                    OnlineMatchStartGate.SetMessage("Connection lagging... retrying");
+                yield return new WaitForSecondsRealtime(reconnectDelay);
+                reconnectDelay = Mathf.Min(ReconnectMaxDelay, reconnectDelay * 1.6f);
+                continue;
+            }
+
+            yield return Send("{\"type\":\"register\",\"role\":\"host\"}");
+            reconnectDelay = ReconnectInitialDelay;
+            yield return SyncLoop();
+
+            string reason = _ws != null && !string.IsNullOrWhiteSpace(_ws.LastError)
+                ? _ws.LastError
+                : "socket closed";
+            Debug.LogWarning("GameStateHost: connection interrupted, will reconnect: " + reason);
+            if (!_matchStarted)
+                OnlineMatchStartGate.SetMessage("Connection lagging... retrying");
+            yield return new WaitForSecondsRealtime(reconnectDelay);
+            reconnectDelay = Mathf.Min(ReconnectMaxDelay, reconnectDelay * 1.6f);
+        }
     }
 
     private IEnumerator SyncLoop()
@@ -63,7 +107,7 @@ public class GameStateHost : MonoBehaviour
             if (GameStatsTracker.IsRunActive)
                 _sawRunActive = true;
 
-            yield return Send(JsonUtility.ToJson(BuildState()));
+            yield return Send(BuildStateJson());
             yield return new WaitForSecondsRealtime(SyncInterval);
         }
     }
@@ -72,6 +116,12 @@ public class GameStateHost : MonoBehaviour
     {
         if (string.IsNullOrWhiteSpace(json))
         {
+            return;
+        }
+
+        if (json.Contains("\"guest_left\""))
+        {
+            HandleGuestLeft();
             return;
         }
 
@@ -98,6 +148,10 @@ public class GameStateHost : MonoBehaviour
             _remotePlayer = FindRemotePlayer();
         if (_remotePlayer == null)
             return;
+
+        SetRemotePlayerPresent(true);
+        _guestUsername = PlayerDisplayNames.Normalize(input.username, "Guest");
+        _remotePlayer.ConfigureNetworkIdentity(_guestUsername);
 
         _remotePlayer.ConfigureNetworkLoadout(
             input.weaponDamage,
@@ -133,7 +187,7 @@ public class GameStateHost : MonoBehaviour
 
         if (!_matchStarted)
         {
-            _remotePlayer.ApplyExternalInput(Vector2.zero, Vector2.down, false, false, false, false);
+            _remotePlayer.ApplyExternalInput(Vector2.zero, Vector2.down, false, false, false, false, input.reviveHeld);
             return;
         }
 
@@ -141,11 +195,18 @@ public class GameStateHost : MonoBehaviour
         bool chargeDown = input.chargeSeq > 0 && input.chargeSeq != _lastChargeSeq;
         bool burstDown = input.burstSeq > 0 && input.burstSeq != _lastBurstSeq;
         bool consumableDown = input.consumableSeq > 0 && input.consumableSeq != _lastConsumableSeq;
+        bool quickChatTriggered = input.quickChatSeq > 0 && input.quickChatSeq != _lastQuickChatSeq;
 
         _lastAttackSeq = input.attackSeq;
         _lastChargeSeq = input.chargeSeq;
         _lastBurstSeq = input.burstSeq;
         _lastConsumableSeq = input.consumableSeq;
+        if (quickChatTriggered)
+        {
+            _lastQuickChatSeq = input.quickChatSeq;
+            _lastQuickChatEmote = QuickChatEmotes.NormalizeId(input.quickChatEmote);
+            _remotePlayer.ShowQuickChatEmote(_lastQuickChatEmote, true);
+        }
 
         _remotePlayer.ApplyExternalInput(
             new Vector2(input.moveX, input.moveY),
@@ -153,7 +214,39 @@ public class GameStateHost : MonoBehaviour
             attackDown,
             chargeDown,
             burstDown,
-            consumableDown);
+            consumableDown,
+            input.reviveHeld);
+    }
+
+    private void HandleGuestLeft()
+    {
+        _guestConnected = false;
+        _guestReady = false;
+        _lastQuickChatSeq = 0;
+        _lastQuickChatEmote = "";
+        _guestUsername = "Guest";
+        SetRemotePlayerPresent(false);
+        if (MultiplayerState.AreAllActivePlayersDowned())
+            GameStatsTracker.RegisterPlayerDied();
+    }
+
+    private void SetRemotePlayerPresent(bool present)
+    {
+        _guestConnected = present;
+        HasConnectedGuest = present;
+
+        if (_remotePlayer == null)
+            return;
+
+        if (!present)
+        {
+            Rigidbody2D body = _remotePlayer.GetComponent<Rigidbody2D>();
+            if (body != null)
+                body.linearVelocity = Vector2.zero;
+        }
+
+        if (_remotePlayer.gameObject.activeSelf != present)
+            _remotePlayer.gameObject.SetActive(present);
     }
 
     private void MarkGuestReady()
@@ -201,6 +294,36 @@ public class GameStateHost : MonoBehaviour
         };
     }
 
+    private string BuildStateJson()
+    {
+        OnlineMatchStateMessage state = BuildState();
+        string json = JsonUtility.ToJson(state);
+        if (json.Length <= MaxStatePayloadChars)
+            return json;
+
+        state.enemies = TrimArray(state.enemies, EmergencySyncedEnemies);
+        state.projectiles = TrimArray(state.projectiles, EmergencySyncedProjectiles);
+        state.effects = TrimArray(state.effects, EmergencySyncedEffects);
+        state.pickups = TrimArray(state.pickups, EmergencySyncedPickups);
+        json = JsonUtility.ToJson(state);
+        if (json.Length <= MaxStatePayloadChars)
+            return json;
+
+        state.effects = new OnlineEffectState[0];
+        json = JsonUtility.ToJson(state);
+        if (json.Length <= MaxStatePayloadChars)
+            return json;
+
+        state.projectiles = new OnlineProjectileState[0];
+        state.pickups = TrimArray(state.pickups, 4);
+        json = JsonUtility.ToJson(state);
+        if (json.Length <= MaxStatePayloadChars)
+            return json;
+
+        state.enemies = TrimArray(state.enemies, 24);
+        return JsonUtility.ToJson(state);
+    }
+
     private OnlinePlayerState[] BuildPlayers()
     {
         if (_remotePlayer == null)
@@ -209,17 +332,20 @@ public class GameStateHost : MonoBehaviour
         return new[]
         {
             BuildPlayerState(0, PlayerController.main),
-            BuildPlayerState(1, _remotePlayer)
+            BuildPlayerState(1, _remotePlayer, _guestConnected)
         };
     }
 
-    private OnlinePlayerState BuildPlayerState(int id, PlayerController player)
+    private OnlinePlayerState BuildPlayerState(int id, PlayerController player, bool presentOverride = true)
     {
         Health health = player != null ? player.GetComponent<Health>() : null;
-        bool alive = player != null && health != null && health.hp > 0f;
+        PlayerReviveState reviveState = player != null ? player.GetComponent<PlayerReviveState>() : null;
+        bool present = presentOverride && player != null;
+        bool downed = present && reviveState != null && reviveState.IsDowned;
+        bool alive = present && health != null && health.hp > 0f && !downed;
         Vector3 pos = player != null ? player.transform.position : Vector3.zero;
         Rigidbody2D body = player != null ? player.GetComponent<Rigidbody2D>() : null;
-        Vector2 velocity = body != null ? body.linearVelocity : Vector2.zero;
+        Vector2 velocity = body != null && !downed ? body.linearVelocity : Vector2.zero;
 
         return new OnlinePlayerState
         {
@@ -230,14 +356,27 @@ public class GameStateHost : MonoBehaviour
             vy = velocity.y,
             hp = health != null ? health.hp : 0f,
             maxHp = health != null ? Mathf.Max(health.maxHp, health.hp) : 0f,
+            present = present,
             alive = alive,
+            downed = downed,
+            reviveProgress = reviveState != null ? reviveState.ReviveProgress01 : 0f,
             skinId = GetPlayerSkinId(id, player),
             skinColor = GetPlayerSkinColor(id, player),
             attackSeq = GetPlayerAttackSequence(id, player),
+            quickChatSeq = GetPlayerQuickChatSequence(id, player),
+            quickChatEmote = GetPlayerQuickChatEmote(id, player),
             weaponItemId = GetPlayerWeaponItemId(id, player),
             weaponType = GetPlayerWeaponType(id, player),
-            weaponColor = GetPlayerWeaponColor(id, player)
+            weaponColor = GetPlayerWeaponColor(id, player),
+            username = GetPlayerUsername(id, player)
         };
+    }
+
+    private string GetPlayerUsername(int id, PlayerController player)
+    {
+        if (id == 0)
+            return PlayerDisplayNames.LocalUsernameOrFallback("Host");
+        return player != null ? player.NetworkUsername : _guestUsername;
     }
 
     private int GetPlayerSkinId(int id, PlayerController player)
@@ -259,6 +398,20 @@ public class GameStateHost : MonoBehaviour
         if (id == 1)
             return _lastAttackSeq;
         return player != null ? player.NetworkAttackSequence : 0;
+    }
+
+    private int GetPlayerQuickChatSequence(int id, PlayerController player)
+    {
+        if (id == 1)
+            return _lastQuickChatSeq;
+        return player != null ? player.NetworkQuickChatSequence : 0;
+    }
+
+    private string GetPlayerQuickChatEmote(int id, PlayerController player)
+    {
+        if (id == 1)
+            return _lastQuickChatEmote;
+        return player != null ? player.NetworkQuickChatEmote : "";
     }
 
     private int GetPlayerWeaponItemId(int id, PlayerController player)
@@ -284,7 +437,7 @@ public class GameStateHost : MonoBehaviour
 
     private OnlineEnemyState[] BuildEnemies()
     {
-        var enemies = new List<OnlineEnemyState>();
+        var candidates = new List<EnemySyncCandidate>();
 
         for (int i = OnlineNetworkRegistry.MeleeEnemies.Count - 1; i >= 0; i--)
         {
@@ -294,7 +447,7 @@ public class GameStateHost : MonoBehaviour
                 OnlineNetworkRegistry.MeleeEnemies.RemoveAt(i);
                 continue;
             }
-            AddEnemyState(enemies, enemy.gameObject, 0);
+            AddEnemyCandidate(candidates, enemy.gameObject, 0);
         }
 
         for (int i = OnlineNetworkRegistry.RangedEnemies.Count - 1; i >= 0; i--)
@@ -305,7 +458,7 @@ public class GameStateHost : MonoBehaviour
                 OnlineNetworkRegistry.RangedEnemies.RemoveAt(i);
                 continue;
             }
-            AddEnemyState(enemies, enemy.gameObject, 1);
+            AddEnemyCandidate(candidates, enemy.gameObject, 1);
         }
 
         for (int i = OnlineNetworkRegistry.GiantEnemies.Count - 1; i >= 0; i--)
@@ -316,13 +469,18 @@ public class GameStateHost : MonoBehaviour
                 OnlineNetworkRegistry.GiantEnemies.RemoveAt(i);
                 continue;
             }
-            AddEnemyState(enemies, enemy.gameObject, 2);
+            AddEnemyCandidate(candidates, enemy.gameObject, 2);
         }
 
+        candidates.Sort((a, b) => a.priority.CompareTo(b.priority));
+        int count = Mathf.Min(MaxSyncedEnemies, candidates.Count);
+        var enemies = new List<OnlineEnemyState>(count);
+        for (int i = 0; i < count; i++)
+            enemies.Add(candidates[i].state);
         return enemies.ToArray();
     }
 
-    private void AddEnemyState(List<OnlineEnemyState> enemies, GameObject enemy, int type)
+    private void AddEnemyCandidate(List<EnemySyncCandidate> candidates, GameObject enemy, int type)
     {
         if (enemy == null) return;
 
@@ -330,24 +488,29 @@ public class GameStateHost : MonoBehaviour
         if (health != null && health.hp <= 0f) return;
         Rigidbody2D body = enemy.GetComponent<Rigidbody2D>();
         Vector2 velocity = body != null ? body.linearVelocity : Vector2.zero;
+        Vector3 position = enemy.transform.position;
 
-        enemies.Add(new OnlineEnemyState
+        candidates.Add(new EnemySyncCandidate
         {
-            id = GetOrAssignId(enemy),
-            type = type,
-            x = enemy.transform.position.x,
-            y = enemy.transform.position.y,
-            vx = velocity.x,
-            vy = velocity.y,
-            hp = health != null ? health.hp : 1f,
-            maxHp = health != null ? Mathf.Max(health.maxHp, health.hp) : 1f,
-            size = enemy.transform.localScale.x
+            priority = GetInterestPriority(position, type == 2 ? GiantEnemyPriorityBoost : 0f),
+            state = new OnlineEnemyState
+            {
+                id = GetOrAssignId(enemy),
+                type = type,
+                x = position.x,
+                y = position.y,
+                vx = velocity.x,
+                vy = velocity.y,
+                hp = health != null ? health.hp : 1f,
+                maxHp = health != null ? Mathf.Max(health.maxHp, health.hp) : 1f,
+                size = enemy.transform.localScale.x
+            }
         });
     }
 
     private OnlineProjectileState[] BuildProjectiles()
     {
-        var projectiles = new List<OnlineProjectileState>();
+        var candidates = new List<ProjectileSyncCandidate>();
 
         for (int i = OnlineNetworkRegistry.Projectiles.Count - 1; i >= 0; i--)
         {
@@ -358,17 +521,18 @@ public class GameStateHost : MonoBehaviour
                 continue;
             }
 
-            projectiles.Add(new OnlineProjectileState
+            Vector3 position = projectile.transform.position;
+            AddProjectileCandidate(candidates, new OnlineProjectileState
             {
                 id = GetOrAssignId(projectile.gameObject),
                 fromPlayer = false,
-                x = projectile.transform.position.x,
-                y = projectile.transform.position.y,
+                x = position.x,
+                y = position.y,
                 vx = projectile.direction.x * projectile.speed,
                 vy = projectile.direction.y * projectile.speed,
                 size = Mathf.Max(0.05f, projectile.transform.localScale.x),
                 life = projectile.RemainingLife
-            });
+            }, position, 0f);
         }
 
         for (int i = OnlineNetworkRegistry.PlayerProjectiles.Count - 1; i >= 0; i--)
@@ -380,23 +544,29 @@ public class GameStateHost : MonoBehaviour
                 continue;
             }
 
-            projectiles.Add(new OnlineProjectileState
+            Vector3 position = projectile.transform.position;
+            AddProjectileCandidate(candidates, new OnlineProjectileState
             {
                 id = GetOrAssignId(projectile.gameObject),
                 fromPlayer = true,
                 ownerId = projectile.ownerPlayerIndex,
                 color = "#" + ColorUtility.ToHtmlStringRGB(projectile.projectileColor),
                 size = Mathf.Max(0.05f, projectile.transform.localScale.x),
-                x = projectile.transform.position.x,
-                y = projectile.transform.position.y,
+                x = position.x,
+                y = position.y,
                 vx = projectile.direction.x * projectile.speed,
                 vy = projectile.direction.y * projectile.speed,
                 life = projectile.RemainingLife
-            });
+            }, position, PlayerCombatPriorityBoost);
         }
 
-        AddPlayerHitBoxStates(projectiles);
+        AddPlayerHitBoxStates(candidates);
 
+        candidates.Sort((a, b) => a.priority.CompareTo(b.priority));
+        int count = Mathf.Min(MaxSyncedProjectiles, candidates.Count);
+        var projectiles = new List<OnlineProjectileState>(count);
+        for (int i = 0; i < count; i++)
+            projectiles.Add(candidates[i].state);
         return projectiles.ToArray();
     }
 
@@ -413,13 +583,15 @@ public class GameStateHost : MonoBehaviour
         AddFireTrailEffects(effects);
         AddTemporaryWallEffects(effects);
         AddPlayerDecoyEffects(effects);
+        AddBloodBurstEffects(effects);
 
+        TrimEffectsByPriority(effects);
         return effects.ToArray();
     }
 
     private OnlineMaterialPickupState[] BuildMaterialPickups()
     {
-        var pickups = new List<OnlineMaterialPickupState>();
+        var candidates = new List<PickupSyncCandidate>();
 
         for (int i = OnlineNetworkRegistry.MaterialPickups.Count - 1; i >= 0; i--)
         {
@@ -430,19 +602,29 @@ public class GameStateHost : MonoBehaviour
                 continue;
             }
 
-            pickups.Add(new OnlineMaterialPickupState
+            Vector3 position = pickup.transform.position;
+            candidates.Add(new PickupSyncCandidate
             {
-                id = GetOrAssignId(pickup.gameObject),
-                x = pickup.transform.position.x,
-                y = pickup.transform.position.y,
-                inventoryKey = pickup.InventoryKey,
-                itemName = pickup.ItemName,
-                rarity = pickup.Rarity,
-                color = "#" + ColorUtility.ToHtmlStringRGBA(pickup.PickupColor),
-                size = Mathf.Max(0.2f, pickup.PickupSize)
+                priority = GetInterestPriority(position, ImportantEffectPriorityBoost),
+                state = new OnlineMaterialPickupState
+                {
+                    id = GetOrAssignId(pickup.gameObject),
+                    x = position.x,
+                    y = position.y,
+                    inventoryKey = pickup.InventoryKey,
+                    itemName = pickup.ItemName,
+                    rarity = pickup.Rarity,
+                    color = "#" + ColorUtility.ToHtmlStringRGBA(pickup.PickupColor),
+                    size = Mathf.Max(0.2f, pickup.PickupSize)
+                }
             });
         }
 
+        candidates.Sort((a, b) => a.priority.CompareTo(b.priority));
+        int count = Mathf.Min(MaxSyncedPickups, candidates.Count);
+        var pickups = new List<OnlineMaterialPickupState>(count);
+        for (int i = 0; i < count; i++)
+            pickups.Add(candidates[i].state);
         return pickups.ToArray();
     }
 
@@ -467,6 +649,96 @@ public class GameStateHost : MonoBehaviour
             pickup.CollectFromNetworkGuest();
             return;
         }
+    }
+
+    private void AddProjectileCandidate(
+        List<ProjectileSyncCandidate> candidates,
+        OnlineProjectileState state,
+        Vector3 position,
+        float priorityBoost)
+    {
+        if (state == null)
+            return;
+
+        candidates.Add(new ProjectileSyncCandidate
+        {
+            priority = GetInterestPriority(position, priorityBoost),
+            state = state
+        });
+    }
+
+    private void TrimEffectsByPriority(List<OnlineEffectState> effects)
+    {
+        if (effects == null)
+            return;
+
+        effects.Sort((a, b) => GetEffectPriority(a).CompareTo(GetEffectPriority(b)));
+        if (effects.Count > MaxSyncedEffects)
+            effects.RemoveRange(MaxSyncedEffects, effects.Count - MaxSyncedEffects);
+    }
+
+    private float GetEffectPriority(OnlineEffectState effect)
+    {
+        if (effect == null)
+            return float.MaxValue;
+
+        float boost = 0f;
+        switch (effect.type)
+        {
+            case OnlineEffectType.ThrownWeapon:
+            case OnlineEffectType.RangedAbilityProjectile:
+            case OnlineEffectType.GravityBombProjectile:
+            case OnlineEffectType.GravityWell:
+            case OnlineEffectType.TemporaryWall:
+            case OnlineEffectType.PlayerDecoy:
+            case OnlineEffectType.PlayerMinion:
+            case OnlineEffectType.BloodBurst:
+                boost = ImportantEffectPriorityBoost;
+                break;
+            case OnlineEffectType.ExpansionBurst:
+                boost = ImportantEffectPriorityBoost * 0.65f;
+                break;
+            case OnlineEffectType.FireTrail:
+                boost = ImportantEffectPriorityBoost * 0.15f;
+                break;
+        }
+
+        return GetInterestPriority(new Vector3(effect.x, effect.y, 0f), boost);
+    }
+
+    private float GetInterestPriority(Vector3 position, float priorityBoost)
+    {
+        float best = float.MaxValue;
+        AddInterestDistance(PlayerController.main, position, ref best);
+
+        if (_remotePlayer == null)
+            _remotePlayer = FindRemotePlayer();
+        AddInterestDistance(_remotePlayer, position, ref best);
+
+        if (best == float.MaxValue)
+            best = 0f;
+        return best - priorityBoost;
+    }
+
+    private static void AddInterestDistance(PlayerController player, Vector3 position, ref float best)
+    {
+        if (player == null)
+            return;
+
+        float distance = (player.transform.position - position).sqrMagnitude;
+        if (distance < best)
+            best = distance;
+    }
+
+    private static T[] TrimArray<T>(T[] items, int maxCount)
+    {
+        if (items == null || items.Length <= maxCount)
+            return items;
+
+        int count = Mathf.Max(0, maxCount);
+        T[] trimmed = new T[count];
+        Array.Copy(items, trimmed, count);
+        return trimmed;
     }
 
     private void AddThrownWeaponEffects(List<OnlineEffectState> effects)
@@ -753,7 +1025,39 @@ public class GameStateHost : MonoBehaviour
         }
     }
 
-    private void AddPlayerHitBoxStates(List<OnlineProjectileState> projectiles)
+    private void AddBloodBurstEffects(List<OnlineEffectState> effects)
+    {
+        for (int i = NetworkedBloodBurst.Active.Count - 1; i >= 0; i--)
+        {
+            NetworkedBloodBurst burst = NetworkedBloodBurst.Active[i];
+            if (burst == null)
+            {
+                NetworkedBloodBurst.Active.RemoveAt(i);
+                continue;
+            }
+
+            float remainingLife = burst.RemainingLife;
+            if (remainingLife <= 0f)
+                continue;
+
+            Vector3 position = burst.transform.position;
+            effects.Add(new OnlineEffectState
+            {
+                id = GetOrAssignId(burst.gameObject),
+                type = OnlineEffectType.BloodBurst,
+                ownerId = 0,
+                x = position.x,
+                y = position.y,
+                vx = burst.HitPoint.x,
+                vy = burst.HitPoint.y,
+                scaleX = Mathf.Max(0.2f, burst.SizeMultiplier),
+                scaleY = Mathf.Max(0.2f, burst.SizeMultiplier),
+                life = remainingLife
+            });
+        }
+    }
+
+    private void AddPlayerHitBoxStates(List<ProjectileSyncCandidate> projectiles)
     {
         var activeIds = new HashSet<int>();
 
@@ -776,7 +1080,11 @@ public class GameStateHost : MonoBehaviour
 
             AttackVisualSnapshot snapshot = BuildAttackVisualSnapshot(id, hitBox, expireAt);
             _attackVisuals[id] = snapshot;
-            projectiles.Add(snapshot.ToState(Time.time));
+            AddProjectileCandidate(
+                projectiles,
+                snapshot.ToState(Time.time),
+                new Vector3(snapshot.x, snapshot.y, 0f),
+                PlayerCombatPriorityBoost);
         }
 
         var expired = new List<int>();
@@ -790,7 +1098,11 @@ public class GameStateHost : MonoBehaviour
                 continue;
             }
 
-            projectiles.Add(kv.Value.ToState(Time.time));
+            AddProjectileCandidate(
+                projectiles,
+                kv.Value.ToState(Time.time),
+                new Vector3(kv.Value.x, kv.Value.y, 0f),
+                PlayerCombatPriorityBoost);
         }
 
         foreach (int id in expired)
@@ -894,7 +1206,53 @@ public class GameStateHost : MonoBehaviour
         HitBox.Spawned -= HandleHitBoxSpawned;
         if (OnlineMatchStartGate.IsWaiting)
             OnlineMatchStartGate.Reset();
-        _ws?.Dispose();
+        NotifyHostLeaving();
+        HasConnectedGuest = false;
+    }
+
+    private void NotifyHostLeaving()
+    {
+        if (_sentLeaveNotice)
+            return;
+
+        _sentLeaveNotice = true;
+        GameWebSocketClient leavingSocket = _ws;
+        _ws = null;
+        if (leavingSocket == null)
+            return;
+
+        _ = SendLeaveThenDispose(leavingSocket, "{\"type\":\"host_left\"}");
+    }
+
+    private static async Task SendLeaveThenDispose(GameWebSocketClient socket, string message)
+    {
+        try
+        {
+            if (socket != null && socket.IsConnected)
+                await socket.SendAsync(message);
+        }
+        finally
+        {
+            socket?.Dispose();
+        }
+    }
+
+    private class EnemySyncCandidate
+    {
+        public float priority;
+        public OnlineEnemyState state;
+    }
+
+    private class ProjectileSyncCandidate
+    {
+        public float priority;
+        public OnlineProjectileState state;
+    }
+
+    private class PickupSyncCandidate
+    {
+        public float priority;
+        public OnlineMaterialPickupState state;
     }
 
     private class AttackVisualSnapshot

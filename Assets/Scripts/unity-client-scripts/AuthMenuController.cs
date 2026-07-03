@@ -123,6 +123,8 @@ public class AuthMenuController : MonoBehaviour
     private bool _dailyCoinsClaimInFlight;
     private GameObject _multiplayerPanel;
     private GameObject _onlineLobbyPanel;
+    private SocialPanelController _mainSocialPanel;
+    private SocialPanelController _lobbySocialPanel;
     private TextMeshProUGUI _myNameText;
     private TextMeshProUGUI _myWeaponText;
     private TextMeshProUGUI _myArmorText;
@@ -216,6 +218,8 @@ public class AuthMenuController : MonoBehaviour
         ShowOnly(mainMenuPanel);
         EnsureProfileUI();
         EnsureMultiplayerPanel();
+        EnsureMainSocialPanel();
+        RefreshSocialPanelVisibility();
 
         if (validateRestoredSession)
         {
@@ -764,6 +768,8 @@ public class AuthMenuController : MonoBehaviour
         if (_inventoryPanelController != null) _inventoryPanelController.Initialize(_apiClient, BackToProfile);
         if (_shopPanelController != null) _shopPanelController.Initialize(_apiClient, BackToProfile);
         if (_skillTreePanelController != null) _skillTreePanelController.Initialize(_apiClient, BackToProfile);
+        if (_mainSocialPanel != null) _mainSocialPanel.SetApiClient(_apiClient);
+        if (_lobbySocialPanel != null) _lobbySocialPanel.SetApiClient(_apiClient);
         RefreshAuthServerIndicators();
         Debug.Log($"[AuthUI] Server set to: {_currentServerUrl}");
     }
@@ -1641,6 +1647,80 @@ public class AuthMenuController : MonoBehaviour
         if (_joinSessionPanel != null) _joinSessionPanel.SetActive(activePanel == _joinSessionPanel);
         if (_googleLoginPanel != null) _googleLoginPanel.SetActive(activePanel == _googleLoginPanel);
         if (_mapSelectPanel != null) _mapSelectPanel.SetActive(activePanel == _mapSelectPanel);
+        RefreshSocialPanelVisibility();
+    }
+
+    private void EnsureMainSocialPanel()
+    {
+        if (_mainSocialPanel != null || mainMenuPanel == null)
+            return;
+
+        GameObject panel = new GameObject("SocialPanel");
+        panel.transform.SetParent(mainMenuPanel.transform, false);
+        _mainSocialPanel = panel.AddComponent<SocialPanelController>();
+        _mainSocialPanel.Initialize(_apiClient, this, false, 0);
+        panel.SetActive(false);
+    }
+
+    private void EnsureLobbySocialPanel()
+    {
+        EnsureOnlineLobbyPanel();
+        if (_lobbySocialPanel != null || _onlineLobbyPanel == null)
+            return;
+
+        GameObject panel = new GameObject("HostSocialPanel");
+        panel.transform.SetParent(_onlineLobbyPanel.transform, false);
+        _lobbySocialPanel = panel.AddComponent<SocialPanelController>();
+        _lobbySocialPanel.Initialize(_apiClient, this, _isHostSession, _currentLobbyRoomNumber);
+        panel.SetActive(false);
+    }
+
+    private void RefreshSocialPanelVisibility()
+    {
+        bool loggedIn = CanUseAuthenticatedSession();
+
+        if (_mainSocialPanel != null)
+        {
+            _mainSocialPanel.SetApiClient(_apiClient);
+            _mainSocialPanel.SetContext(false, 0);
+            bool showMainSocial = loggedIn && mainMenuPanel != null && mainMenuPanel.activeSelf;
+            _mainSocialPanel.gameObject.SetActive(showMainSocial);
+            if (showMainSocial)
+                _mainSocialPanel.RefreshNow();
+        }
+
+        if (_lobbySocialPanel != null)
+        {
+            _lobbySocialPanel.SetApiClient(_apiClient);
+            bool showLobbySocial = loggedIn
+                && _isHostSession
+                && _onlineLobbyPanel != null
+                && _onlineLobbyPanel.activeSelf;
+            _lobbySocialPanel.SetContext(showLobbySocial, _currentLobbyRoomNumber);
+            _lobbySocialPanel.gameObject.SetActive(showLobbySocial);
+            if (showLobbySocial)
+                _lobbySocialPanel.RefreshNow();
+        }
+    }
+
+    public void JoinInvitedOnlineLobby(int roomNumber)
+    {
+        if (roomNumber <= 0)
+        {
+            ShowError("Invite did not include a valid room.");
+            return;
+        }
+
+        if (_lobbyPollRoutine != null)
+        {
+            StopCoroutine(_lobbyPollRoutine);
+            _lobbyPollRoutine = null;
+        }
+
+        _isHostSession = false;
+        _currentLobbyRoomNumber = roomNumber;
+        _loginReturn = LoginReturn.OnlineLobby;
+        ContinueToLobbyOrLogin();
     }
 
     private void RefreshSessionUI()
@@ -1672,6 +1752,7 @@ public class AuthMenuController : MonoBehaviour
         RefreshAuthServerIndicators();
         RefreshDailyCoinsUI();
         RefreshCreateSessionButtonState();
+        RefreshSocialPanelVisibility();
 
         if (!loggedIn)
         {
@@ -3043,6 +3124,8 @@ public class AuthMenuController : MonoBehaviour
         if (_lobbyWaitingText != null) _lobbyWaitingText.gameObject.SetActive(!_isHostSession);
 
         ShowOnly(_onlineLobbyPanel);
+        EnsureLobbySocialPanel();
+        RefreshSocialPanelVisibility();
 
         if (_lobbyPollRoutine != null) StopCoroutine(_lobbyPollRoutine);
         _lobbyPollRoutine = StartCoroutine(LobbyPollLoop());

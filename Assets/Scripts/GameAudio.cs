@@ -187,4 +187,5 @@ public class GameAudio : MonoBehaviour
     public static void PlayExitPortal()                           => PlayClip(Instance?._clipExitPortal);
     public static void PlayGenericPower()                         => PlayClip(Instance?._clipGenericPower);
     public static void PlayFireTrail()                            => PlayClip(Instance?._clipFireTrail);
+    public static void PlayQuickChat()                            => PlayClip(Instance?._clipGenericPower, 0.55f);
 }

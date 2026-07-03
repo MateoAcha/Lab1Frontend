@@ -51,6 +51,15 @@ public class GameBootstrap : MonoBehaviour
     public Texture2D healthConsumableIconTexture;
     public Sprite speedConsumableIcon;
     public Texture2D speedConsumableIconTexture;
+    [Header("Quick Chat Icons (R Wheel)")]
+    [Tooltip("Icon shown for the greet quick chat emote.")]
+    public Sprite quickChatGreetIcon;
+    [Tooltip("Icon shown for the thumbs up quick chat emote.")]
+    public Sprite quickChatThumbsUpIcon;
+    [Tooltip("Icon shown for the danger quick chat emote.")]
+    public Sprite quickChatDangerIcon;
+    [Tooltip("Icon shown for the angry quick chat emote.")]
+    public Sprite quickChatAngryIcon;
     [Header("Enemy Attack Orb Visual")]
     public Sprite[] enemyAttackOrbSprites;
     public Texture2D enemyAttackOrbTexture;
@@ -302,6 +311,10 @@ public class GameBootstrap : MonoBehaviour
         player.healthConsumableIconTexture = healthConsumableIconTexture;
         player.speedConsumableIcon = speedConsumableIcon;
         player.speedConsumableIconTexture = speedConsumableIconTexture;
+        player.quickChatGreetIcon = quickChatGreetIcon;
+        player.quickChatThumbsUpIcon = quickChatThumbsUpIcon;
+        player.quickChatDangerIcon = quickChatDangerIcon;
+        player.quickChatAngryIcon = quickChatAngryIcon;
         player.minionMoveSprites = minionMoveSprites;
         player.minionMoveTexture = minionMoveTexture;
         player.minionMoveResource = minionMoveResource;

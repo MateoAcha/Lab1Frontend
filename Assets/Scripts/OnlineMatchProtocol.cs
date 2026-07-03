@@ -4,6 +4,7 @@ using System;
 public class OnlineMatchInputMessage
 {
     public string type = "input";
+    public string username = "";
     public float moveX;
     public float moveY;
     public float aimX;
@@ -14,6 +15,9 @@ public class OnlineMatchInputMessage
     public int chargeSeq;
     public int burstSeq;
     public int consumableSeq;
+    public int quickChatSeq;
+    public string quickChatEmote = "";
+    public bool reviveHeld;
     public int pickupSeq;
     public int pickupId;
     public int weaponDamage = 1;
@@ -77,6 +81,7 @@ public static class OnlineEffectType
     public const int FireTrail = 7;
     public const int TemporaryWall = 8;
     public const int PlayerDecoy = 9;
+    public const int BloodBurst = 10;
 }
 
 [Serializable]
@@ -92,16 +97,22 @@ public class OnlineExitState
 public class OnlinePlayerState
 {
     public int id;
+    public string username = "";
     public float x;
     public float y;
     public float vx;
     public float vy;
     public float hp;
     public float maxHp;
+    public bool present = true;
     public bool alive;
+    public bool downed;
+    public float reviveProgress;
     public int skinId;
     public string skinColor = "#FFFFFF";
     public int attackSeq;
+    public int quickChatSeq;
+    public string quickChatEmote = "";
     public int weaponItemId;
     public string weaponType = "Spear";
     public string weaponColor = "#FFFFFF";

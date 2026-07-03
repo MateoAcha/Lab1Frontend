@@ -20,7 +20,7 @@ public class ChargeAbilityUI : MonoBehaviour
 
     private void LateUpdate()
     {
-        if (player == null || dimImage == null || fillImage == null)
+        if (player == null || !player.OwnsRuntimeHud || dimImage == null || fillImage == null)
         {
             return;
         }

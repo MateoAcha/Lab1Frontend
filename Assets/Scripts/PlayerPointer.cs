@@ -3,7 +3,10 @@ using UnityEngine;
 public class PlayerPointer : MonoBehaviour
 {
     private Transform _pivot;
+    private SpriteRenderer _arrowRenderer;
     private static Sprite _triangleSprite;
+    private static readonly Color NormalColor = new Color(1f, 0.92f, 0.15f, 0.9f);
+    private static readonly Color DownedColor = new Color(1f, 0.22f, 0.16f, 0.95f);
 
     private void Start()
     {
@@ -16,10 +19,10 @@ public class PlayerPointer : MonoBehaviour
         arrow.transform.localPosition = new Vector3(0f, 0.85f, 0f);
         arrow.transform.localScale = new Vector3(0.38f, 0.52f, 1f);
 
-        SpriteRenderer sr = arrow.AddComponent<SpriteRenderer>();
-        sr.sprite = GetTriangleSprite();
-        sr.color = new Color(1f, 0.92f, 0.15f, 0.9f);
-        sr.sortingOrder = 20;
+        _arrowRenderer = arrow.AddComponent<SpriteRenderer>();
+        _arrowRenderer.sprite = GetTriangleSprite();
+        _arrowRenderer.color = NormalColor;
+        _arrowRenderer.sortingOrder = 20;
 
         _pivot.gameObject.SetActive(false);
     }
@@ -37,6 +40,7 @@ public class PlayerPointer : MonoBehaviour
         }
 
         Vector2 otherPos;
+        bool targetDowned = false;
 
         if (isOnline)
         {
@@ -49,6 +53,7 @@ public class PlayerPointer : MonoBehaviour
                     return;
                 }
                 otherPos = other.position;
+                targetDowned = IsTransformDowned(other);
             }
             else
             {
@@ -61,6 +66,7 @@ public class PlayerPointer : MonoBehaviour
                         return;
                     }
                     otherPos = PlayerController.main.transform.position;
+                    targetDowned = PlayerController.main.IsDowned;
                 }
                 else if (OnlinePlayerSync.Instance == null || !OnlinePlayerSync.Instance.HasRemotePlayer)
                 {
@@ -70,6 +76,7 @@ public class PlayerPointer : MonoBehaviour
                 else
                 {
                     otherPos = OnlinePlayerSync.Instance.RemotePlayerPosition;
+                    targetDowned = OnlinePlayerSync.Instance.RemoteDowned;
                 }
             }
         }
@@ -82,9 +89,15 @@ public class PlayerPointer : MonoBehaviour
                 return;
             }
             otherPos = other.position;
+            targetDowned = IsTransformDowned(other);
         }
 
         _pivot.gameObject.SetActive(true);
+        if (_arrowRenderer != null)
+        {
+            _arrowRenderer.enabled = true;
+            _arrowRenderer.color = targetDowned ? DownedColor : NormalColor;
+        }
 
         Vector2 dir = (otherPos - (Vector2)transform.position).normalized;
         float angle = Mathf.Atan2(dir.x, dir.y) * Mathf.Rad2Deg;
@@ -124,5 +137,14 @@ public class PlayerPointer : MonoBehaviour
             size);
 
         return _triangleSprite;
+    }
+
+    private static bool IsTransformDowned(Transform target)
+    {
+        if (target == null)
+            return false;
+
+        PlayerReviveState reviveState = target.GetComponent<PlayerReviveState>();
+        return reviveState != null && reviveState.IsDowned;
     }
 }

@@ -11,16 +11,26 @@ using UnityEngine;
 // messages so the main thread can drain them via TryReceive().
 public class GameWebSocketClient : IDisposable
 {
+    private const int ReceiveBufferSize = 256 * 1024;
+    private const int SendTimeoutMilliseconds = 8000;
+
     private ClientWebSocket          _ws;
     private CancellationTokenSource  _cts;
     private readonly ConcurrentQueue<string> _inbox = new ConcurrentQueue<string>();
+    private volatile bool _faulted;
+    private string _lastError = "";
 
-    public bool IsConnected => _ws != null && _ws.State == WebSocketState.Open;
+    public bool IsConnected => _ws != null && _ws.State == WebSocketState.Open && !_faulted;
+    public string LastError => _lastError;
 
     public async Task ConnectAsync(string url)
     {
+        DisposeSocket();
         _ws  = new ClientWebSocket();
+        _ws.Options.KeepAliveInterval = TimeSpan.FromSeconds(10);
         _cts = new CancellationTokenSource();
+        _faulted = false;
+        _lastError = "";
         await _ws.ConnectAsync(new Uri(url), _cts.Token);
         _ = ReceiveLoopAsync();
     }
@@ -28,20 +38,31 @@ public class GameWebSocketClient : IDisposable
     public async Task SendAsync(string message)
     {
         if (!IsConnected) return;
+        CancellationTokenSource sendCts = null;
         try
         {
             byte[] bytes = Encoding.UTF8.GetBytes(message);
-            await _ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, _cts.Token);
+            sendCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+            sendCts.CancelAfter(SendTimeoutMilliseconds);
+            await _ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, sendCts.Token);
         }
-        catch { }
+        catch (Exception ex)
+        {
+            MarkFaulted(ex);
+        }
+        finally
+        {
+            if (sendCts != null)
+                sendCts.Dispose();
+        }
     }
 
     public bool TryReceive(out string message) => _inbox.TryDequeue(out message);
 
     private async Task ReceiveLoopAsync()
     {
-        byte[] buffer = new byte[64 * 1024];
-        var sb = new StringBuilder();
+        byte[] buffer = new byte[ReceiveBufferSize];
+        var sb = new StringBuilder(ReceiveBufferSize);
         try
         {
             while (_ws.State == WebSocketState.Open)
@@ -51,7 +72,11 @@ public class GameWebSocketClient : IDisposable
                 do
                 {
                     result = await _ws.ReceiveAsync(new ArraySegment<byte>(buffer), _cts.Token);
-                    if (result.MessageType == WebSocketMessageType.Close) return;
+                    if (result.MessageType == WebSocketMessageType.Close)
+                    {
+                        MarkFaulted(null);
+                        return;
+                    }
                     sb.Append(Encoding.UTF8.GetString(buffer, 0, result.Count));
                 }
                 while (!result.EndOfMessage);
@@ -59,12 +84,34 @@ public class GameWebSocketClient : IDisposable
                 _inbox.Enqueue(sb.ToString());
             }
         }
-        catch { }
+        catch (Exception ex)
+        {
+            MarkFaulted(ex);
+        }
     }
 
     public void Dispose()
     {
+        DisposeSocket();
+    }
+
+    private void MarkFaulted(Exception ex)
+    {
+        _faulted = true;
+        if (ex != null)
+            _lastError = ex.Message;
+        else if (string.IsNullOrWhiteSpace(_lastError))
+            _lastError = "socket closed";
+
+        try { _ws?.Abort(); } catch { }
+    }
+
+    private void DisposeSocket()
+    {
         try { _cts?.Cancel(); } catch { }
         try { _ws?.Dispose(); } catch { }
+        _ws = null;
+        _cts = null;
+        _faulted = true;
     }
 }

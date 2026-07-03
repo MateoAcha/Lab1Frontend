@@ -4,19 +4,29 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using TMPro;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
+#if ENABLE_INPUT_SYSTEM
+using UnityEngine.InputSystem.UI;
+#endif
 
 public class GameStateGuest : MonoBehaviour
 {
     private const float SendInterval = 0.05f;
     private const float InputHeartbeatInterval = 0.5f;
     private const float InputChangeThreshold = 0.001f;
+    private const float EnemyReplicaGraceSeconds = 1.25f;
+    private const float ReconnectInitialDelay = 0.4f;
+    private const float ReconnectMaxDelay = 4f;
+    private const float ReconnectDisconnectButtonDelay = 8f;
 
     private readonly Dictionary<int, OnlineEntityReplica> _enemyReplicas = new Dictionary<int, OnlineEntityReplica>();
+    private readonly Dictionary<int, float> _enemyReplicaExpiresAt = new Dictionary<int, float>();
     private readonly Dictionary<int, OnlineEntityReplica> _projectileReplicas = new Dictionary<int, OnlineEntityReplica>();
     private readonly Dictionary<int, OnlineEntityReplica> _effectReplicas = new Dictionary<int, OnlineEntityReplica>();
     private readonly Dictionary<int, float> _effectReplicaExpiresAt = new Dictionary<int, float>();
+    private readonly HashSet<int> _playedBloodBurstIds = new HashSet<int>();
     private readonly Dictionary<int, DroppedMaterialPickup> _pickupReplicas = new Dictionary<int, DroppedMaterialPickup>();
     private readonly HashSet<int> _locallyCollectedPickupIds = new HashSet<int>();
 
@@ -35,6 +45,12 @@ public class GameStateGuest : MonoBehaviour
     private bool _matchStarted;
     private bool _appliedMatchEndingVisual;
     private GameObject _hostPauseNotice;
+    private GameObject _reconnectNoticeCanvas;
+    private TextMeshProUGUI _reconnectNoticeText;
+    private GameObject _reconnectDisconnectButton;
+    private float _reconnectNoticeShownAt;
+    private bool _reconnectDisconnectImmediate;
+    private bool _sentLeaveNotice;
     private OnlineMatchInputMessage _lastSentInput;
     private float _nextInputHeartbeatAt;
     private int _pickupCollectSeq;
@@ -63,57 +79,112 @@ public class GameStateGuest : MonoBehaviour
         }
 
         BuildHostPauseNotice();
+        BuildReconnectNotice();
         StartCoroutine(ConnectThenRun());
+    }
+
+    private void Update()
+    {
+        if (_reconnectNoticeCanvas == null || !_reconnectNoticeCanvas.activeSelf || _reconnectDisconnectButton == null)
+            return;
+
+        bool showButton = _reconnectDisconnectImmediate ||
+            Time.realtimeSinceStartup - _reconnectNoticeShownAt >= ReconnectDisconnectButtonDelay;
+        if (_reconnectDisconnectButton.activeSelf != showButton)
+            _reconnectDisconnectButton.SetActive(showButton);
     }
 
     private IEnumerator ConnectThenRun()
     {
         string wsUrl = BuildWsUrl();
-        _ws = new GameWebSocketClient();
+        float reconnectDelay = ReconnectInitialDelay;
 
-        Task connectTask = _ws.ConnectAsync(wsUrl);
-        yield return new WaitUntil(() => connectTask.IsCompleted);
-
-        if (connectTask.IsFaulted || !_ws.IsConnected)
+        while (!_matchCompleted)
         {
-            Debug.LogWarning("GameStateGuest: WebSocket connect failed - " + connectTask.Exception?.GetBaseException()?.Message);
-            OnlineMatchStartGate.SetMessage("Could not connect to host.");
-            yield break;
-        }
+            _ws?.Dispose();
+            _ws = new GameWebSocketClient();
 
-        yield return Send("{\"type\":\"register\",\"role\":\"guest\"}");
-        StartCoroutine(ReceiveLoop());
-        StartCoroutine(SendLoop());
+            if (_matchStarted)
+            {
+                if (OnlineMatchStartGate.IsWaiting)
+                    OnlineMatchStartGate.Hide();
+                ShowReconnectNotice("Connection lagging... reconnecting");
+                SetLocalPlayerControlOnly(false);
+            }
+            else
+            {
+                HideReconnectNotice();
+                OnlineMatchStartGate.Show("Syncing online match...");
+            }
+
+            Task connectTask = _ws.ConnectAsync(wsUrl);
+            yield return new WaitUntil(() => connectTask.IsCompleted);
+
+            if (connectTask.IsFaulted || !_ws.IsConnected)
+            {
+                Debug.LogWarning("GameStateGuest: WebSocket reconnect failed - " + connectTask.Exception?.GetBaseException()?.Message);
+                yield return new WaitForSecondsRealtime(reconnectDelay);
+                reconnectDelay = Mathf.Min(ReconnectMaxDelay, reconnectDelay * 1.6f);
+                continue;
+            }
+
+            _lastSentInput = null;
+            _nextInputHeartbeatAt = 0f;
+            yield return Send("{\"type\":\"register\",\"role\":\"guest\"}");
+            if (_matchStarted && _ws != null && _ws.IsConnected)
+            {
+                OnlineMatchInputMessage reconnectInput = BuildInput();
+                reconnectInput.ready = true;
+                reconnectInput.readyMapIndex = GameMapSelection.SelectedMapIndex;
+                yield return Send(JsonUtility.ToJson(reconnectInput));
+                if (_ws != null && _ws.IsConnected)
+                {
+                    _lastSentInput = reconnectInput;
+                    _nextInputHeartbeatAt = Time.time + InputHeartbeatInterval;
+                }
+            }
+            reconnectDelay = ReconnectInitialDelay;
+
+            yield return ConnectedLoop();
+
+            if (!_matchCompleted)
+            {
+                string reason = _ws != null && !string.IsNullOrWhiteSpace(_ws.LastError)
+                    ? _ws.LastError
+                    : "socket closed";
+                Debug.LogWarning("GameStateGuest: connection interrupted, will reconnect: " + reason);
+                yield return new WaitForSecondsRealtime(reconnectDelay);
+                reconnectDelay = Mathf.Min(ReconnectMaxDelay, reconnectDelay * 1.6f);
+            }
+        }
     }
 
-    private IEnumerator ReceiveLoop()
+    private IEnumerator ConnectedLoop()
     {
-        while (_ws.IsConnected)
+        float nextSendAt = 0f;
+        while (_ws != null && _ws.IsConnected && !_matchCompleted)
         {
             string msg;
             while (_ws.TryReceive(out msg))
                 HandleHostMessage(msg);
 
-            yield return null;
-        }
-
-        if (!_matchCompleted)
-            HandleHostLeft();
-    }
-
-    private IEnumerator SendLoop()
-    {
-        while (_ws.IsConnected)
-        {
-            OnlineMatchInputMessage input = BuildInput();
-            if (ShouldSendInput(input))
+            if (Time.unscaledTime >= nextSendAt)
             {
-                yield return Send(JsonUtility.ToJson(input));
-                _lastSentInput = input;
-                _nextInputHeartbeatAt = Time.time + InputHeartbeatInterval;
+                OnlineMatchInputMessage input = BuildInput();
+                if (ShouldSendInput(input))
+                {
+                    yield return Send(JsonUtility.ToJson(input));
+                    if (_ws != null && _ws.IsConnected)
+                    {
+                        _lastSentInput = input;
+                        _nextInputHeartbeatAt = Time.time + InputHeartbeatInterval;
+                    }
+                }
+
+                nextSendAt = Time.unscaledTime + SendInterval;
             }
 
-            yield return new WaitForSeconds(SendInterval);
+            yield return null;
         }
     }
 
@@ -125,6 +196,7 @@ public class GameStateGuest : MonoBehaviour
 
         OnlineMatchInputMessage input = new OnlineMatchInputMessage
         {
+            username = PlayerDisplayNames.LocalUsernameOrFallback("Guest"),
             moveX = move.x,
             moveY = move.y,
             aimX = aim.x,
@@ -133,6 +205,9 @@ public class GameStateGuest : MonoBehaviour
             chargeSeq = player != null ? player.NetworkChargeSequence : 0,
             burstSeq = player != null ? player.NetworkBurstSequence : 0,
             consumableSeq = player != null ? player.NetworkConsumableSequence : 0,
+            quickChatSeq = player != null ? player.NetworkQuickChatSequence : 0,
+            quickChatEmote = player != null ? player.NetworkQuickChatEmote : "",
+            reviveHeld = player != null && player.ReviveInputHeldForNetwork,
             pickupSeq = _pickupCollectSeq,
             pickupId = _pendingPickupCollectId,
             weaponDamage = Mathf.Max(1, PlayerLoadout.WeaponDamage),
@@ -206,6 +281,9 @@ public class GameStateGuest : MonoBehaviour
         if (input.chargeSeq != _lastSentInput.chargeSeq) return true;
         if (input.burstSeq != _lastSentInput.burstSeq) return true;
         if (input.consumableSeq != _lastSentInput.consumableSeq) return true;
+        if (input.quickChatSeq != _lastSentInput.quickChatSeq) return true;
+        if (!string.Equals(input.quickChatEmote, _lastSentInput.quickChatEmote, StringComparison.Ordinal)) return true;
+        if (input.reviveHeld != _lastSentInput.reviveHeld) return true;
         if (input.pickupSeq != _lastSentInput.pickupSeq) return true;
         if (input.pickupId != _lastSentInput.pickupId) return true;
         if (input.weaponItemId != _lastSentInput.weaponItemId) return true;
@@ -213,6 +291,7 @@ public class GameStateGuest : MonoBehaviour
         if (!string.Equals(input.weaponColor, _lastSentInput.weaponColor, StringComparison.Ordinal)) return true;
         if (input.skinId != _lastSentInput.skinId) return true;
         if (!string.Equals(input.skinColor, _lastSentInput.skinColor, StringComparison.Ordinal)) return true;
+        if (!string.Equals(input.username, _lastSentInput.username, StringComparison.Ordinal)) return true;
         if (!string.Equals(input.swordSpearActiveSkillId, _lastSentInput.swordSpearActiveSkillId, StringComparison.Ordinal)) return true;
         if (input.swordSpearActiveSkillLevel != _lastSentInput.swordSpearActiveSkillLevel) return true;
         if (!string.Equals(input.swordSpearPassiveSkillId, _lastSentInput.swordSpearPassiveSkillId, StringComparison.Ordinal)) return true;
@@ -234,7 +313,8 @@ public class GameStateGuest : MonoBehaviour
 
         if (json.Contains("\"host_left\""))
         {
-            HandleHostLeft();
+            Debug.LogWarning("GameStateGuest: host disconnected.");
+            HandleHostDisconnected();
             return;
         }
 
@@ -255,6 +335,9 @@ public class GameStateGuest : MonoBehaviour
 
     private void ApplyState(OnlineMatchStateMessage state)
     {
+        if (state.matchStarted)
+            HideReconnectNotice();
+
         EnemySpawner.SetNetworkElapsedTime(state.matchStarted ? state.elapsedSeconds : 0f);
         ApplyMapState(state.mapIndex);
         ApplyStartState(state);
@@ -304,15 +387,16 @@ public class GameStateGuest : MonoBehaviour
         if (state.matchStarted)
         {
             if (!_matchStarted)
-            {
                 _matchStarted = true;
-                OnlineMatchStartGate.Hide();
-            }
 
+            HideReconnectNotice();
+            if (OnlineMatchStartGate.IsWaiting)
+                OnlineMatchStartGate.Hide();
             GameAudio.EnsureMatchMusic(state.mapIndex);
             return;
         }
 
+        HideReconnectNotice();
         OnlineMatchStartGate.Show(_sentReady ? "Waiting for host..." : "Syncing online match...");
     }
 
@@ -461,36 +545,50 @@ public class GameStateGuest : MonoBehaviour
     {
         if (OnlinePlayerSync.Instance == null) return;
 
-        if (!state.alive)
+        if (!state.present)
         {
             OnlinePlayerSync.Instance.ClearRemotePlayer();
             return;
         }
 
         OnlinePlayerSync.Instance.SetRemoteState(
-            new Vector3(state.x, state.y, 0f),
-            new Vector3(state.vx, state.vy, 0f),
-            state.skinId,
-            state.skinColor,
-            state.hp,
-            state.maxHp,
-            state.attackSeq,
-            state.weaponItemId,
-            state.weaponType,
-            state.weaponColor);
+            pos: new Vector3(state.x, state.y, 0f),
+            velocity: new Vector3(state.vx, state.vy, 0f),
+            skinId: state.skinId,
+            skinColor: state.skinColor,
+            hp: state.hp,
+            maxHp: state.maxHp,
+            attackSequence: state.attackSeq,
+            quickChatSequence: state.quickChatSeq,
+            quickChatEmote: state.quickChatEmote,
+            weaponItemId: state.weaponItemId,
+            weaponType: state.weaponType,
+            weaponColor: state.weaponColor,
+            downed: state.downed,
+            reviveProgress: state.reviveProgress,
+            username: state.username);
     }
 
     private void ApplyLocalGuestPlayer(OnlinePlayerState state, bool matchEnded, bool matchStarted)
     {
         PlayerController player = PlayerController.main;
         if (player == null) return;
+        player.ConfigureNetworkIdentity(PlayerDisplayNames.LocalUsernameOrFallback("Guest"));
 
         Health health = player.GetComponent<Health>();
         if (health != null)
         {
-            health.maxHp = Mathf.Max(state.maxHp, state.hp);
-            health.hp = Mathf.Clamp(state.hp, 0f, Mathf.Max(health.maxHp, 0.01f));
+            float previousHp = health.hp;
+            health.SetHealthSilently(
+                state.hp,
+                Mathf.Max(state.maxHp, state.hp, 0.01f));
+            if (state.hp < previousHp - 0.001f)
+                health.PlayPlayerHitFeedback();
         }
+
+        PlayerReviveState reviveState = player.GetComponent<PlayerReviveState>();
+        if (reviveState != null)
+            reviveState.ApplySyncedState(state.downed, state.reviveProgress);
 
         Vector3 authoritative = new Vector3(state.x, state.y, player.transform.position.z);
         float distance = Vector3.Distance(player.transform.position, authoritative);
@@ -498,24 +596,74 @@ public class GameStateGuest : MonoBehaviour
             ? authoritative
             : Vector3.Lerp(player.transform.position, authoritative, 0.18f);
 
-        SetLocalPlayerVisibleAndControllable(matchStarted && state.alive && !matchEnded);
+        SetLocalPlayerVisibleAndControllable(matchStarted && state.present && !matchEnded, state.downed);
     }
 
-    private void SetLocalPlayerVisibleAndControllable(bool alive)
+    private void SetLocalPlayerVisibleAndControllable(bool visible, bool downed = false)
     {
         PlayerController player = PlayerController.main;
         if (player == null) return;
 
-        player.enabled = alive;
+        player.enabled = visible && !downed;
+        PlayerNameTag nameTag = player.GetComponent<PlayerNameTag>();
+        if (nameTag != null)
+            nameTag.SetAvailable(visible);
 
-        SpriteRenderer renderer = player.GetComponent<SpriteRenderer>();
-        if (renderer != null) renderer.enabled = alive;
+        if (!visible)
+        {
+            PlayerQuickChatBubble bubble = player.GetComponent<PlayerQuickChatBubble>();
+            if (bubble != null)
+                bubble.Hide();
+
+            SpriteRenderer[] renderers = player.GetComponentsInChildren<SpriteRenderer>(true);
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                if (renderers[i] != null)
+                    renderers[i].enabled = false;
+            }
+        }
+        else
+        {
+            Transform sprite = player.transform.Find("Sprite");
+            SpriteRenderer renderer = sprite != null
+                ? sprite.GetComponent<SpriteRenderer>()
+                : player.GetComponentInChildren<SpriteRenderer>(true);
+            if (renderer != null)
+                renderer.enabled = true;
+            SetChildSpriteVisible(player.transform, "HpBack", true);
+            SetChildSpriteVisible(player.transform, "HpFill", true);
+        }
 
         Collider2D collider = player.GetComponent<Collider2D>();
-        if (collider != null) collider.enabled = alive;
+        if (collider != null) collider.enabled = visible;
 
         Rigidbody2D body = player.GetComponent<Rigidbody2D>();
-        if (body != null && !alive) body.linearVelocity = Vector2.zero;
+        if (body != null && (!visible || downed)) body.linearVelocity = Vector2.zero;
+    }
+
+    private void SetChildSpriteVisible(Transform parent, string childName, bool visible)
+    {
+        if (parent == null)
+            return;
+
+        Transform child = parent.Find(childName);
+        if (child == null)
+            return;
+
+        SpriteRenderer renderer = child.GetComponent<SpriteRenderer>();
+        if (renderer != null)
+            renderer.enabled = visible;
+    }
+
+    private void SetLocalPlayerControlOnly(bool enabled)
+    {
+        PlayerController player = PlayerController.main;
+        if (player == null) return;
+
+        player.enabled = enabled;
+        Rigidbody2D body = player.GetComponent<Rigidbody2D>();
+        if (body != null && !enabled)
+            body.linearVelocity = Vector2.zero;
     }
 
     private void ApplyHostPauseState(bool paused, bool matchEnded, bool matchStarted)
@@ -561,10 +709,33 @@ public class GameStateGuest : MonoBehaviour
         _pickupCollectSeq++;
     }
 
-    private void HandleHostLeft()
+    private void HandleHostDisconnected()
     {
         if (_matchCompleted) return;
         _matchCompleted = true;
+        _ws?.Dispose();
+        if (OnlinePlayerSync.Instance != null)
+            OnlinePlayerSync.Instance.ClearRemotePlayer();
+        if (OnlineMatchStartGate.IsWaiting)
+            OnlineMatchStartGate.Hide();
+        Time.timeScale = 1f;
+        SetLocalPlayerControlOnly(false);
+        ShowReconnectNotice("Host disconnected.", true);
+    }
+
+    private void DisconnectToOnlineMenu()
+    {
+        if (_matchCompleted && _reconnectNoticeCanvas == null)
+            return;
+
+        bool shouldNotifyLeave = !_matchCompleted;
+        _matchCompleted = true;
+        if (shouldNotifyLeave)
+            NotifyGuestLeaving();
+        else
+            _ws?.Dispose();
+        if (OnlinePlayerSync.Instance != null)
+            OnlinePlayerSync.Instance.ClearRemotePlayer();
         OnlineMatchStartGate.Reset();
         Time.timeScale = 1f;
         MultiplayerState.RequestReturnToOnlineMenu();
@@ -600,6 +771,117 @@ public class GameStateGuest : MonoBehaviour
         _hostPauseNotice.SetActive(false);
     }
 
+    private void BuildReconnectNotice()
+    {
+        if (_reconnectNoticeCanvas != null)
+            return;
+
+        _reconnectNoticeCanvas = new GameObject("ReconnectNoticeCanvas");
+        Canvas canvas = _reconnectNoticeCanvas.AddComponent<Canvas>();
+        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        canvas.sortingOrder = 120;
+        EnsureEventSystem();
+
+        CanvasScaler scaler = _reconnectNoticeCanvas.AddComponent<CanvasScaler>();
+        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        scaler.referenceResolution = new Vector2(1920f, 1080f);
+        _reconnectNoticeCanvas.AddComponent<GraphicRaycaster>();
+
+        GameObject reconnectNotice = new GameObject("ReconnectNotice");
+        reconnectNotice.transform.SetParent(_reconnectNoticeCanvas.transform, false);
+        RectTransform rect = reconnectNotice.AddComponent<RectTransform>();
+        rect.anchorMin = new Vector2(0.5f, 1f);
+        rect.anchorMax = new Vector2(0.5f, 1f);
+        rect.pivot = new Vector2(0.5f, 1f);
+        rect.sizeDelta = new Vector2(760f, 48f);
+        rect.anchoredPosition = new Vector2(0f, -88f);
+
+        _reconnectNoticeText = reconnectNotice.AddComponent<TextMeshProUGUI>();
+        _reconnectNoticeText.text = "Connection lagging... reconnecting";
+        _reconnectNoticeText.font = TMP_Settings.defaultFontAsset;
+        _reconnectNoticeText.fontSize = 22f;
+        _reconnectNoticeText.fontStyle = FontStyles.Bold;
+        _reconnectNoticeText.alignment = TextAlignmentOptions.Center;
+        _reconnectNoticeText.color = new Color(1f, 0.92f, 0.45f, 1f);
+        _reconnectNoticeText.raycastTarget = false;
+
+        GameObject buttonObj = new GameObject("ReconnectDisconnectButton");
+        buttonObj.transform.SetParent(_reconnectNoticeCanvas.transform, false);
+        RectTransform buttonRect = buttonObj.AddComponent<RectTransform>();
+        buttonRect.anchorMin = new Vector2(0.5f, 1f);
+        buttonRect.anchorMax = new Vector2(0.5f, 1f);
+        buttonRect.pivot = new Vector2(0.5f, 1f);
+        buttonRect.sizeDelta = new Vector2(220f, 46f);
+        buttonRect.anchoredPosition = new Vector2(0f, -132f);
+
+        Image buttonImage = buttonObj.AddComponent<Image>();
+        buttonImage.color = new Color(0.05f, 0.06f, 0.08f, 0.86f);
+        Button button = buttonObj.AddComponent<Button>();
+        button.onClick.AddListener(DisconnectToOnlineMenu);
+
+        GameObject labelObj = new GameObject("Label");
+        labelObj.transform.SetParent(buttonObj.transform, false);
+        RectTransform labelRect = labelObj.AddComponent<RectTransform>();
+        labelRect.anchorMin = Vector2.zero;
+        labelRect.anchorMax = Vector2.one;
+        labelRect.offsetMin = Vector2.zero;
+        labelRect.offsetMax = Vector2.zero;
+        TextMeshProUGUI label = labelObj.AddComponent<TextMeshProUGUI>();
+        label.text = "Disconnect";
+        label.font = TMP_Settings.defaultFontAsset;
+        label.fontSize = 20f;
+        label.fontStyle = FontStyles.Bold;
+        label.alignment = TextAlignmentOptions.Center;
+        label.color = Color.white;
+        label.raycastTarget = false;
+        _reconnectDisconnectButton = buttonObj;
+        _reconnectDisconnectButton.SetActive(false);
+
+        _reconnectNoticeCanvas.SetActive(false);
+    }
+
+    private void EnsureEventSystem()
+    {
+        EventSystem eventSystem = FindObjectOfType<EventSystem>();
+        GameObject eventSystemObj = eventSystem != null
+            ? eventSystem.gameObject
+            : new GameObject("EventSystem");
+        if (eventSystem == null)
+            eventSystemObj.AddComponent<EventSystem>();
+
+#if ENABLE_INPUT_SYSTEM
+        if (eventSystemObj.GetComponent<InputSystemUIInputModule>() == null)
+            eventSystemObj.AddComponent<InputSystemUIInputModule>();
+#else
+        if (eventSystemObj.GetComponent<StandaloneInputModule>() == null)
+            eventSystemObj.AddComponent<StandaloneInputModule>();
+#endif
+    }
+
+    private void ShowReconnectNotice(string message, bool showDisconnectImmediately = false)
+    {
+        BuildReconnectNotice();
+        bool wasVisible = _reconnectNoticeCanvas != null && _reconnectNoticeCanvas.activeSelf;
+        if (!wasVisible)
+            _reconnectNoticeShownAt = Time.realtimeSinceStartup;
+        _reconnectDisconnectImmediate = showDisconnectImmediately;
+        if (_reconnectNoticeText != null)
+            _reconnectNoticeText.text = string.IsNullOrWhiteSpace(message) ? "Connection lagging... reconnecting" : message;
+        if (_reconnectNoticeCanvas != null)
+            _reconnectNoticeCanvas.SetActive(true);
+        if (_reconnectDisconnectButton != null)
+            _reconnectDisconnectButton.SetActive(showDisconnectImmediately);
+    }
+
+    private void HideReconnectNotice()
+    {
+        if (_reconnectNoticeCanvas != null)
+            _reconnectNoticeCanvas.SetActive(false);
+        if (_reconnectDisconnectButton != null)
+            _reconnectDisconnectButton.SetActive(false);
+        _reconnectDisconnectImmediate = false;
+    }
+
     private void ApplyEnemyState(OnlineEnemyState[] enemies)
     {
         var activeIds = new HashSet<int>();
@@ -610,6 +892,7 @@ public class GameStateGuest : MonoBehaviour
             {
                 if (enemy == null || enemy.hp <= 0f) continue;
                 activeIds.Add(enemy.id);
+                _enemyReplicaExpiresAt[enemy.id] = Time.time + EnemyReplicaGraceSeconds;
 
                 if (_enemyReplicas.TryGetValue(enemy.id, out OnlineEntityReplica replica) && replica != null)
                 {
@@ -622,7 +905,7 @@ public class GameStateGuest : MonoBehaviour
             }
         }
 
-        RemoveInactive(_enemyReplicas, activeIds);
+        RemoveInactiveEnemies(activeIds);
     }
 
     private OnlineEntityReplica SpawnEnemyReplica(OnlineEnemyState enemy)
@@ -688,8 +971,9 @@ public class GameStateGuest : MonoBehaviour
         Health health = replica.GetComponent<Health>();
         if (health != null)
         {
+            float nextHp = Mathf.Clamp(enemy.hp, 0.01f, Mathf.Max(0.1f, enemy.maxHp));
             health.maxHp = Mathf.Max(0.1f, enemy.maxHp);
-            health.hp = Mathf.Clamp(enemy.hp, 0.01f, health.maxHp);
+            health.hp = nextHp;
         }
     }
 
@@ -901,6 +1185,7 @@ public class GameStateGuest : MonoBehaviour
     private void ApplyEffectState(OnlineEffectState[] effects)
     {
         var activeIds = new HashSet<int>();
+        var activeBloodIds = new HashSet<int>();
 
         if (effects != null)
         {
@@ -908,6 +1193,13 @@ public class GameStateGuest : MonoBehaviour
             {
                 if (effect == null || effect.life <= 0f) continue;
                 if (effect.ownerId == 1) continue;
+
+                if (effect.type == OnlineEffectType.BloodBurst)
+                {
+                    activeBloodIds.Add(effect.id);
+                    PlayBloodBurstEffectOnce(effect);
+                    continue;
+                }
 
                 activeIds.Add(effect.id);
                 if (effect.type == OnlineEffectType.FireTrail)
@@ -924,6 +1216,35 @@ public class GameStateGuest : MonoBehaviour
         }
 
         RemoveInactiveEffects(activeIds);
+        ForgetInactiveBloodBursts(activeBloodIds);
+    }
+
+    private void PlayBloodBurstEffectOnce(OnlineEffectState effect)
+    {
+        if (effect == null || effect.id <= 0 || _playedBloodBurstIds.Contains(effect.id))
+            return;
+
+        _playedBloodBurstIds.Add(effect.id);
+        BloodBurst.Spawn(
+            new Vector2(effect.x, effect.y),
+            new Vector2(effect.vx, effect.vy),
+            Mathf.Max(0.2f, Mathf.Max(effect.scaleX, effect.scaleY)));
+    }
+
+    private void ForgetInactiveBloodBursts(HashSet<int> activeBloodIds)
+    {
+        if (_playedBloodBurstIds.Count == 0)
+            return;
+
+        var expired = new List<int>();
+        foreach (int id in _playedBloodBurstIds)
+        {
+            if (!activeBloodIds.Contains(id))
+                expired.Add(id);
+        }
+
+        for (int i = 0; i < expired.Count; i++)
+            _playedBloodBurstIds.Remove(expired[i]);
     }
 
     private void ApplyMaterialPickupState(OnlineMaterialPickupState[] pickups)
@@ -1414,6 +1735,31 @@ public class GameStateGuest : MonoBehaviour
             replicas.Remove(id);
     }
 
+    private void RemoveInactiveEnemies(HashSet<int> activeIds)
+    {
+        var dead = new List<int>();
+        foreach (var kv in _enemyReplicas)
+        {
+            bool active = activeIds.Contains(kv.Key);
+            bool keepUntilExpiry = false;
+            if (!active && _enemyReplicaExpiresAt.TryGetValue(kv.Key, out float expireAt))
+                keepUntilExpiry = Time.time < expireAt;
+
+            if ((active || keepUntilExpiry) && kv.Value != null)
+                continue;
+
+            if (kv.Value != null)
+                Destroy(kv.Value.gameObject);
+            dead.Add(kv.Key);
+        }
+
+        foreach (int id in dead)
+        {
+            _enemyReplicas.Remove(id);
+            _enemyReplicaExpiresAt.Remove(id);
+        }
+    }
+
     private void RemoveInactiveEffects(HashSet<int> activeIds)
     {
         var dead = new List<int>();
@@ -1490,6 +1836,38 @@ public class GameStateGuest : MonoBehaviour
     {
         if (OnlineMatchStartGate.IsWaiting)
             OnlineMatchStartGate.Reset();
-        _ws?.Dispose();
+        if (_reconnectNoticeCanvas != null)
+            Destroy(_reconnectNoticeCanvas);
+        if (!_matchCompleted)
+            NotifyGuestLeaving();
+        else
+            _ws?.Dispose();
+    }
+
+    private void NotifyGuestLeaving()
+    {
+        if (_sentLeaveNotice)
+            return;
+
+        _sentLeaveNotice = true;
+        GameWebSocketClient leavingSocket = _ws;
+        _ws = null;
+        if (leavingSocket == null)
+            return;
+
+        _ = SendLeaveThenDispose(leavingSocket, "{\"type\":\"guest_left\"}");
+    }
+
+    private static async Task SendLeaveThenDispose(GameWebSocketClient socket, string message)
+    {
+        try
+        {
+            if (socket != null && socket.IsConnected)
+                await socket.SendAsync(message);
+        }
+        finally
+        {
+            socket?.Dispose();
+        }
     }
 }

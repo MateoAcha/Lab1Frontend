@@ -50,7 +50,7 @@ public static class MultiplayerState
     {
         foreach (PlayerController p in _players)
         {
-            if (p != null && p.transform != exclude)
+            if (p != null && p.gameObject.activeInHierarchy && p.transform != exclude)
                 return p.transform;
         }
         return null;
@@ -60,7 +60,7 @@ public static class MultiplayerState
     {
         foreach (PlayerController p in _players)
         {
-            if (p != null && p.playerIndex == playerIndex)
+            if (p != null && p.gameObject.activeInHierarchy && p.playerIndex == playerIndex)
                 return p;
         }
         return null;
@@ -91,6 +91,7 @@ public static class MultiplayerState
         foreach (PlayerController p in _players)
         {
             if (p == null) continue;
+            if (!p.gameObject.activeInHierarchy) continue;
             if (!p.EnemiesCanSee) continue;
             float sqDist = (p.transform.position - position).sqrMagnitude;
             if (sqDist < nearestSqDist)
@@ -121,16 +122,42 @@ public static class MultiplayerState
 
     public static void RegisterPlayerDeath(PlayerController player)
     {
+        if (player == null)
+            return;
+
+        if (IsMultiplayer || IsOnline)
+        {
+            if (AreAllActivePlayersDowned())
+                GameStatsTracker.RegisterPlayerDied();
+            return;
+        }
+
         UnregisterPlayer(player);
 
         bool anyAlive = false;
         foreach (PlayerController p in _players)
         {
-            if (p != null) { anyAlive = true; break; }
+            if (p != null && p.gameObject.activeInHierarchy) { anyAlive = true; break; }
         }
 
         if (!anyAlive)
             GameStatsTracker.RegisterPlayerDied();
+    }
+
+    public static bool AreAllActivePlayersDowned()
+    {
+        bool sawPlayer = false;
+        foreach (PlayerController p in _players)
+        {
+            if (p == null || !p.gameObject.activeInHierarchy)
+                continue;
+
+            sawPlayer = true;
+            if (!p.IsDowned)
+                return false;
+        }
+
+        return sawPlayer;
     }
 
     public static void Reset()
