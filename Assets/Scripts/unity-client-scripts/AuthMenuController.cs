@@ -913,8 +913,7 @@ public class AuthMenuController : MonoBehaviour
 
         if (statusCode == 401 || statusCode == 403)
         {
-            if (errorPanel != null)
-                errorPanel.SetActive(false);
+            ShowError("Your saved login expired or was replaced. Please log in again.");
             yield break;
         }
 
@@ -3119,6 +3118,7 @@ public class AuthMenuController : MonoBehaviour
 
             if (!created)
             {
+                RefreshSessionUI();
                 ShowError(string.IsNullOrWhiteSpace(createError) ? "Could not create lobby room." : createError);
                 OpenMultiplayer();
                 yield break;
@@ -3236,6 +3236,7 @@ public class AuthMenuController : MonoBehaviour
             if (!string.IsNullOrWhiteSpace(pingError))
             {
                 Debug.LogWarning($"[AuthUI] Lobby ping failed: {pingError}");
+                RefreshSessionUI();
                 ShowError(pingError);
                 if (!_isHostSession)
                 {
@@ -3288,6 +3289,7 @@ public class AuthMenuController : MonoBehaviour
 
         if (!started)
         {
+            RefreshSessionUI();
             ShowError(string.IsNullOrWhiteSpace(startError) ? "Could not start lobby." : startError);
             yield break;
         }
@@ -3787,6 +3789,7 @@ public class AuthMenuController : MonoBehaviour
 
         if (!string.IsNullOrWhiteSpace(error))
         {
+            RefreshSessionUI();
             SetRoomListStatus(error);
             yield break;
         }
