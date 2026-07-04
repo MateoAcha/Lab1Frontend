@@ -251,7 +251,30 @@ public class AuthApiClient
 
     public IEnumerator GetSocialSummary(Action<SocialSummaryResponse> onSuccess, Action<string> onError)
     {
-        yield return GetJsonTyped("/social/summary", onSuccess, onError, requiresAuth: true, context: "social summary");
+        var request = UnityWebRequest.Get(_baseUrl + "/social/summary");
+        request.timeout = 10;
+        if (!TryAttachAuthorization(request, onError))
+        {
+            yield break;
+        }
+
+        Debug.Log($"[AuthApi] GET {_baseUrl}/social/summary");
+        yield return request.SendWebRequest();
+        Debug.Log($"[AuthApi] Response {(long)request.responseCode} from /social/summary");
+
+        if (request.result != UnityWebRequest.Result.Success
+            || request.responseCode < 200
+            || request.responseCode >= 300)
+        {
+            onError?.Invoke(FormatError(request));
+            yield break;
+        }
+
+        string raw = request.downloadHandler != null ? request.downloadHandler.text : "";
+        Debug.Log($"[AuthApi] Social summary raw: {TruncateForLog(raw, 1800)}");
+
+        SocialSummaryResponse summary = ParseSocialSummary(raw);
+        onSuccess?.Invoke(summary ?? new SocialSummaryResponse());
     }
 
     public IEnumerator SendFriendRequest(string username, Action<SocialActionResponse> onSuccess, Action<string> onError)
@@ -1062,6 +1085,152 @@ public class AuthApiClient
         return sb.ToString();
     }
 
+    private static SocialSummaryResponse ParseSocialSummary(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return new SocialSummaryResponse();
+
+        SocialSummaryResponse direct = null;
+        try
+        {
+            direct = JsonUtility.FromJson<SocialSummaryResponse>(raw);
+        }
+        catch
+        {
+            direct = null;
+        }
+
+        if (HasAnySocialSection(direct))
+            return direct;
+
+        SocialSummaryEnvelope envelope = null;
+        try
+        {
+            envelope = JsonUtility.FromJson<SocialSummaryEnvelope>(raw);
+        }
+        catch
+        {
+            envelope = null;
+        }
+
+        if (HasAnySocialSection(envelope?.summary))
+            return envelope.summary;
+        if (HasAnySocialSection(envelope?.data))
+            return envelope.data;
+        if (HasAnySocialSection(envelope?.social))
+            return envelope.social;
+        if (HasAnySocialSection(envelope?.result))
+            return envelope.result;
+        if (HasAnySocialSection(envelope?.payload))
+            return envelope.payload;
+
+        string summaryObject = ExtractJsonObject(raw, "summary");
+        if (!string.IsNullOrWhiteSpace(summaryObject))
+        {
+            try
+            {
+                SocialSummaryResponse nested = JsonUtility.FromJson<SocialSummaryResponse>(summaryObject);
+                if (nested != null)
+                    return nested;
+            }
+            catch
+            {
+                Debug.LogWarning("[AuthApi] Could not parse nested social summary object.");
+            }
+        }
+
+        return direct ?? new SocialSummaryResponse();
+    }
+
+    private static bool HasAnySocialSection(SocialSummaryResponse summary)
+    {
+        if (summary == null)
+            return false;
+
+        return summary.friends != null
+            || summary.friendList != null
+            || summary.friendships != null
+            || summary.incomingFriendRequests != null
+            || summary.incomingRequests != null
+            || summary.receivedFriendRequests != null
+            || summary.friendRequests != null
+            || summary.sentFriendRequests != null
+            || summary.sentRequests != null
+            || summary.outgoingFriendRequests != null
+            || summary.gameInvites != null
+            || summary.invites != null
+            || summary.pendingGameInvites != null
+            || summary.lobbyInvites != null;
+    }
+
+    private static string ExtractJsonObject(string json, string key)
+    {
+        string search = "\"" + key + "\"";
+        int idx = json.IndexOf(search, StringComparison.OrdinalIgnoreCase);
+        if (idx < 0)
+            return null;
+
+        int colon = json.IndexOf(':', idx + search.Length);
+        if (colon < 0)
+            return null;
+
+        int start = colon + 1;
+        while (start < json.Length && char.IsWhiteSpace(json[start]))
+            start++;
+
+        if (start >= json.Length || json[start] != '{')
+            return null;
+
+        int depth = 0;
+        bool inString = false;
+        bool escaped = false;
+        for (int i = start; i < json.Length; i++)
+        {
+            char c = json[i];
+            if (inString)
+            {
+                if (escaped)
+                {
+                    escaped = false;
+                }
+                else if (c == '\\')
+                {
+                    escaped = true;
+                }
+                else if (c == '"')
+                {
+                    inString = false;
+                }
+                continue;
+            }
+
+            if (c == '"')
+            {
+                inString = true;
+                continue;
+            }
+
+            if (c == '{')
+                depth++;
+            else if (c == '}')
+            {
+                depth--;
+                if (depth == 0)
+                    return json.Substring(start, i - start + 1);
+            }
+        }
+
+        return null;
+    }
+
+    private static string TruncateForLog(string value, int maxLength)
+    {
+        if (string.IsNullOrEmpty(value) || value.Length <= maxLength)
+            return value ?? "";
+
+        return value.Substring(0, Mathf.Max(0, maxLength)) + "...";
+    }
+
     private IEnumerator GetJsonTyped<T>(
         string endpoint,
         Action<T> onSuccess,
@@ -1337,6 +1506,16 @@ public class AuthApiClient
     }
 
     [Serializable]
+    private class SocialSummaryEnvelope
+    {
+        public SocialSummaryResponse summary;
+        public SocialSummaryResponse data;
+        public SocialSummaryResponse social;
+        public SocialSummaryResponse result;
+        public SocialSummaryResponse payload;
+    }
+
+    [Serializable]
     private class LobbyPingRequest
     {
         public int roomNumber;
@@ -1425,17 +1604,32 @@ public class ChallengeClaimData
 public class SocialSummaryResponse
 {
     public FriendSummaryResponse[] friends;
+    public FriendSummaryResponse[] friendList;
+    public FriendSummaryResponse[] friendships;
     public FriendRequestResponse[] incomingFriendRequests;
+    public FriendRequestResponse[] incomingRequests;
+    public FriendRequestResponse[] receivedFriendRequests;
+    public FriendRequestResponse[] friendRequests;
     public FriendRequestResponse[] sentFriendRequests;
+    public FriendRequestResponse[] sentRequests;
+    public FriendRequestResponse[] outgoingFriendRequests;
     public GameInviteResponse[] gameInvites;
+    public GameInviteResponse[] invites;
+    public GameInviteResponse[] pendingGameInvites;
+    public GameInviteResponse[] lobbyInvites;
 }
 
 [Serializable]
 public class FriendSummaryResponse
 {
+    public int friendshipId;
     public int userId;
     public int id;
+    public int friendUserId;
+    public int friendId;
     public string username;
+    public string friendUsername;
+    public string name;
     public string displayName;
     public int level;
 }
@@ -1444,13 +1638,20 @@ public class FriendSummaryResponse
 public class FriendRequestResponse
 {
     public int requestId;
+    public int friendRequestId;
     public int id;
     public int requesterUserId;
     public int senderUserId;
+    public int fromUserId;
     public int recipientUserId;
+    public int toUserId;
     public string requesterUsername;
+    public string requester;
     public string senderUsername;
+    public string fromUsername;
     public string recipientUsername;
+    public string recipient;
+    public string toUsername;
     public string createdAt;
     public string status;
 }
@@ -1459,14 +1660,19 @@ public class FriendRequestResponse
 public class GameInviteResponse
 {
     public int inviteId;
+    public int gameInviteId;
     public int id;
     public int hostUserId;
     public int senderUserId;
     public int recipientUserId;
     public string hostUsername;
+    public string host;
     public string senderUsername;
+    public string fromUsername;
     public string recipientUsername;
+    public string toUsername;
     public int roomNumber;
+    public int room;
     public string createdAt;
     public string expiresAt;
     public string status;
@@ -1478,8 +1684,11 @@ public class SocialActionResponse
     public string result;
     public SocialSummaryResponse summary;
     public FriendSummaryResponse friend;
+    public FriendSummaryResponse friendship;
     public FriendRequestResponse request;
+    public FriendRequestResponse friendRequest;
     public GameInviteResponse invite;
+    public GameInviteResponse gameInvite;
 }
 
 [Serializable]
@@ -1488,6 +1697,7 @@ public class GameInviteActionResponse
     public string result;
     public SocialSummaryResponse summary;
     public GameInviteResponse invite;
+    public GameInviteResponse gameInvite;
     public int roomNumber;
 }
 

@@ -62,6 +62,17 @@ public class AuthMenuController : MonoBehaviour
     [Header("Weapon Visuals")]
     public WeaponVisualDatabase weaponVisualDatabase;
 
+    [Header("Social Profile Preview")]
+    public Vector2 profilePreviewSwordWeaponOffset = new Vector2(88f, -6f);
+    public Vector2 profilePreviewSwordWeaponSize = new Vector2(112f, 146f);
+    public float profilePreviewSwordWeaponRotation = -28f;
+    public Vector2 profilePreviewSpearWeaponOffset = new Vector2(92f, 0f);
+    public Vector2 profilePreviewSpearWeaponSize = new Vector2(92f, 178f);
+    public float profilePreviewSpearWeaponRotation = -35f;
+    public Vector2 profilePreviewRangedWeaponOffset = new Vector2(86f, 18f);
+    public Vector2 profilePreviewRangedWeaponSize = new Vector2(74f, 74f);
+    public float profilePreviewRangedWeaponRotation = 0f;
+
     [Header("Play")]
     public GameObject gamePrefab;
     public Transform gameParent;
@@ -126,15 +137,18 @@ public class AuthMenuController : MonoBehaviour
     private SocialPanelController _mainSocialPanel;
     private SocialPanelController _lobbySocialPanel;
     private TextMeshProUGUI _myNameText;
-    private TextMeshProUGUI _myWeaponText;
-    private TextMeshProUGUI _myArmorText;
-    private TextMeshProUGUI _myItemText;
+    private RectTransform _myLobbyPreviewRoot;
+    private TextMeshProUGUI _myLobbyStatusText;
     private TextMeshProUGUI _otherNameText;
-    private TextMeshProUGUI _otherWeaponText;
-    private TextMeshProUGUI _otherArmorText;
-    private TextMeshProUGUI _otherItemText;
+    private RectTransform _otherLobbyPreviewRoot;
+    private TextMeshProUGUI _otherLobbyStatusText;
     private TextMeshProUGUI _hostAddressText;
     private Coroutine _lobbyPollRoutine;
+    private Coroutine _otherLobbyProfileRoutine;
+    private UserProfileSummaryResponse _otherLobbyProfile;
+    private string _otherLobbyPreviewUsername = "";
+    private string _otherLobbyProfileUsername = "";
+    private string _otherLobbyProfileRequestUsername = "";
     private bool _isHostSession;
     private Button _lobbyPlayButton;
     private Image _lobbyPlayButtonImage;
@@ -1658,8 +1672,10 @@ public class AuthMenuController : MonoBehaviour
 
         GameObject panel = new GameObject("SocialPanel");
         panel.transform.SetParent(mainMenuPanel.transform, false);
+        panel.transform.SetAsLastSibling();
         _mainSocialPanel = panel.AddComponent<SocialPanelController>();
         _mainSocialPanel.Initialize(_apiClient, this, false, 0);
+        ApplySocialProfilePreviewSettings(_mainSocialPanel);
         panel.SetActive(false);
     }
 
@@ -1671,9 +1687,28 @@ public class AuthMenuController : MonoBehaviour
 
         GameObject panel = new GameObject("HostSocialPanel");
         panel.transform.SetParent(_onlineLobbyPanel.transform, false);
+        panel.transform.SetAsLastSibling();
         _lobbySocialPanel = panel.AddComponent<SocialPanelController>();
         _lobbySocialPanel.Initialize(_apiClient, this, _isHostSession, _currentLobbyRoomNumber);
+        ApplySocialProfilePreviewSettings(_lobbySocialPanel);
         panel.SetActive(false);
+    }
+
+    private void ApplySocialProfilePreviewSettings(SocialPanelController panel)
+    {
+        if (panel == null)
+            return;
+
+        panel.SetProfilePreviewWeaponOffsets(
+            profilePreviewSwordWeaponOffset,
+            profilePreviewSwordWeaponSize,
+            profilePreviewSwordWeaponRotation,
+            profilePreviewSpearWeaponOffset,
+            profilePreviewSpearWeaponSize,
+            profilePreviewSpearWeaponRotation,
+            profilePreviewRangedWeaponOffset,
+            profilePreviewRangedWeaponSize,
+            profilePreviewRangedWeaponRotation);
     }
 
     private void RefreshSocialPanelVisibility()
@@ -1683,9 +1718,12 @@ public class AuthMenuController : MonoBehaviour
         if (_mainSocialPanel != null)
         {
             _mainSocialPanel.SetApiClient(_apiClient);
+            ApplySocialProfilePreviewSettings(_mainSocialPanel);
             _mainSocialPanel.SetContext(false, 0);
             bool showMainSocial = loggedIn && mainMenuPanel != null && mainMenuPanel.activeSelf;
             _mainSocialPanel.gameObject.SetActive(showMainSocial);
+            if (showMainSocial)
+                _mainSocialPanel.transform.SetAsLastSibling();
             if (showMainSocial)
                 _mainSocialPanel.RefreshNow();
         }
@@ -1693,12 +1731,15 @@ public class AuthMenuController : MonoBehaviour
         if (_lobbySocialPanel != null)
         {
             _lobbySocialPanel.SetApiClient(_apiClient);
+            ApplySocialProfilePreviewSettings(_lobbySocialPanel);
             bool showLobbySocial = loggedIn
                 && _isHostSession
                 && _onlineLobbyPanel != null
                 && _onlineLobbyPanel.activeSelf;
             _lobbySocialPanel.SetContext(showLobbySocial, _currentLobbyRoomNumber);
             _lobbySocialPanel.gameObject.SetActive(showLobbySocial);
+            if (showLobbySocial)
+                _lobbySocialPanel.transform.SetAsLastSibling();
             if (showLobbySocial)
                 _lobbySocialPanel.RefreshNow();
         }
@@ -3133,24 +3174,21 @@ public class AuthMenuController : MonoBehaviour
 
     private void SetOtherPlayerWaiting()
     {
-        if (_otherNameText   != null) _otherNameText.text   = "Waiting...";
-        if (_otherWeaponText != null) _otherWeaponText.text = "-";
-        if (_otherArmorText  != null) _otherArmorText.text  = "-";
-        if (_otherItemText   != null) _otherItemText.text   = "-";
+        if (_otherNameText != null) _otherNameText.text = "Waiting...";
+        if (_otherLobbyStatusText != null) _otherLobbyStatusText.text = "";
+        ClearLobbyPreview(_otherLobbyPreviewRoot);
+        StopOtherLobbyProfileFetch();
+        _otherLobbyProfile = null;
+        _otherLobbyPreviewUsername = "";
+        _otherLobbyProfileUsername = "";
+        _otherLobbyProfileRequestUsername = "";
     }
 
     private void RefreshMyLobbyLoadoutDisplay()
     {
-        if (_myNameText   != null) _myNameText.text   = AuthSession.Username;
-        if (_myWeaponText != null) _myWeaponText.text = "Weapon: " + GetLobbyItemLabel(PlayerLoadout.EquippedWeapon);
-        if (_myArmorText  != null) _myArmorText.text  = "Armor: "  + GetLobbyItemLabel(PlayerLoadout.EquippedArmor);
-        if (_myItemText   != null) _myItemText.text   = "Item: "   + GetLobbyItemLabel(PlayerLoadout.EquippedConsumable);
-    }
-
-    private string GetLobbyItemLabel(InventoryItemData item)
-    {
-        string itemName = GetLobbyItemName(item);
-        return string.IsNullOrWhiteSpace(itemName) ? "None" : itemName;
+        if (_myNameText != null) _myNameText.text = string.IsNullOrWhiteSpace(AuthSession.Username) ? "You" : AuthSession.Username;
+        if (_myLobbyStatusText != null) _myLobbyStatusText.text = "";
+        RenderLobbyLoadoutPreview(_myLobbyPreviewRoot, BuildLocalLobbyLoadoutSummary());
     }
 
     private string GetLobbyItemName(InventoryItemData item)
@@ -3182,10 +3220,8 @@ public class AuthMenuController : MonoBehaviour
                     }
                     if (other != null)
                     {
-                        if (_otherNameText   != null) _otherNameText.text   = other.username;
-                        if (_otherWeaponText != null) _otherWeaponText.text = "Weapon: " + (string.IsNullOrWhiteSpace(other.weapon) ? "None" : other.weapon);
-                        if (_otherArmorText  != null) _otherArmorText.text  = "Armor: "  + (string.IsNullOrWhiteSpace(other.armor)  ? "None" : other.armor);
-                        if (_otherItemText   != null) _otherItemText.text   = "Item: "   + (string.IsNullOrWhiteSpace(other.item)   ? "None" : other.item);
+                        if (_otherNameText != null) _otherNameText.text = other.username;
+                        RenderOtherLobbyLoadoutPreview(other);
                     }
                     else
                     {
@@ -3220,6 +3256,7 @@ public class AuthMenuController : MonoBehaviour
     private void PlayOnlineGame()
     {
         if (_lobbyPollRoutine != null) { StopCoroutine(_lobbyPollRoutine); _lobbyPollRoutine = null; }
+        StopOtherLobbyProfileFetch();
         MultiplayerState.SetOnline(true);
         MultiplayerState.SetHost(_isHostSession);
         MultiplayerState.SetOnlineRoomNumber(_currentLobbyRoomNumber);
@@ -3271,6 +3308,317 @@ public class AuthMenuController : MonoBehaviour
         return count;
     }
 
+    private void RenderOtherLobbyLoadoutPreview(LobbyPlayerData other)
+    {
+        string username = other != null ? other.username : "";
+        if (string.IsNullOrWhiteSpace(username))
+        {
+            SetOtherPlayerWaiting();
+            return;
+        }
+
+        if (!SameUsername(_otherLobbyPreviewUsername, username))
+        {
+            _otherLobbyPreviewUsername = username;
+            _otherLobbyProfile = null;
+            _otherLobbyProfileUsername = "";
+            _otherLobbyProfileRequestUsername = "";
+            StopOtherLobbyProfileFetch();
+        }
+
+        SocialLoadoutSummary profileLoadout = _otherLobbyProfile != null && SameUsername(_otherLobbyProfileUsername, username)
+            ? GetLobbyProfileLoadout(_otherLobbyProfile)
+            : null;
+        SocialLoadoutSummary loadout = profileLoadout ?? BuildLobbyLoadoutSummary(other);
+
+        if (_otherLobbyStatusText != null)
+            _otherLobbyStatusText.text = "";
+        RenderLobbyLoadoutPreview(_otherLobbyPreviewRoot, loadout);
+
+        if (_otherLobbyProfileRoutine == null && !SameUsername(_otherLobbyProfileRequestUsername, username))
+        {
+            _otherLobbyProfileRequestUsername = username;
+            _otherLobbyProfileRoutine = StartCoroutine(FetchOtherLobbyProfilePreview(username));
+        }
+    }
+
+    private IEnumerator FetchOtherLobbyProfilePreview(string username)
+    {
+        UserProfileSummaryResponse profile = null;
+        string error = null;
+        yield return _apiClient.GetProfileByUsername(
+            username,
+            data => profile = data,
+            err => error = err);
+
+        if (SameUsername(_otherLobbyPreviewUsername, username))
+        {
+            if (profile != null)
+            {
+                _otherLobbyProfile = profile;
+                _otherLobbyProfileUsername = username;
+                SocialLoadoutSummary profileLoadout = GetLobbyProfileLoadout(profile);
+                if (profileLoadout != null)
+                    RenderLobbyLoadoutPreview(_otherLobbyPreviewRoot, profileLoadout);
+            }
+            else if (!string.IsNullOrWhiteSpace(error))
+            {
+                Debug.LogWarning($"[AuthUI] Could not load lobby profile preview for {username}: {error}");
+            }
+        }
+
+        _otherLobbyProfileRoutine = null;
+    }
+
+    private void StopOtherLobbyProfileFetch()
+    {
+        if (_otherLobbyProfileRoutine == null)
+            return;
+
+        StopCoroutine(_otherLobbyProfileRoutine);
+        _otherLobbyProfileRoutine = null;
+    }
+
+    private SocialLoadoutSummary BuildLocalLobbyLoadoutSummary()
+    {
+        InventoryItemData weapon = PlayerLoadout.EquippedWeapon;
+        return new SocialLoadoutSummary
+        {
+            skinId = PlayerLoadout.EquippedSkinId,
+            equippedSkinId = PlayerLoadout.EquippedSkinId,
+            skinColor = ColorToHex(PlayerLoadout.GetSkinColor()),
+            weaponItemId = weapon != null ? weapon.itemId : 0,
+            equippedWeaponItemId = weapon != null ? weapon.itemId : 0,
+            weaponId = weapon != null ? weapon.itemId : 0,
+            weaponType = FirstNonEmpty(
+                weapon != null ? weapon.weaponType : "",
+                weapon != null ? weapon.weapon_type : "",
+                weapon != null ? weapon.weaponSubtype : "",
+                weapon != null ? weapon.weapon_subtype : "",
+                weapon != null ? weapon.weaponClass : "",
+                weapon != null ? weapon.weapon_class : "",
+                PlayerLoadout.CurrentWeaponKind.ToString()),
+            weaponName = GetLobbyItemName(weapon),
+            weaponItemName = GetLobbyItemName(weapon),
+            weaponColor = FirstNonEmpty(
+                weapon != null ? weapon.weaponColor : "",
+                weapon != null ? weapon.weapon_color : "",
+                PlayerLoadout.WeaponColorHex)
+        };
+    }
+
+    private SocialLoadoutSummary BuildLobbyLoadoutSummary(LobbyPlayerData player)
+    {
+        string weaponName = player != null ? player.weapon : "";
+        return new SocialLoadoutSummary
+        {
+            weaponName = weaponName,
+            weaponItemName = weaponName,
+            weaponType = weaponName,
+            weaponColor = "#E6DBB3"
+        };
+    }
+
+    private void RenderLobbyLoadoutPreview(RectTransform root, SocialLoadoutSummary loadout)
+    {
+        if (root == null)
+            return;
+
+        ClearLobbyPreview(root);
+
+        int skinId = GetLobbySkinId(loadout);
+        Color skinColor = ParseLobbyColor(loadout != null ? loadout.skinColor : "", PlayerLoadout.GetSkinColor(skinId));
+        Color weaponColor = ParseLobbyColor(loadout != null ? loadout.weaponColor : "", new Color(0.90f, 0.86f, 0.70f, 1f));
+        WeaponKind weaponKind = ResolveLobbyWeaponKind(loadout);
+
+        GameObject body = CreateLobbyPreviewObject("CharacterBody", root);
+        RectTransform bodyRect = body.GetComponent<RectTransform>();
+        bodyRect.anchorMin = new Vector2(0.5f, 0.5f);
+        bodyRect.anchorMax = new Vector2(0.5f, 0.5f);
+        bodyRect.pivot = new Vector2(0.5f, 0.5f);
+        bodyRect.sizeDelta = new Vector2(124f, 158f);
+        bodyRect.anchoredPosition = new Vector2(-32f, -4f);
+
+        Image bodyImage = body.AddComponent<Image>();
+        bodyImage.preserveAspect = true;
+        bodyImage.raycastTarget = false;
+        Sprite skinSprite = SkinVisualDatabase.GetSpriteSetOrDefault(skinId).PreviewOrFirstSprite;
+        bodyImage.sprite = skinSprite != null ? skinSprite : SimpleSprite.Square;
+        bodyImage.color = skinSprite != null ? Color.white : skinColor;
+
+        if (weaponKind == WeaponKind.Ranged)
+        {
+            RenderLobbyRangedOrb(root, weaponColor);
+            return;
+        }
+
+        GameObject weapon = CreateLobbyPreviewObject("Weapon", root);
+        RectTransform weaponRect = weapon.GetComponent<RectTransform>();
+        weaponRect.anchorMin = new Vector2(0.5f, 0.5f);
+        weaponRect.anchorMax = new Vector2(0.5f, 0.5f);
+        weaponRect.pivot = new Vector2(0.5f, 0.5f);
+
+        bool spear = weaponKind == WeaponKind.Spear;
+        weaponRect.sizeDelta = ClampLobbyPreviewSize(
+            spear ? profilePreviewSpearWeaponSize : profilePreviewSwordWeaponSize,
+            spear ? new Vector2(92f, 178f) : new Vector2(112f, 146f));
+        weaponRect.anchoredPosition = spear ? profilePreviewSpearWeaponOffset : profilePreviewSwordWeaponOffset;
+        weaponRect.localRotation = Quaternion.Euler(0f, 0f, spear ? profilePreviewSpearWeaponRotation : profilePreviewSwordWeaponRotation);
+
+        Image weaponImage = weapon.AddComponent<Image>();
+        weaponImage.preserveAspect = true;
+        weaponImage.raycastTarget = false;
+        Sprite weaponSprite = ResolveLobbyWeaponSprite(loadout, weaponKind);
+        weaponImage.sprite = weaponSprite != null ? weaponSprite : SimpleSprite.Square;
+        weaponImage.color = weaponSprite != null ? Color.white : weaponColor;
+    }
+
+    private void RenderLobbyRangedOrb(RectTransform root, Color weaponColor)
+    {
+        GameObject orb = CreateLobbyPreviewObject("RangedOrb", root);
+        RectTransform orbRect = orb.GetComponent<RectTransform>();
+        orbRect.anchorMin = new Vector2(0.5f, 0.5f);
+        orbRect.anchorMax = new Vector2(0.5f, 0.5f);
+        orbRect.pivot = new Vector2(0.5f, 0.5f);
+        orbRect.sizeDelta = ClampLobbyPreviewSize(profilePreviewRangedWeaponSize, new Vector2(74f, 74f));
+        orbRect.anchoredPosition = profilePreviewRangedWeaponOffset;
+        orbRect.localRotation = Quaternion.Euler(0f, 0f, profilePreviewRangedWeaponRotation);
+
+        Image orbImage = orb.AddComponent<Image>();
+        orbImage.sprite = SimpleSprite.Circle;
+        orbImage.color = weaponColor;
+        orbImage.preserveAspect = true;
+        orbImage.raycastTarget = false;
+
+        Outline outline = orb.AddComponent<Outline>();
+        outline.effectColor = new Color(1f, 1f, 1f, 0.28f);
+        outline.effectDistance = new Vector2(3f, -3f);
+    }
+
+    private Sprite ResolveLobbyWeaponSprite(SocialLoadoutSummary loadout, WeaponKind weaponKind)
+    {
+        int weaponItemId = GetLobbyWeaponItemId(loadout);
+        WeaponVisualEntry visual;
+
+        if (weaponKind == WeaponKind.Ranged)
+            return null;
+
+        if (weaponKind == WeaponKind.Spear
+            && WeaponVisualDatabase.TryGetSpearVisualGlobal(weaponItemId, out visual))
+            return visual.ResolveSpearSprite();
+
+        if ((weaponKind == WeaponKind.Sword || weaponKind == WeaponKind.Hammer)
+            && WeaponVisualDatabase.TryGetSwordVisualGlobal(weaponItemId, out visual))
+            return visual.ResolveSwordSwingSprite();
+
+        if (WeaponVisualDatabase.TryGetSwordVisualGlobal(weaponItemId, out visual))
+            return visual.ResolveSwordSwingSprite();
+
+        if (WeaponVisualDatabase.TryGetSpearVisualGlobal(weaponItemId, out visual))
+            return visual.ResolveSpearSprite();
+
+        return null;
+    }
+
+    private static SocialLoadoutSummary GetLobbyProfileLoadout(UserProfileSummaryResponse profile)
+    {
+        if (profile == null)
+            return null;
+        if (profile.loadout != null)
+            return profile.loadout;
+        if (profile.equippedLoadout != null)
+            return profile.equippedLoadout;
+        return profile.equipped;
+    }
+
+    private static WeaponKind ResolveLobbyWeaponKind(SocialLoadoutSummary loadout)
+    {
+        if (loadout == null)
+            return WeaponKind.Spear;
+
+        string type = (loadout.weaponType ?? "") + " " + (loadout.weaponName ?? "") + " " + (loadout.weaponItemName ?? "");
+        return PlayerLoadout.ParseWeaponKind(type);
+    }
+
+    private static int GetLobbySkinId(SocialLoadoutSummary loadout)
+    {
+        if (loadout == null)
+            return 0;
+        return loadout.skinId > 0 ? loadout.skinId : loadout.equippedSkinId;
+    }
+
+    private static int GetLobbyWeaponItemId(SocialLoadoutSummary loadout)
+    {
+        if (loadout == null)
+            return 0;
+        if (loadout.weaponItemId > 0)
+            return loadout.weaponItemId;
+        if (loadout.equippedWeaponItemId > 0)
+            return loadout.equippedWeaponItemId;
+        return loadout.weaponId;
+    }
+
+    private static Color ParseLobbyColor(string value, Color fallback)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return fallback;
+
+        string trimmed = value.Trim();
+        if (!trimmed.StartsWith("#", StringComparison.Ordinal) && (trimmed.Length == 6 || trimmed.Length == 8))
+            trimmed = "#" + trimmed;
+
+        Color color;
+        return ColorUtility.TryParseHtmlString(trimmed, out color) ? color : fallback;
+    }
+
+    private static string ColorToHex(Color color)
+    {
+        return "#" + ColorUtility.ToHtmlStringRGBA(color);
+    }
+
+    private static bool SameUsername(string a, string b)
+    {
+        return string.Equals(a ?? "", b ?? "", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string FirstNonEmpty(params string[] values)
+    {
+        if (values == null)
+            return "";
+
+        for (int i = 0; i < values.Length; i++)
+        {
+            if (!string.IsNullOrWhiteSpace(values[i]))
+                return values[i];
+        }
+
+        return "";
+    }
+
+    private static Vector2 ClampLobbyPreviewSize(Vector2 value, Vector2 fallback)
+    {
+        float x = Mathf.Approximately(value.x, 0f) ? fallback.x : Mathf.Abs(value.x);
+        float y = Mathf.Approximately(value.y, 0f) ? fallback.y : Mathf.Abs(value.y);
+        return new Vector2(Mathf.Max(1f, x), Mathf.Max(1f, y));
+    }
+
+    private static GameObject CreateLobbyPreviewObject(string name, Transform parent)
+    {
+        GameObject obj = new GameObject(name);
+        obj.transform.SetParent(parent, false);
+        obj.AddComponent<RectTransform>();
+        return obj;
+    }
+
+    private static void ClearLobbyPreview(Transform root)
+    {
+        if (root == null)
+            return;
+
+        for (int i = root.childCount - 1; i >= 0; i--)
+            UnityEngine.Object.Destroy(root.GetChild(i).gameObject);
+    }
+
     private void RefreshLobbyStartButtonState()
     {
         if (_lobbyPlayButton == null) return;
@@ -3292,6 +3640,7 @@ public class AuthMenuController : MonoBehaviour
     public void BackFromLobby()
     {
         if (_lobbyPollRoutine != null) { StopCoroutine(_lobbyPollRoutine); _lobbyPollRoutine = null; }
+        StopOtherLobbyProfileFetch();
         if (_currentLobbyRoomNumber > 0) StartCoroutine(_apiClient.LobbyLeave(_currentLobbyRoomNumber, _lobbyClientId));
         _currentLobbyRoomNumber = 0;
         OpenMultiplayer();
@@ -4167,10 +4516,10 @@ public class AuthMenuController : MonoBehaviour
         hlg.childForceExpandWidth = false; hlg.childForceExpandHeight = false;
 
         // Build left (you) and right (other) cards
-        (_myNameText, _myWeaponText, _myArmorText, _myItemText) =
-            BuildPlayerCard(row.transform, "YOU", new Color(0.10f, 0.28f, 0.18f, 1f));
-        (_otherNameText, _otherWeaponText, _otherArmorText, _otherItemText) =
-            BuildPlayerCard(row.transform, "OTHER PLAYER", new Color(0.12f, 0.20f, 0.36f, 1f));
+        _myNameText = BuildPlayerCard(row.transform, "YOU", new Color(0.10f, 0.28f, 0.18f, 1f),
+            out _myLobbyPreviewRoot, out _myLobbyStatusText);
+        _otherNameText = BuildPlayerCard(row.transform, "OTHER PLAYER", new Color(0.12f, 0.20f, 0.36f, 1f),
+            out _otherLobbyPreviewRoot, out _otherLobbyStatusText);
 
         // Play button (host only)
         GameObject playBtnObj = new GameObject("PlayButton");
@@ -4217,19 +4566,25 @@ public class AuthMenuController : MonoBehaviour
         _onlineLobbyPanel.SetActive(false);
     }
 
-    private (TextMeshProUGUI name, TextMeshProUGUI weapon, TextMeshProUGUI armor, TextMeshProUGUI item)
-        BuildPlayerCard(Transform parent, string header, Color cardColor)
+    private TextMeshProUGUI BuildPlayerCard(
+        Transform parent,
+        string header,
+        Color cardColor,
+        out RectTransform previewRoot,
+        out TextMeshProUGUI statusText)
     {
         GameObject card = new GameObject(header + "Card");
         card.transform.SetParent(parent, false);
         RectTransform cr = card.AddComponent<RectTransform>();
         cr.sizeDelta = new Vector2(420f, 320f);
-        card.AddComponent<LayoutElement>().preferredWidth = 420f;
+        LayoutElement cardLayout = card.AddComponent<LayoutElement>();
+        cardLayout.preferredWidth = 420f;
+        cardLayout.preferredHeight = 320f;
         GameUiThemeRuntime.StylePanel(card, cardColor, true);
 
         VerticalLayoutGroup vg = card.AddComponent<VerticalLayoutGroup>();
-        vg.padding = new RectOffset(28, 28, 24, 24);
-        vg.spacing = 14f;
+        vg.padding = new RectOffset(28, 28, 18, 18);
+        vg.spacing = 8f;
         vg.childAlignment = TextAnchor.UpperCenter;
         vg.childControlWidth = true; vg.childControlHeight = true;
         vg.childForceExpandWidth = true; vg.childForceExpandHeight = false;
@@ -4256,16 +4611,29 @@ public class AuthMenuController : MonoBehaviour
         hdr.color = new Color(0.8f, 0.9f, 1f, 0.7f);
 
         TextMeshProUGUI nameText   = MakeLine("Name",   28f, true);
-        TextMeshProUGUI weaponText = MakeLine("Weapon", 20f);
-        TextMeshProUGUI armorText  = MakeLine("Armor",  20f);
-        TextMeshProUGUI itemText   = MakeLine("Item",   20f);
 
-        // Prefix each line with a label
-        weaponText.text = "Weapon: -";
-        armorText.text  = "Armor: -";
-        itemText.text   = "Item: -";
+        GameObject previewFrame = new GameObject("LoadoutPreviewFrame");
+        previewFrame.transform.SetParent(card.transform, false);
+        RectTransform frameRect = previewFrame.AddComponent<RectTransform>();
+        frameRect.sizeDelta = new Vector2(330f, 190f);
+        LayoutElement frameLayout = previewFrame.AddComponent<LayoutElement>();
+        frameLayout.preferredWidth = 330f;
+        frameLayout.preferredHeight = 190f;
+        GameUiThemeRuntime.StylePanel(previewFrame, new Color(0.07f, 0.10f, 0.14f, 0.55f), true);
 
-        return (nameText, weaponText, armorText, itemText);
+        GameObject previewObj = new GameObject("LoadoutPreview");
+        previewObj.transform.SetParent(previewFrame.transform, false);
+        previewRoot = previewObj.AddComponent<RectTransform>();
+        previewRoot.anchorMin = Vector2.zero;
+        previewRoot.anchorMax = Vector2.one;
+        previewRoot.offsetMin = new Vector2(10f, 8f);
+        previewRoot.offsetMax = new Vector2(-10f, -8f);
+
+        statusText = MakeLine("Status", 16f);
+        statusText.text = "";
+        statusText.color = GameUiThemeRuntime.Current.MutedText(0.72f);
+
+        return nameText;
     }
 
     private void EnsureMultiplayerPanel()

@@ -25,10 +25,12 @@ public class SocialPanelController : MonoBehaviour
     private int _roomNumber;
     private bool _built;
     private bool _refreshInFlight;
+    private float _refreshStartedAt;
     private bool _actionInFlight;
     private Coroutine _refreshRoutine;
     private SocialTab _activeTab = SocialTab.Friends;
     private SocialSummaryResponse _summary;
+    private string _listMessage = "Loading social data...";
     private FriendSummaryResponse _selectedFriend;
 
     private TextMeshProUGUI _titleText;
@@ -50,6 +52,15 @@ public class SocialPanelController : MonoBehaviour
     private TextMeshProUGUI _profileLoadoutText;
     private TextMeshProUGUI _profileStatusText;
     private RectTransform _profilePreviewRoot;
+    private Vector2 _profileSwordWeaponOffset = new Vector2(88f, -6f);
+    private Vector2 _profileSwordWeaponSize = new Vector2(112f, 146f);
+    private float _profileSwordWeaponRotation = -28f;
+    private Vector2 _profileSpearWeaponOffset = new Vector2(92f, 0f);
+    private Vector2 _profileSpearWeaponSize = new Vector2(92f, 178f);
+    private float _profileSpearWeaponRotation = -35f;
+    private Vector2 _profileRangedWeaponOffset = new Vector2(86f, 18f);
+    private Vector2 _profileRangedWeaponSize = new Vector2(74f, 74f);
+    private float _profileRangedWeaponRotation;
 
     public void Initialize(AuthApiClient apiClient, AuthMenuController menuController, bool allowLobbyInvites, int roomNumber)
     {
@@ -61,7 +72,6 @@ public class SocialPanelController : MonoBehaviour
         BuildUiIfNeeded();
         UpdateContextText();
         Render();
-        StartRefreshLoop();
     }
 
     public void SetApiClient(AuthApiClient apiClient)
@@ -78,9 +88,35 @@ public class SocialPanelController : MonoBehaviour
         Render();
     }
 
+    public void SetProfilePreviewWeaponOffsets(
+        Vector2 swordOffset,
+        Vector2 swordSize,
+        float swordRotation,
+        Vector2 spearOffset,
+        Vector2 spearSize,
+        float spearRotation,
+        Vector2 rangedOffset,
+        Vector2 rangedSize,
+        float rangedRotation)
+    {
+        _profileSwordWeaponOffset = swordOffset;
+        _profileSwordWeaponSize = ClampPreviewSize(swordSize, new Vector2(112f, 146f));
+        _profileSwordWeaponRotation = swordRotation;
+        _profileSpearWeaponOffset = spearOffset;
+        _profileSpearWeaponSize = ClampPreviewSize(spearSize, new Vector2(92f, 178f));
+        _profileSpearWeaponRotation = spearRotation;
+        _profileRangedWeaponOffset = rangedOffset;
+        _profileRangedWeaponSize = ClampPreviewSize(rangedSize, new Vector2(74f, 74f));
+        _profileRangedWeaponRotation = rangedRotation;
+    }
+
     public void RefreshNow()
     {
-        if (!isActiveAndEnabled || _apiClient == null || _refreshInFlight)
+        BuildUiIfNeeded();
+        if (!isActiveAndEnabled || _apiClient == null)
+            return;
+
+        if (_refreshInFlight && Time.realtimeSinceStartup - _refreshStartedAt < 12f)
             return;
 
         StartCoroutine(RefreshSummaryRoutine());
@@ -132,12 +168,14 @@ public class SocialPanelController : MonoBehaviour
         HorizontalLayoutGroup headerLayout = header.AddComponent<HorizontalLayoutGroup>();
         headerLayout.spacing = 8f;
         headerLayout.childAlignment = TextAnchor.MiddleCenter;
+        headerLayout.childControlWidth = true;
         headerLayout.childControlHeight = true;
         headerLayout.childForceExpandWidth = false;
         headerLayout.childForceExpandHeight = true;
 
         _titleText = CreateText(header.transform, "Title", "Social", 24f, FontStyles.Bold, TextAlignmentOptions.Left);
-        _titleText.gameObject.AddComponent<LayoutElement>().flexibleWidth = 1f;
+        LayoutElement titleLayout = AddLayout(_titleText.gameObject, 220f, 38f);
+        titleLayout.flexibleWidth = 1f;
 
         Button refreshButton = CreateButton("RefreshButton", header.transform, "Refresh", GameUiThemeRuntime.Current.secondaryButton, 16f);
         AddLayout(refreshButton.gameObject, 88f, 38f);
@@ -156,6 +194,9 @@ public class SocialPanelController : MonoBehaviour
         _friendsTabButton = CreateButton("FriendsTab", tabs.transform, "Friends", GameUiThemeRuntime.Current.primaryButton, 15f);
         _inboxTabButton = CreateButton("InboxTab", tabs.transform, "Inbox", GameUiThemeRuntime.Current.secondaryButton, 15f);
         _sentTabButton = CreateButton("SentTab", tabs.transform, "Sent", GameUiThemeRuntime.Current.secondaryButton, 15f);
+        AddFlexibleButtonLayout(_friendsTabButton.gameObject);
+        AddFlexibleButtonLayout(_inboxTabButton.gameObject);
+        AddFlexibleButtonLayout(_sentTabButton.gameObject);
         _friendsTabButton.onClick.AddListener(() => SetTab(SocialTab.Friends));
         _inboxTabButton.onClick.AddListener(() => SetTab(SocialTab.Inbox));
         _sentTabButton.onClick.AddListener(() => SetTab(SocialTab.Sent));
@@ -165,11 +206,14 @@ public class SocialPanelController : MonoBehaviour
         HorizontalLayoutGroup sendLayout = _sendFriendRow.AddComponent<HorizontalLayoutGroup>();
         sendLayout.spacing = 8f;
         sendLayout.childAlignment = TextAnchor.MiddleCenter;
+        sendLayout.childControlWidth = true;
         sendLayout.childControlHeight = true;
+        sendLayout.childForceExpandWidth = false;
         sendLayout.childForceExpandHeight = true;
 
         _usernameInput = CreateInput(_sendFriendRow.transform, "Username");
-        _usernameInput.gameObject.AddComponent<LayoutElement>().flexibleWidth = 1f;
+        LayoutElement inputLayout = AddLayout(_usernameInput.gameObject, 230f, 40f);
+        inputLayout.flexibleWidth = 1f;
         Button sendButton = CreateButton("SendFriendButton", _sendFriendRow.transform, "Send", GameUiThemeRuntime.Current.successButton, 15f);
         AddLayout(sendButton.gameObject, 78f, 40f);
         sendButton.onClick.AddListener(SendFriendRequest);
@@ -178,7 +222,7 @@ public class SocialPanelController : MonoBehaviour
         AddLayout(_statusText.gameObject, -1f, 28f);
 
         GameObject scroll = CreateScrollArea(transform);
-        AddLayout(scroll, -1f, -1f, 1f);
+        AddLayout(scroll, -1f, 340f, 1f);
 
         _friendActionsRow = CreateUIObject("FriendActions", transform);
         AddLayout(_friendActionsRow, -1f, 88f);
@@ -274,36 +318,96 @@ public class SocialPanelController : MonoBehaviour
 
     private IEnumerator RefreshSummaryRoutine()
     {
-        if (_refreshInFlight || _apiClient == null)
+        if (_refreshInFlight && Time.realtimeSinceStartup - _refreshStartedAt < 12f)
+            yield break;
+
+        if (_apiClient == null)
             yield break;
 
         if (string.IsNullOrWhiteSpace(AuthSession.AccessToken))
         {
+            _listMessage = "Log in to use friends.";
             SetStatus("Log in to use friends.");
             _summary = null;
             Render();
             yield break;
         }
 
+        _listMessage = "Loading social data...";
+        SetStatus("Loading...");
+        Render();
         _refreshInFlight = true;
+        _refreshStartedAt = Time.realtimeSinceStartup;
         SocialSummaryResponse response = null;
         string error = null;
-        yield return _apiClient.GetSocialSummary(
-            onSuccess: data => response = data,
-            onError: err => error = err);
+        yield return RunSummaryRequestSafely(
+            data => response = data,
+            err => error = err);
         _refreshInFlight = false;
 
         if (!string.IsNullOrWhiteSpace(error))
         {
+            _listMessage = error;
+            _summary = null;
             SetStatus(error);
             Render();
             yield break;
         }
 
         _summary = response ?? new SocialSummaryResponse();
+        _listMessage = "";
         RestoreSelectedFriendAfterRefresh();
         SetStatus("");
         Render();
+    }
+
+    private IEnumerator RunSummaryRequestSafely(Action<SocialSummaryResponse> onSuccess, Action<string> onError)
+    {
+        IEnumerator request = null;
+        string startError = null;
+        try
+        {
+            request = _apiClient.GetSocialSummary(onSuccess, onError);
+        }
+        catch (Exception ex)
+        {
+            startError = "Could not start social summary: " + ex.Message;
+        }
+
+        if (!string.IsNullOrWhiteSpace(startError))
+        {
+            onError?.Invoke(startError);
+            yield break;
+        }
+
+        while (true)
+        {
+            object current;
+            bool movedNext;
+            string moveError = null;
+            try
+            {
+                movedNext = request.MoveNext();
+                current = movedNext ? request.Current : null;
+            }
+            catch (Exception ex)
+            {
+                movedNext = false;
+                current = null;
+                moveError = "Could not load social summary: " + ex.Message;
+            }
+
+            if (!string.IsNullOrWhiteSpace(moveError))
+            {
+                onError?.Invoke(moveError);
+                yield break;
+            }
+
+            if (!movedNext)
+                yield break;
+
+            yield return current;
+        }
     }
 
     private void SetTab(SocialTab tab)
@@ -327,7 +431,7 @@ public class SocialPanelController : MonoBehaviour
 
         if (!hasSummary)
         {
-            AddInfoRow("Loading social data...");
+            AddInfoRow(string.IsNullOrWhiteSpace(_listMessage) ? "Loading social data..." : _listMessage);
             return;
         }
 
@@ -341,7 +445,7 @@ public class SocialPanelController : MonoBehaviour
 
     private void RenderFriends()
     {
-        FriendSummaryResponse[] friends = _summary.friends ?? new FriendSummaryResponse[0];
+        FriendSummaryResponse[] friends = GetFriends();
         if (friends.Length == 0)
         {
             AddInfoRow("No friends yet.");
@@ -374,7 +478,7 @@ public class SocialPanelController : MonoBehaviour
     private void RenderInbox()
     {
         bool any = false;
-        GameInviteResponse[] invites = _summary.gameInvites ?? new GameInviteResponse[0];
+        GameInviteResponse[] invites = GetGameInvites();
         for (int i = 0; i < invites.Length; i++)
         {
             if (!IsInviteActive(invites[i]))
@@ -384,7 +488,7 @@ public class SocialPanelController : MonoBehaviour
             any = true;
         }
 
-        FriendRequestResponse[] requests = _summary.incomingFriendRequests ?? new FriendRequestResponse[0];
+        FriendRequestResponse[] requests = GetIncomingRequests();
         for (int i = 0; i < requests.Length; i++)
         {
             if (!IsPending(requests[i]?.status))
@@ -401,7 +505,7 @@ public class SocialPanelController : MonoBehaviour
     private void RenderSentRequests()
     {
         bool any = false;
-        FriendRequestResponse[] requests = _summary.sentFriendRequests ?? new FriendRequestResponse[0];
+        FriendRequestResponse[] requests = GetSentRequests();
         for (int i = 0; i < requests.Length; i++)
         {
             if (!IsPending(requests[i]?.status))
@@ -477,7 +581,7 @@ public class SocialPanelController : MonoBehaviour
     private void AddInviteRow(GameInviteResponse invite)
     {
         GameObject row = CreateRow("GameInviteRow", new Color(0.12f, 0.20f, 0.30f, 1f), 74f);
-        string text = "Game invite from " + GetInviteHostName(invite) + "\nRoom #" + invite.roomNumber + "  " + GetInviteRemainingLabel(invite);
+        string text = "Game invite from " + GetInviteHostName(invite) + "\nRoom #" + GetInviteRoomNumber(invite) + "  " + GetInviteRemainingLabel(invite);
         TextMeshProUGUI label = CreateText(row.transform, "Label", text, 14f, FontStyles.Bold, TextAlignmentOptions.Left);
         label.gameObject.AddComponent<LayoutElement>().flexibleWidth = 1f;
 
@@ -707,11 +811,14 @@ public class SocialPanelController : MonoBehaviour
         if (response != null && response.summary != null)
             _summary = response.summary;
 
+        GameInviteResponse acceptedInvite = response != null
+            ? (response.invite ?? response.gameInvite)
+            : null;
         int room = response != null && response.roomNumber > 0
             ? response.roomNumber
-            : response != null && response.invite != null && response.invite.roomNumber > 0
-                ? response.invite.roomNumber
-                : invite.roomNumber;
+            : acceptedInvite != null && GetInviteRoomNumber(acceptedInvite) > 0
+                ? GetInviteRoomNumber(acceptedInvite)
+                : GetInviteRoomNumber(invite);
 
         if (room <= 0)
         {
@@ -833,38 +940,42 @@ public class SocialPanelController : MonoBehaviour
         cardRect.anchorMin = new Vector2(0.5f, 0.5f);
         cardRect.anchorMax = new Vector2(0.5f, 0.5f);
         cardRect.pivot = new Vector2(0.5f, 0.5f);
-        cardRect.sizeDelta = new Vector2(760f, 460f);
+        cardRect.sizeDelta = new Vector2(700f, 390f);
         cardRect.anchoredPosition = Vector2.zero;
         GameUiThemeRuntime.StylePanel(card, new Color(0.07f, 0.10f, 0.14f, 0.98f), true);
 
         VerticalLayoutGroup cardLayout = card.AddComponent<VerticalLayoutGroup>();
-        cardLayout.padding = new RectOffset(22, 22, 18, 20);
-        cardLayout.spacing = 12f;
+        cardLayout.padding = new RectOffset(22, 20, 16, 18);
+        cardLayout.spacing = 8f;
         cardLayout.childControlWidth = true;
         cardLayout.childControlHeight = true;
         cardLayout.childForceExpandWidth = true;
         cardLayout.childForceExpandHeight = false;
 
         GameObject header = CreateUIObject("Header", card.transform);
-        AddLayout(header, -1f, 46f);
+        AddLayout(header, -1f, 38f);
         HorizontalLayoutGroup headerLayout = header.AddComponent<HorizontalLayoutGroup>();
-        headerLayout.spacing = 10f;
+        headerLayout.spacing = 8f;
         headerLayout.childAlignment = TextAnchor.MiddleCenter;
+        headerLayout.childControlWidth = true;
         headerLayout.childControlHeight = true;
+        headerLayout.childForceExpandWidth = false;
         headerLayout.childForceExpandHeight = true;
 
-        _profileNameText = CreateText(header.transform, "Name", "Profile", 26f, FontStyles.Bold, TextAlignmentOptions.Left);
-        _profileNameText.gameObject.AddComponent<LayoutElement>().flexibleWidth = 1f;
-        _profileLevelText = CreateText(header.transform, "Level", "", 18f, FontStyles.Bold, TextAlignmentOptions.Right);
-        AddLayout(_profileLevelText.gameObject, 120f, 36f);
+        _profileNameText = CreateText(header.transform, "Name", "Profile", 24f, FontStyles.Bold, TextAlignmentOptions.Left);
+        LayoutElement nameLayout = AddLayout(_profileNameText.gameObject, 410f, 34f);
+        nameLayout.flexibleWidth = 1f;
+        _profileLevelText = CreateText(header.transform, "Level", "", 17f, FontStyles.Bold, TextAlignmentOptions.Right);
+        AddLayout(_profileLevelText.gameObject, 0f, 32f);
+        _profileLevelText.gameObject.SetActive(false);
         Button close = CreateButton("CloseButton", header.transform, "Close", GameUiThemeRuntime.Current.secondaryButton, 14f);
-        AddLayout(close.gameObject, 78f, 36f);
+        AddLayout(close.gameObject, 78f, 32f);
         close.onClick.AddListener(() => _profileOverlay.SetActive(false));
 
         GameObject body = CreateUIObject("Body", card.transform);
         AddLayout(body, -1f, -1f, 1f);
         HorizontalLayoutGroup bodyLayout = body.AddComponent<HorizontalLayoutGroup>();
-        bodyLayout.spacing = 18f;
+        bodyLayout.spacing = 14f;
         bodyLayout.childControlWidth = true;
         bodyLayout.childControlHeight = true;
         bodyLayout.childForceExpandWidth = false;
@@ -873,21 +984,21 @@ public class SocialPanelController : MonoBehaviour
         GameObject info = CreateUIObject("Info", body.transform);
         AddLayout(info, 330f, -1f, 1f);
         VerticalLayoutGroup infoLayout = info.AddComponent<VerticalLayoutGroup>();
-        infoLayout.spacing = 10f;
+        infoLayout.spacing = 6f;
         infoLayout.childControlWidth = true;
         infoLayout.childControlHeight = true;
         infoLayout.childForceExpandWidth = true;
         infoLayout.childForceExpandHeight = false;
 
-        _profileStatsText = CreateText(info.transform, "Stats", "", 17f, FontStyles.Normal, TextAlignmentOptions.TopLeft);
-        AddLayout(_profileStatsText.gameObject, -1f, 170f);
-        _profileLoadoutText = CreateText(info.transform, "Loadout", "", 16f, FontStyles.Normal, TextAlignmentOptions.TopLeft);
-        AddLayout(_profileLoadoutText.gameObject, -1f, 90f);
+        _profileStatsText = CreateText(info.transform, "Stats", "", 16f, FontStyles.Bold, TextAlignmentOptions.TopLeft);
+        AddLayout(_profileStatsText.gameObject, -1f, 116f);
+        _profileLoadoutText = CreateText(info.transform, "Loadout", "", 17f, FontStyles.Normal, TextAlignmentOptions.TopLeft);
+        AddLayout(_profileLoadoutText.gameObject, -1f, 92f);
         _profileStatusText = CreateText(info.transform, "Status", "", 14f, FontStyles.Normal, TextAlignmentOptions.Left);
-        AddLayout(_profileStatusText.gameObject, -1f, 36f);
+        AddLayout(_profileStatusText.gameObject, -1f, 28f);
 
         GameObject preview = CreateUIObject("Preview", body.transform);
-        AddLayout(preview, -1f, -1f, 1f);
+        AddLayout(preview, 280f, -1f, 1f);
         GameUiThemeRuntime.StylePanel(preview, new Color(0.10f, 0.13f, 0.18f, 0.95f), true);
         _profilePreviewRoot = preview.GetComponent<RectTransform>();
 
@@ -897,8 +1008,9 @@ public class SocialPanelController : MonoBehaviour
     private void SetProfileLoading(FriendSummaryResponse friend)
     {
         ClearChildren(_profilePreviewRoot);
-        _profileNameText.text = GetFriendName(friend);
-        _profileLevelText.text = GetFriendLevel(friend) > 0 ? "Lv. " + GetFriendLevel(friend) : "";
+        int level = GetFriendLevel(friend);
+        _profileNameText.text = level > 0 ? GetFriendName(friend) + "  Lv. " + level : GetFriendName(friend);
+        _profileLevelText.text = "";
         _profileStatsText.text = "Loading stats...";
         _profileLoadoutText.text = "";
         _profileStatusText.text = "";
@@ -913,8 +1025,8 @@ public class SocialPanelController : MonoBehaviour
         SocialStatsSummary stats = GetProfileStats(profile);
         SocialLoadoutSummary loadout = GetProfileLoadout(profile);
         int level = profile.level > 0 ? profile.level : stats != null ? stats.level : 0;
-        _profileNameText.text = username;
-        _profileLevelText.text = level > 0 ? "Lv. " + level : "";
+        _profileNameText.text = level > 0 ? username + "  Lv. " + level : username;
+        _profileLevelText.text = "";
         _profileStatsText.text = BuildStatsText(stats);
         _profileLoadoutText.text = BuildLoadoutText(loadout);
         _profileStatusText.text = "";
@@ -929,14 +1041,15 @@ public class SocialPanelController : MonoBehaviour
         int skinId = GetSkinId(loadout);
         Color skinColor = ParseColor(loadout != null ? loadout.skinColor : "", new Color(0.25f, 0.65f, 0.95f, 1f));
         Color weaponColor = ParseColor(loadout != null ? loadout.weaponColor : "", new Color(0.90f, 0.86f, 0.70f, 1f));
+        WeaponKind weaponKind = ResolveProfileWeaponKind(loadout);
 
         GameObject body = CreateUIObject("CharacterBody", _profilePreviewRoot);
         RectTransform bodyRect = body.GetComponent<RectTransform>();
         bodyRect.anchorMin = new Vector2(0.5f, 0.5f);
         bodyRect.anchorMax = new Vector2(0.5f, 0.5f);
         bodyRect.pivot = new Vector2(0.5f, 0.5f);
-        bodyRect.sizeDelta = new Vector2(190f, 230f);
-        bodyRect.anchoredPosition = new Vector2(-38f, -10f);
+        bodyRect.sizeDelta = new Vector2(150f, 190f);
+        bodyRect.anchoredPosition = new Vector2(-38f, -8f);
         Image bodyImage = body.AddComponent<Image>();
         bodyImage.color = skinColor;
         bodyImage.preserveAspect = true;
@@ -948,19 +1061,26 @@ public class SocialPanelController : MonoBehaviour
             bodyImage.color = Color.white;
         }
 
+        if (weaponKind == WeaponKind.Ranged)
+        {
+            RenderProfileRangedOrb(weaponColor);
+            return;
+        }
+
         GameObject weapon = CreateUIObject("Weapon", _profilePreviewRoot);
         RectTransform weaponRect = weapon.GetComponent<RectTransform>();
         weaponRect.anchorMin = new Vector2(0.5f, 0.5f);
         weaponRect.anchorMax = new Vector2(0.5f, 0.5f);
         weaponRect.pivot = new Vector2(0.5f, 0.5f);
-        weaponRect.sizeDelta = new Vector2(130f, 190f);
-        weaponRect.anchoredPosition = new Vector2(110f, -6f);
-        weaponRect.localRotation = Quaternion.Euler(0f, 0f, -28f);
+        bool spear = weaponKind == WeaponKind.Spear;
+        weaponRect.sizeDelta = spear ? _profileSpearWeaponSize : _profileSwordWeaponSize;
+        weaponRect.anchoredPosition = spear ? _profileSpearWeaponOffset : _profileSwordWeaponOffset;
+        weaponRect.localRotation = Quaternion.Euler(0f, 0f, spear ? _profileSpearWeaponRotation : _profileSwordWeaponRotation);
         Image weaponImage = weapon.AddComponent<Image>();
         weaponImage.color = weaponColor;
         weaponImage.preserveAspect = true;
 
-        Sprite weaponSprite = ResolveWeaponSprite(loadout);
+        Sprite weaponSprite = ResolveWeaponSprite(loadout, weaponKind);
         if (weaponSprite != null)
         {
             weaponImage.sprite = weaponSprite;
@@ -968,10 +1088,31 @@ public class SocialPanelController : MonoBehaviour
         }
     }
 
+    private void RenderProfileRangedOrb(Color weaponColor)
+    {
+        GameObject orb = CreateUIObject("RangedOrb", _profilePreviewRoot);
+        RectTransform orbRect = orb.GetComponent<RectTransform>();
+        orbRect.anchorMin = new Vector2(0.5f, 0.5f);
+        orbRect.anchorMax = new Vector2(0.5f, 0.5f);
+        orbRect.pivot = new Vector2(0.5f, 0.5f);
+        orbRect.sizeDelta = _profileRangedWeaponSize;
+        orbRect.anchoredPosition = _profileRangedWeaponOffset;
+        orbRect.localRotation = Quaternion.Euler(0f, 0f, _profileRangedWeaponRotation);
+
+        Image orbImage = orb.AddComponent<Image>();
+        orbImage.sprite = SimpleSprite.Circle;
+        orbImage.color = weaponColor;
+        orbImage.preserveAspect = true;
+
+        Outline outline = orb.AddComponent<Outline>();
+        outline.effectColor = new Color(1f, 1f, 1f, 0.28f);
+        outline.effectDistance = new Vector2(3f, -3f);
+    }
+
     private string BuildStatsText(SocialStatsSummary stats)
     {
         if (stats == null)
-            return "Stats unavailable.";
+            return "STATS\nNo games played yet.";
 
         int games = stats.gamesPlayed > 0 ? stats.gamesPlayed : stats.runsPlayed > 0 ? stats.runsPlayed : stats.matchesPlayed;
         int wins = stats.wins > 0 ? stats.wins : stats.gamesWon;
@@ -979,17 +1120,28 @@ public class SocialPanelController : MonoBehaviour
         int giantKills = stats.giantKills > 0 ? stats.giantKills : stats.bossKills;
         float bestTime = stats.bestTimeSeconds > 0f ? stats.bestTimeSeconds : stats.bestRunTimeSeconds > 0f ? stats.bestRunTimeSeconds : stats.fastestWinSeconds;
         var sb = new StringBuilder();
-        AppendStat(sb, "Games", games);
-        AppendStat(sb, "Wins", wins);
-        AppendStat(sb, "Kills", kills);
-        AppendStat(sb, "Giant kills", giantKills);
-        AppendStat(sb, "Revives", stats.revives);
+        sb.AppendLine("STATS");
+        bool hasStats = false;
+        hasStats |= AppendStat(sb, "Games", games);
+        hasStats |= AppendStat(sb, "Wins", wins);
+        hasStats |= AppendStat(sb, "Kills", kills);
+        hasStats |= AppendStat(sb, "Giant kills", giantKills);
+        hasStats |= AppendStat(sb, "Revives", stats.revives);
         if (bestTime > 0f)
+        {
             sb.AppendLine("Best time: " + FormatSeconds(bestTime));
+            hasStats = true;
+        }
         if (stats.totalTimeSeconds > 0f)
+        {
             sb.AppendLine("Total time: " + FormatSeconds(stats.totalTimeSeconds));
+            hasStats = true;
+        }
 
-        return sb.Length > 0 ? sb.ToString().TrimEnd() : "No recorded stats yet.";
+        if (!hasStats)
+            sb.Append("No games played yet.");
+
+        return sb.ToString().TrimEnd();
     }
 
     private string BuildLoadoutText(SocialLoadoutSummary loadout)
@@ -999,23 +1151,31 @@ public class SocialPanelController : MonoBehaviour
 
         string weapon = FirstNonEmpty(loadout.weaponName, loadout.weaponItemName, loadout.weaponType);
         var sb = new StringBuilder();
+        sb.AppendLine("LOADOUT");
         sb.AppendLine("Weapon: " + (string.IsNullOrWhiteSpace(weapon) ? "None" : weapon));
         sb.AppendLine("Armor: " + FirstNonEmpty(loadout.armorName, loadout.armorItemName, "None"));
         sb.Append("Item: " + FirstNonEmpty(loadout.consumableName, loadout.itemName, "None"));
         return sb.ToString();
     }
 
-    private Sprite ResolveWeaponSprite(SocialLoadoutSummary loadout)
+    private Sprite ResolveWeaponSprite(SocialLoadoutSummary loadout, WeaponKind weaponKind)
     {
         if (loadout == null)
             return null;
 
         int weaponItemId = GetWeaponItemId(loadout);
-        string type = (loadout.weaponType ?? "") + " " + (loadout.weaponName ?? "") + " " + (loadout.weaponItemName ?? "");
         WeaponVisualEntry visual;
-        if (type.IndexOf("spear", StringComparison.OrdinalIgnoreCase) >= 0
+
+        if (weaponKind == WeaponKind.Ranged)
+            return null;
+
+        if (weaponKind == WeaponKind.Spear
             && WeaponVisualDatabase.TryGetSpearVisualGlobal(weaponItemId, out visual))
             return visual.ResolveSpearSprite();
+
+        if (weaponKind == WeaponKind.Sword
+            && WeaponVisualDatabase.TryGetSwordVisualGlobal(weaponItemId, out visual))
+            return visual.ResolveSwordSwingSprite();
 
         if (WeaponVisualDatabase.TryGetSwordVisualGlobal(weaponItemId, out visual))
             return visual.ResolveSwordSwingSprite();
@@ -1024,6 +1184,15 @@ public class SocialPanelController : MonoBehaviour
             return visual.ResolveSpearSprite();
 
         return null;
+    }
+
+    private static WeaponKind ResolveProfileWeaponKind(SocialLoadoutSummary loadout)
+    {
+        if (loadout == null)
+            return WeaponKind.Spear;
+
+        string type = (loadout.weaponType ?? "") + " " + (loadout.weaponName ?? "") + " " + (loadout.weaponItemName ?? "");
+        return PlayerLoadout.ParseWeaponKind(type);
     }
 
     private static SocialStatsSummary GetProfileStats(UserProfileSummaryResponse profile)
@@ -1076,10 +1245,20 @@ public class SocialPanelController : MonoBehaviour
         return "";
     }
 
-    private static void AppendStat(StringBuilder sb, string label, int value)
+    private static bool AppendStat(StringBuilder sb, string label, int value)
     {
-        if (value > 0)
-            sb.AppendLine(label + ": " + value);
+        if (value <= 0)
+            return false;
+
+        sb.AppendLine(label + ": " + value);
+        return true;
+    }
+
+    private static Vector2 ClampPreviewSize(Vector2 value, Vector2 fallback)
+    {
+        float x = Mathf.Approximately(value.x, 0f) ? fallback.x : Mathf.Abs(value.x);
+        float y = Mathf.Approximately(value.y, 0f) ? fallback.y : Mathf.Abs(value.y);
+        return new Vector2(Mathf.Max(1f, x), Mathf.Max(1f, y));
     }
 
     private static string FormatSeconds(float seconds)
@@ -1092,14 +1271,15 @@ public class SocialPanelController : MonoBehaviour
 
     private void RestoreSelectedFriendAfterRefresh()
     {
-        if (_selectedFriend == null || _summary == null || _summary.friends == null)
+        if (_selectedFriend == null || _summary == null)
             return;
 
+        FriendSummaryResponse[] friends = GetFriends();
         int selectedId = GetFriendUserId(_selectedFriend);
         string selectedName = GetFriendName(_selectedFriend);
-        for (int i = 0; i < _summary.friends.Length; i++)
+        for (int i = 0; i < friends.Length; i++)
         {
-            FriendSummaryResponse friend = _summary.friends[i];
+            FriendSummaryResponse friend = friends[i];
             if (friend == null)
                 continue;
 
@@ -1112,6 +1292,54 @@ public class SocialPanelController : MonoBehaviour
         }
 
         _selectedFriend = null;
+    }
+
+    private FriendSummaryResponse[] GetFriends()
+    {
+        if (_summary == null)
+            return new FriendSummaryResponse[0];
+        if (_summary.friends != null)
+            return _summary.friends;
+        if (_summary.friendList != null)
+            return _summary.friendList;
+        return _summary.friendships ?? new FriendSummaryResponse[0];
+    }
+
+    private FriendRequestResponse[] GetIncomingRequests()
+    {
+        if (_summary == null)
+            return new FriendRequestResponse[0];
+        if (_summary.incomingFriendRequests != null)
+            return _summary.incomingFriendRequests;
+        if (_summary.incomingRequests != null)
+            return _summary.incomingRequests;
+        if (_summary.receivedFriendRequests != null)
+            return _summary.receivedFriendRequests;
+        return _summary.friendRequests ?? new FriendRequestResponse[0];
+    }
+
+    private FriendRequestResponse[] GetSentRequests()
+    {
+        if (_summary == null)
+            return new FriendRequestResponse[0];
+        if (_summary.sentFriendRequests != null)
+            return _summary.sentFriendRequests;
+        if (_summary.sentRequests != null)
+            return _summary.sentRequests;
+        return _summary.outgoingFriendRequests ?? new FriendRequestResponse[0];
+    }
+
+    private GameInviteResponse[] GetGameInvites()
+    {
+        if (_summary == null)
+            return new GameInviteResponse[0];
+        if (_summary.gameInvites != null)
+            return _summary.gameInvites;
+        if (_summary.invites != null)
+            return _summary.invites;
+        if (_summary.pendingGameInvites != null)
+            return _summary.pendingGameInvites;
+        return _summary.lobbyInvites ?? new GameInviteResponse[0];
     }
 
     private void UpdateContextText()
@@ -1158,7 +1386,13 @@ public class SocialPanelController : MonoBehaviour
     {
         if (friend == null)
             return 0;
-        return friend.userId > 0 ? friend.userId : friend.id;
+        if (friend.userId > 0)
+            return friend.userId;
+        if (friend.friendUserId > 0)
+            return friend.friendUserId;
+        if (friend.friendId > 0)
+            return friend.friendId;
+        return friend.id;
     }
 
     private static string GetFriendName(FriendSummaryResponse friend)
@@ -1167,7 +1401,11 @@ public class SocialPanelController : MonoBehaviour
             return "";
         if (!string.IsNullOrWhiteSpace(friend.displayName))
             return friend.displayName;
-        return friend.username ?? "";
+        if (!string.IsNullOrWhiteSpace(friend.username))
+            return friend.username;
+        if (!string.IsNullOrWhiteSpace(friend.friendUsername))
+            return friend.friendUsername;
+        return friend.name ?? "";
     }
 
     private static int GetFriendLevel(FriendSummaryResponse friend)
@@ -1179,14 +1417,22 @@ public class SocialPanelController : MonoBehaviour
     {
         if (request == null)
             return 0;
-        return request.requestId > 0 ? request.requestId : request.id;
+        if (request.requestId > 0)
+            return request.requestId;
+        if (request.friendRequestId > 0)
+            return request.friendRequestId;
+        return request.id;
     }
 
     private static int GetInviteId(GameInviteResponse invite)
     {
         if (invite == null)
             return 0;
-        return invite.inviteId > 0 ? invite.inviteId : invite.id;
+        if (invite.inviteId > 0)
+            return invite.inviteId;
+        if (invite.gameInviteId > 0)
+            return invite.gameInviteId;
+        return invite.id;
     }
 
     private static string GetRequesterName(FriendRequestResponse request)
@@ -1195,14 +1441,22 @@ public class SocialPanelController : MonoBehaviour
             return "";
         if (!string.IsNullOrWhiteSpace(request.requesterUsername))
             return request.requesterUsername;
-        return !string.IsNullOrWhiteSpace(request.senderUsername) ? request.senderUsername : "Unknown";
+        if (!string.IsNullOrWhiteSpace(request.senderUsername))
+            return request.senderUsername;
+        if (!string.IsNullOrWhiteSpace(request.fromUsername))
+            return request.fromUsername;
+        return !string.IsNullOrWhiteSpace(request.requester) ? request.requester : "Unknown";
     }
 
     private static string GetRecipientName(FriendRequestResponse request)
     {
         if (request == null)
             return "";
-        return !string.IsNullOrWhiteSpace(request.recipientUsername) ? request.recipientUsername : "Unknown";
+        if (!string.IsNullOrWhiteSpace(request.recipientUsername))
+            return request.recipientUsername;
+        if (!string.IsNullOrWhiteSpace(request.toUsername))
+            return request.toUsername;
+        return !string.IsNullOrWhiteSpace(request.recipient) ? request.recipient : "Unknown";
     }
 
     private static string GetInviteHostName(GameInviteResponse invite)
@@ -1211,7 +1465,18 @@ public class SocialPanelController : MonoBehaviour
             return "";
         if (!string.IsNullOrWhiteSpace(invite.hostUsername))
             return invite.hostUsername;
-        return !string.IsNullOrWhiteSpace(invite.senderUsername) ? invite.senderUsername : "Host";
+        if (!string.IsNullOrWhiteSpace(invite.senderUsername))
+            return invite.senderUsername;
+        if (!string.IsNullOrWhiteSpace(invite.fromUsername))
+            return invite.fromUsername;
+        return !string.IsNullOrWhiteSpace(invite.host) ? invite.host : "Host";
+    }
+
+    private static int GetInviteRoomNumber(GameInviteResponse invite)
+    {
+        if (invite == null)
+            return 0;
+        return invite.roomNumber > 0 ? invite.roomNumber : invite.room;
     }
 
     private static bool IsPending(string status)
@@ -1354,6 +1619,12 @@ public class SocialPanelController : MonoBehaviour
         if (flexibleHeight > 0f)
             layout.flexibleWidth = 1f;
         return layout;
+    }
+
+    private static void AddFlexibleButtonLayout(GameObject obj)
+    {
+        LayoutElement layout = AddLayout(obj, 0f, 38f);
+        layout.flexibleWidth = 1f;
     }
 
     private static void StretchToParent(RectTransform rect, float left, float top, float right, float bottom)
