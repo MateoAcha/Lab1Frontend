@@ -185,6 +185,10 @@ public class AuthMenuController : MonoBehaviour
     private GameObject _mapSelectReturnPanel;
     private Action<int> _pendingMapSelection;
     private bool _launchMultiplayer;
+    private bool _pvpModeActive;
+    private bool _pvpOffered;
+    private GameObject _pvpButtonObj;
+    private Image _pvpButtonImage;
     private bool _mainMenuButtonsBuilt;
     private bool _sessionValidationInProgress;
     private string _sessionValidationMessage = "";
@@ -846,7 +850,7 @@ public class AuthMenuController : MonoBehaviour
         MultiplayerState.SetOnline(false);
         MultiplayerState.SetHost(false);
         Debug.Log("[AuthUI] Local multiplayer clicked.");
-        OpenMapSelect(_multiplayerPanel, _ => StartCoroutine(FetchLoadoutThenPlay()));
+        OpenMapSelect(_multiplayerPanel, _ => StartCoroutine(FetchLoadoutThenPlay()), offerPvp: true);
     }
 
     private IEnumerator FetchLoadoutThenPlay(bool waitForLoadout = true)
@@ -3273,7 +3277,7 @@ public class AuthMenuController : MonoBehaviour
             yield break;
         }
 
-        OpenMapSelect(_onlineLobbyPanel, _ => StartCoroutine(HostStartGameAfterMapSelection()));
+        OpenMapSelect(_onlineLobbyPanel, _ => StartCoroutine(HostStartGameAfterMapSelection()), offerPvp: true);
         yield break;
     }
 
@@ -4317,24 +4321,49 @@ public class AuthMenuController : MonoBehaviour
             _googleStatusText.text = status ?? "";
     }
 
-    private void OpenMapSelect(GameObject returnPanel, Action<int> onSelected)
+    private void OpenMapSelect(GameObject returnPanel, Action<int> onSelected, bool offerPvp = false)
     {
         EnsureMapSelectPanel();
         _mapSelectReturnPanel = returnPanel != null ? returnPanel : mainMenuPanel;
         _pendingMapSelection = onSelected;
+        _pvpModeActive = false;
+        _pvpOffered = offerPvp;
+        if (_pvpButtonObj != null)
+        {
+            _pvpButtonObj.SetActive(offerPvp);
+            RefreshPvpButtonStyle();
+        }
         ShowOnly(_mapSelectPanel);
     }
 
     private void BackFromMapSelect()
     {
+        _pvpModeActive = false;
         Action<int> pending = _pendingMapSelection;
         _pendingMapSelection = null;
         ShowOnly(_mapSelectReturnPanel != null ? _mapSelectReturnPanel : mainMenuPanel);
     }
 
+    private void TogglePvpMode()
+    {
+        _pvpModeActive = !_pvpModeActive;
+        RefreshPvpButtonStyle();
+    }
+
+    private void RefreshPvpButtonStyle()
+    {
+        if (_pvpButtonImage == null)
+            return;
+        _pvpButtonImage.color = _pvpModeActive
+            ? new Color(0.55f, 0.15f, 0.75f, 1f)
+            : new Color(0.22f, 0.12f, 0.32f, 1f);
+    }
+
     private void SelectMap(int index)
     {
         GameMapSelection.Select(index);
+        MultiplayerState.SetPvP(_pvpModeActive);
+        _pvpModeActive = false;
         Action<int> pending = _pendingMapSelection;
         _pendingMapSelection = null;
         pending?.Invoke(index);
@@ -4401,6 +4430,39 @@ public class AuthMenuController : MonoBehaviour
         {
             CreateMapCard(row.transform, mapSelectOptions[i], i);
         }
+
+        // PvP toggle button — shown only in multiplayer map selects
+        _pvpButtonObj = new GameObject("PvpModeButton");
+        _pvpButtonObj.transform.SetParent(_mapSelectPanel.transform, false);
+        RectTransform pvpRect = _pvpButtonObj.AddComponent<RectTransform>();
+        pvpRect.anchorMin = new Vector2(0.5f, 0.5f);
+        pvpRect.anchorMax = new Vector2(0.5f, 0.5f);
+        pvpRect.pivot = new Vector2(0.5f, 0.5f);
+        pvpRect.sizeDelta = new Vector2(380f, 60f);
+        pvpRect.anchoredPosition = new Vector2(0f, -270f);
+
+        _pvpButtonImage = _pvpButtonObj.AddComponent<Image>();
+        _pvpButtonImage.color = new Color(0.22f, 0.12f, 0.32f, 1f);
+        Button pvpBtn = _pvpButtonObj.AddComponent<Button>();
+        GameUiThemeRuntime.StyleButton(pvpBtn, _pvpButtonImage, new Color(0.22f, 0.12f, 0.32f, 1f));
+        pvpBtn.onClick.AddListener(TogglePvpMode);
+
+        GameObject pvpLabel = new GameObject("Label");
+        pvpLabel.transform.SetParent(_pvpButtonObj.transform, false);
+        RectTransform pvpLabelRect = pvpLabel.AddComponent<RectTransform>();
+        pvpLabelRect.anchorMin = Vector2.zero;
+        pvpLabelRect.anchorMax = Vector2.one;
+        pvpLabelRect.offsetMin = Vector2.zero;
+        pvpLabelRect.offsetMax = Vector2.zero;
+        TextMeshProUGUI pvpTmp = pvpLabel.AddComponent<TextMeshProUGUI>();
+        pvpTmp.text = "⚔  PvP Mode";
+        pvpTmp.font = TMP_Settings.defaultFontAsset;
+        pvpTmp.fontSize = 24f;
+        pvpTmp.fontStyle = FontStyles.Bold;
+        pvpTmp.color = new Color(0.9f, 0.75f, 1f, 1f);
+        pvpTmp.alignment = TextAlignmentOptions.Center;
+        pvpTmp.raycastTarget = false;
+        _pvpButtonObj.SetActive(false);
 
         _mapSelectPanel.SetActive(false);
     }

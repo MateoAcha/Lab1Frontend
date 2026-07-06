@@ -128,9 +128,11 @@ public class GameBootstrap : MonoBehaviour
         bool isMultiplayer = MultiplayerState.IsMultiplayer;
         bool isOnline      = MultiplayerState.IsOnline;
         bool isHost        = MultiplayerState.IsHost;
+        bool isPvP         = MultiplayerState.IsPvP;
         int onlineRoom     = MultiplayerState.OnlineRoomNumber;
         MultiplayerState.Reset();
         MultiplayerState.SetMultiplayer(isMultiplayer || isOnline);
+        if (isPvP) MultiplayerState.SetPvP(true);
         if (isOnline) { MultiplayerState.SetOnline(true); MultiplayerState.SetHost(isHost); MultiplayerState.SetOnlineRoomNumber(onlineRoom); }
         if (isOnline)
             OnlineMatchStartGate.Show(isHost ? "Waiting for guest..." : "Syncing online match...");
@@ -165,8 +167,15 @@ public class GameBootstrap : MonoBehaviour
             }
         }
         SetupRocks();
-        SetupExits();
-        SetupSpawner();
+        if (MultiplayerState.IsPvP)
+        {
+            GameStatsTracker.StartMatch();
+        }
+        else
+        {
+            SetupExits();
+            SetupSpawner();
+        }
         SetupGameOverScreen();
         SetupPauseMenu();
         if (isOnline)

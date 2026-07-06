@@ -38,6 +38,7 @@ public static class GameStatsTracker
     public static event Action<int, int, int, int> OnPlayerDied;
     public static event Action<int, int, int, int> OnMatchFinished;
     public static event Action<PlayerStatsData> OnPlayerStatsSynced;
+    public static event Action<int> OnPvpMatchFinished;
 
     public static int LastRunMeleeKills { get; private set; }
     public static int LastRunRangedKills { get; private set; }
@@ -143,6 +144,21 @@ public static class GameStatsTracker
         }
 
         CompleteRun(_runMeleeKills, _runRangedKills, _runGiantKills, Mathf.Max(0, Mathf.FloorToInt(Time.time - _runStartAt)), false);
+    }
+
+    public static void RegisterPvpPlayerDied(int loserPlayerIndex)
+    {
+        if (!_runActive)
+            return;
+
+        int seconds = Mathf.Max(0, Mathf.FloorToInt(Time.time - _runStartAt));
+        LastRunMeleeKills = _runMeleeKills;
+        LastRunRangedKills = _runRangedKills;
+        LastRunGiantKills = _runGiantKills;
+        LastRunTimeSeconds = seconds;
+        LastRunWasFinished = false;
+        _runActive = false;
+        OnPvpMatchFinished?.Invoke(loserPlayerIndex);
     }
 
     public static void RegisterMatchFinished()

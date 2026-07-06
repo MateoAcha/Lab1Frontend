@@ -77,9 +77,12 @@ public class Health : MonoBehaviour
             {
                 if (MultiplayerState.IsMultiplayer || MultiplayerState.IsOnline)
                 {
-                    if (reviveState == null)
-                        reviveState = gameObject.AddComponent<PlayerReviveState>();
-                    reviveState.Down();
+                    if (!MultiplayerState.IsPvP)
+                    {
+                        if (reviveState == null)
+                            reviveState = gameObject.AddComponent<PlayerReviveState>();
+                        reviveState.Down();
+                    }
                     MultiplayerState.RegisterPlayerDeath(pc);
                     return;
                 }

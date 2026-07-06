@@ -6,6 +6,7 @@ public static class MultiplayerState
     public static bool IsMultiplayer { get; private set; }
     public static bool IsOnline      { get; private set; }
     public static bool IsHost        { get; private set; }
+    public static bool IsPvP         { get; private set; }
     public static int OnlineRoomNumber { get; private set; } = 1;
     private static bool _returnToOnlineMenu;
 
@@ -15,6 +16,7 @@ public static class MultiplayerState
     public static void SetMultiplayer(bool value) { IsMultiplayer = value; }
     public static void SetOnline(bool value)      { IsOnline = value; }
     public static void SetHost(bool value)        { IsHost = value; }
+    public static void SetPvP(bool value)         { IsPvP = value; }
     public static void SetOnlineRoomNumber(int value) { OnlineRoomNumber = Mathf.Max(1, value); }
     public static void RequestReturnToOnlineMenu() { _returnToOnlineMenu = true; }
     public static bool ConsumeReturnToOnlineMenu()
@@ -127,6 +129,11 @@ public static class MultiplayerState
 
         if (IsMultiplayer || IsOnline)
         {
+            if (IsPvP)
+            {
+                GameStatsTracker.RegisterPvpPlayerDied(player.playerIndex);
+                return;
+            }
             if (AreAllActivePlayersDowned())
                 GameStatsTracker.RegisterPlayerDied();
             return;
@@ -166,6 +173,7 @@ public static class MultiplayerState
         IsMultiplayer = false;
         IsOnline = false;
         IsHost = false;
+        IsPvP = false;
         OnlineRoomNumber = 1;
         _enemyTargets.Clear();
     }

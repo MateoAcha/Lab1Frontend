@@ -17,6 +17,7 @@ public class GameOverScreen : MonoBehaviour
         GameStatsTracker.OnPlayerDied += ShowGameOver;
         GameStatsTracker.OnMatchFinished += ShowGameFinished;
         GameStatsTracker.OnPlayerStatsSynced += HandlePlayerStatsSynced;
+        GameStatsTracker.OnPvpMatchFinished += ShowPvpResult;
     }
 
     private void OnDestroy()
@@ -24,6 +25,82 @@ public class GameOverScreen : MonoBehaviour
         GameStatsTracker.OnPlayerDied -= ShowGameOver;
         GameStatsTracker.OnMatchFinished -= ShowGameFinished;
         GameStatsTracker.OnPlayerStatsSynced -= HandlePlayerStatsSynced;
+        GameStatsTracker.OnPvpMatchFinished -= ShowPvpResult;
+    }
+
+    private void ShowPvpResult(int loserPlayerIndex)
+    {
+        Time.timeScale = 0f;
+
+        bool isOnline = MultiplayerState.IsOnline;
+        int winnerIndex = loserPlayerIndex == 0 ? 1 : 0;
+
+        string winnerName = isOnline
+            ? (winnerIndex == 0 ? "You" : "Opponent")
+            : $"Player {winnerIndex + 1}";
+        string loserName = isOnline
+            ? (loserPlayerIndex == 0 ? "You" : "Opponent")
+            : $"Player {loserPlayerIndex + 1}";
+
+        int seconds = GameStatsTracker.LastRunTimeSeconds;
+        string timeStr = string.Format("{0}:{1:00}", seconds / 60, seconds % 60);
+
+        GameObject canvasObj = new GameObject("PvpResultCanvas");
+        DontDestroyOnLoad(canvasObj);
+
+        Canvas canvas = canvasObj.AddComponent<Canvas>();
+        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        canvas.sortingOrder = 100;
+        canvasObj.AddComponent<CanvasScaler>();
+        canvasObj.AddComponent<GraphicRaycaster>();
+
+        Image bg = canvasObj.AddComponent<Image>();
+        bg.color = new Color(0f, 0f, 0f, 0.82f);
+        RectTransform bgRect = bg.rectTransform;
+        bgRect.anchorMin = Vector2.zero;
+        bgRect.anchorMax = Vector2.one;
+        bgRect.offsetMin = Vector2.zero;
+        bgRect.offsetMax = Vector2.zero;
+
+        GameObject panel = new GameObject("Panel");
+        panel.transform.SetParent(canvasObj.transform, false);
+        GameUiThemeRuntime.StylePanel(panel, GameUiThemeRuntime.Current.resultBackground, true);
+
+        RectTransform panelRect = panel.GetComponent<RectTransform>();
+        panelRect.anchorMin = new Vector2(0.5f, 0.5f);
+        panelRect.anchorMax = new Vector2(0.5f, 0.5f);
+        panelRect.pivot = new Vector2(0.5f, 0.5f);
+        panelRect.sizeDelta = new Vector2(460f, 10f);
+        panelRect.anchoredPosition = Vector2.zero;
+
+        VerticalLayoutGroup layout = panel.AddComponent<VerticalLayoutGroup>();
+        layout.padding = new RectOffset(40, 40, 36, 36);
+        layout.spacing = 16f;
+        layout.childAlignment = TextAnchor.UpperCenter;
+        layout.childControlWidth = true;
+        layout.childControlHeight = true;
+        layout.childForceExpandWidth = true;
+        layout.childForceExpandHeight = false;
+
+        ContentSizeFitter fitter = panel.AddComponent<ContentSizeFitter>();
+        fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+        fitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
+
+        AddLabel(panel.transform, "PvP MATCH OVER", 44, FontStyles.Bold, new Color(0.55f, 0.35f, 1f, 1f));
+        AddSpacer(panel.transform, 8f);
+        AddLabel(panel.transform, $"🏆  {winnerName} Wins!", 34, FontStyles.Bold, new Color(0.4f, 1f, 0.55f, 1f));
+        AddLabel(panel.transform, $"☠  {loserName} was eliminated", 22, FontStyles.Normal, new Color(1f, 0.35f, 0.35f, 1f));
+        AddSpacer(panel.transform, 6f);
+        AddLabel(panel.transform, $"Match Time:  {timeStr}", 22, FontStyles.Normal, new Color(0.9f, 0.92f, 1f, 1f));
+        AddSpacer(panel.transform, 10f);
+
+        AddButton(panel.transform, "Main Menu", new Color(0.18f, 0.22f, 0.35f, 1f), () =>
+        {
+            Time.timeScale = 1f;
+            Destroy(canvasObj);
+            GameAudio.StopMusic();
+            UnityEngine.SceneManagement.SceneManager.LoadScene("Menu");
+        });
     }
 
     private void ShowGameOver(int meleeKills, int rangedKills, int giantKills, int seconds)
