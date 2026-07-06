@@ -380,24 +380,32 @@ public class GameStateGuest : MonoBehaviour
 
     private int ResolvePvpLoserPlayerId(OnlineMatchStateMessage state)
     {
+        // All ids here are in the HOST's frame: 0=host's local player, 1=guest's player.
+        // On the GUEST machine the convention is: 0=local(guest), 1=remote(host).
+        // So we must flip: guestIndex = 1 - hostIndex.
+        int hostFrameId = -1;
+
         if (state != null && state.pvpLoserPlayerId >= 0)
         {
-            return state.pvpLoserPlayerId;
+            hostFrameId = state.pvpLoserPlayerId;
         }
-
-        if (state != null && state.players != null)
+        else if (state != null && state.players != null)
         {
             for (int i = 0; i < state.players.Length; i++)
             {
                 OnlinePlayerState player = state.players[i];
                 if (player != null && player.present && !player.alive)
                 {
-                    return player.id;
+                    hostFrameId = player.id;
+                    break;
                 }
             }
         }
 
-        return MultiplayerState.IsHost ? 1 : 0;
+        if (hostFrameId >= 0)
+            return 1 - hostFrameId;
+
+        return 0; // fallback: treat local player as loser
     }
 
     private void ApplyPvpState(bool pvp)

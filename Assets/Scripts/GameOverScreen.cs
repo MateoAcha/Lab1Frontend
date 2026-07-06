@@ -139,8 +139,7 @@ public class GameOverScreen : MonoBehaviour
                 : (MultiplayerState.IsHost ? "Guest" : "Host");
         }
 
-        if (playerIndex == 0)
-            return PlayerDisplayNames.LocalUsernameOrFallback("Player 1");
+        if (playerIndex == 0) return "Player 1";
         return "Player 2";
     }
 
