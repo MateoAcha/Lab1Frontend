@@ -32,16 +32,10 @@ public class GameOverScreen : MonoBehaviour
     {
         Time.timeScale = 0f;
 
-        bool isOnline = MultiplayerState.IsOnline;
         int winnerIndex = loserPlayerIndex == 0 ? 1 : 0;
 
-        int localOnlinePlayerIndex = MultiplayerState.IsHost ? 0 : 1;
-        string winnerName = isOnline
-            ? (winnerIndex == localOnlinePlayerIndex ? "You" : "Opponent")
-            : $"Player {winnerIndex + 1}";
-        string loserName = isOnline
-            ? (loserPlayerIndex == localOnlinePlayerIndex ? "You" : "Opponent")
-            : $"Player {loserPlayerIndex + 1}";
+        string winnerName = ResolvePvpPlayerName(winnerIndex);
+        string loserName = ResolvePvpPlayerName(loserPlayerIndex);
 
         int seconds = GameStatsTracker.LastRunTimeSeconds;
         string timeStr = string.Format("{0}:{1:00}", seconds / 60, seconds % 60);
@@ -102,6 +96,31 @@ public class GameOverScreen : MonoBehaviour
             GameAudio.StopMusic();
             UnityEngine.SceneManagement.SceneManager.LoadScene("Menu");
         });
+    }
+
+    private static string ResolvePvpPlayerName(int playerIndex)
+    {
+        PlayerController player = MultiplayerState.GetPlayerByIndex(playerIndex);
+        if (player != null && !string.IsNullOrWhiteSpace(player.NetworkUsername))
+            return player.NetworkUsername;
+
+        if (MultiplayerState.IsOnline)
+        {
+            if (MultiplayerState.IsHost)
+            {
+                if (playerIndex == 0)
+                    return PlayerDisplayNames.LocalUsernameOrFallback("Host");
+            }
+            else
+            {
+                if (playerIndex == 1)
+                    return PlayerDisplayNames.LocalUsernameOrFallback("Guest");
+                if (OnlinePlayerSync.Instance != null && !string.IsNullOrWhiteSpace(OnlinePlayerSync.Instance.RemoteUsername))
+                    return OnlinePlayerSync.Instance.RemoteUsername;
+            }
+        }
+
+        return "Player " + (playerIndex + 1);
     }
 
     private void ShowGameOver(int meleeKills, int rangedKills, int giantKills, int seconds)

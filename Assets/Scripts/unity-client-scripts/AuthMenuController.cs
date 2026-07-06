@@ -162,6 +162,18 @@ public class AuthMenuController : MonoBehaviour
     private Button _createSessionButton;
     private TextMeshProUGUI _createSessionTitleText;
     private TextMeshProUGUI _createSessionSubtitleText;
+    private bool _createPrivateMatch;
+    private bool _pendingCreatePrivateMatch;
+    private string _pendingCreatePassword = "";
+    private string _currentLobbyPassword = "";
+    private bool _joiningViaInvite;
+    private Button _privateCreateToggleButton;
+    private TextMeshProUGUI _privateCreateToggleText;
+    private TMP_InputField _privateCreatePasswordInput;
+    private GameObject _privateRoomPasswordPanel;
+    private TMP_InputField _privateRoomPasswordInput;
+    private TextMeshProUGUI _privateRoomPasswordTitleText;
+    private LobbyRoomData _pendingPrivateRoom;
     private GameObject _joinSessionPanel;
     private TMP_InputField _joinServerUrlInput;
     private TextMeshProUGUI _joinSessionTitleText;
@@ -675,6 +687,18 @@ public class AuthMenuController : MonoBehaviour
 
         _isHostSession = true;
         _currentLobbyRoomNumber = 0;
+        _pendingCreatePrivateMatch = _createPrivateMatch;
+        _pendingCreatePassword = _createPrivateMatch && _privateCreatePasswordInput != null
+            ? (_privateCreatePasswordInput.text ?? "").Trim()
+            : "";
+        if (_pendingCreatePrivateMatch && string.IsNullOrWhiteSpace(_pendingCreatePassword))
+        {
+            ShowError("Enter a private match password.");
+            return;
+        }
+
+        _currentLobbyPassword = "";
+        _joiningViaInvite = false;
         _loginReturn = LoginReturn.OnlineLobby;
         RefreshSessionUI();
         ContinueToLobbyOrLogin();
@@ -1764,6 +1788,8 @@ public class AuthMenuController : MonoBehaviour
 
         _isHostSession = false;
         _currentLobbyRoomNumber = roomNumber;
+        _currentLobbyPassword = "";
+        _joiningViaInvite = true;
         _loginReturn = LoginReturn.OnlineLobby;
         ContinueToLobbyOrLogin();
     }
@@ -3113,6 +3139,8 @@ public class AuthMenuController : MonoBehaviour
             string createError = null;
             yield return _apiClient.LobbyCreate(
                 _lobbyClientId,
+                _pendingCreatePrivateMatch,
+                _pendingCreatePassword,
                 onSuccess: room =>
                 {
                     _currentLobbyRoomNumber = room != null ? room.roomNumber : 0;
@@ -3152,7 +3180,8 @@ public class AuthMenuController : MonoBehaviour
             if (_isHostSession)
             {
                 string ip = GetLocalIP();
-                _hostAddressText.text = $"Room #{_currentLobbyRoomNumber}\nYour address:\nhttp://{ip}:8080";
+                string privacy = _pendingCreatePrivateMatch ? "\nPrivate match" : "";
+                _hostAddressText.text = $"Room #{_currentLobbyRoomNumber}{privacy}\nYour address:\nhttp://{ip}:8080";
                 _hostAddressText.gameObject.SetActive(true);
             }
             else
@@ -3214,6 +3243,8 @@ public class AuthMenuController : MonoBehaviour
             bool shouldLaunch = false;
             string pingError = null;
             yield return _apiClient.LobbyPing(_currentLobbyRoomNumber, _lobbyClientId, weapon, armor, item, 0f, 0f,
+                _currentLobbyPassword,
+                _joiningViaInvite,
                 onSuccess: (players, started) =>
                 {
                     _lobbyPlayerCount = CountLobbyPlayers(players);
@@ -3827,7 +3858,22 @@ public class AuthMenuController : MonoBehaviour
             return;
         }
 
+        if (room.privateMatch)
+        {
+            ShowPrivateRoomPasswordPrompt(room);
+            return;
+        }
+
+        JoinRoomFromList(room, "");
+    }
+
+    private void JoinRoomFromList(LobbyRoomData room, string password)
+    {
+        if (room == null) return;
+
         _currentLobbyRoomNumber = room.roomNumber;
+        _currentLobbyPassword = password ?? "";
+        _joiningViaInvite = false;
         _isHostSession = false;
         _loginReturn = LoginReturn.OnlineLobby;
         ContinueToLobbyOrLogin();
@@ -3970,8 +4016,111 @@ public class AuthMenuController : MonoBehaviour
         label.color = unavailable ? new Color(1f, 0.72f, 0.72f, 1f) : Color.white;
         label.alignment = TextAlignmentOptions.Left;
         label.raycastTarget = false;
-        string status = currentUserAlreadyInRoom ? "   ACCOUNT IN ROOM" : full ? "   FULL" : "";
+        string status = currentUserAlreadyInRoom ? "   ACCOUNT IN ROOM" : full ? "   FULL" : room.privateMatch ? "   PRIVATE" : "";
         label.text = $"Room #{room.roomNumber}   {room.playerCount}/{Mathf.Max(1, room.maxPlayers)}{status}\n{BuildRoomPlayerNames(room)}";
+    }
+
+    private void ShowPrivateRoomPasswordPrompt(LobbyRoomData room)
+    {
+        _pendingPrivateRoom = room;
+        EnsurePrivateRoomPasswordPanel();
+        if (_privateRoomPasswordTitleText != null)
+            _privateRoomPasswordTitleText.text = "Room #" + room.roomNumber + " Password";
+        if (_privateRoomPasswordInput != null)
+            _privateRoomPasswordInput.text = "";
+        _privateRoomPasswordPanel.SetActive(true);
+        _privateRoomPasswordPanel.transform.SetAsLastSibling();
+        AutoFocusNextFrame(_privateRoomPasswordInput);
+    }
+
+    private void SubmitPrivateRoomPassword()
+    {
+        string password = _privateRoomPasswordInput != null ? (_privateRoomPasswordInput.text ?? "").Trim() : "";
+        if (string.IsNullOrWhiteSpace(password))
+        {
+            ShowError("Enter the room password.");
+            return;
+        }
+
+        LobbyRoomData room = _pendingPrivateRoom;
+        _pendingPrivateRoom = null;
+        if (_privateRoomPasswordPanel != null)
+            _privateRoomPasswordPanel.SetActive(false);
+        JoinRoomFromList(room, password);
+    }
+
+    private void CancelPrivateRoomPassword()
+    {
+        _pendingPrivateRoom = null;
+        if (_privateRoomPasswordPanel != null)
+            _privateRoomPasswordPanel.SetActive(false);
+    }
+
+    private void EnsurePrivateRoomPasswordPanel()
+    {
+        if (_privateRoomPasswordPanel != null)
+            return;
+
+        Transform panelParent = _roomListPanel != null ? _roomListPanel.transform : transform;
+        _privateRoomPasswordPanel = new GameObject("PrivateRoomPasswordPanel");
+        _privateRoomPasswordPanel.transform.SetParent(panelParent, false);
+
+        RectTransform overlayRect = _privateRoomPasswordPanel.AddComponent<RectTransform>();
+        overlayRect.anchorMin = Vector2.zero;
+        overlayRect.anchorMax = Vector2.one;
+        overlayRect.offsetMin = Vector2.zero;
+        overlayRect.offsetMax = Vector2.zero;
+
+        Image dim = _privateRoomPasswordPanel.AddComponent<Image>();
+        dim.color = new Color(0f, 0f, 0f, 0.55f);
+        dim.raycastTarget = true;
+
+        GameObject card = new GameObject("PasswordCard");
+        card.transform.SetParent(_privateRoomPasswordPanel.transform, false);
+        RectTransform cardRect = card.AddComponent<RectTransform>();
+        cardRect.anchorMin = new Vector2(0.5f, 0.5f);
+        cardRect.anchorMax = new Vector2(0.5f, 0.5f);
+        cardRect.pivot = new Vector2(0.5f, 0.5f);
+        cardRect.sizeDelta = new Vector2(460f, 230f);
+        cardRect.anchoredPosition = Vector2.zero;
+        GameUiThemeRuntime.StyleSurface(card);
+
+        VerticalLayoutGroup layout = card.AddComponent<VerticalLayoutGroup>();
+        layout.padding = new RectOffset(28, 28, 26, 26);
+        layout.spacing = 14f;
+        layout.childControlWidth = true;
+        layout.childControlHeight = true;
+        layout.childForceExpandWidth = true;
+        layout.childForceExpandHeight = false;
+
+        GameObject titleObj = new GameObject("Title");
+        titleObj.transform.SetParent(card.transform, false);
+        titleObj.AddComponent<LayoutElement>().preferredHeight = 34f;
+        _privateRoomPasswordTitleText = titleObj.AddComponent<TextMeshProUGUI>();
+        _privateRoomPasswordTitleText.font = TMP_Settings.defaultFontAsset;
+        _privateRoomPasswordTitleText.fontSize = 24f;
+        _privateRoomPasswordTitleText.fontStyle = FontStyles.Bold;
+        _privateRoomPasswordTitleText.color = GameUiThemeRuntime.Current.text;
+        _privateRoomPasswordTitleText.alignment = TextAlignmentOptions.Center;
+        _privateRoomPasswordTitleText.raycastTarget = false;
+
+        _privateRoomPasswordInput = CreateGoogleInput(card.transform, "RoomPasswordInput", "Password");
+        _privateRoomPasswordInput.contentType = TMP_InputField.ContentType.Password;
+
+        GameObject buttons = new GameObject("Buttons");
+        buttons.transform.SetParent(card.transform, false);
+        buttons.AddComponent<LayoutElement>().preferredHeight = 48f;
+        HorizontalLayoutGroup buttonsLayout = buttons.AddComponent<HorizontalLayoutGroup>();
+        buttonsLayout.spacing = 12f;
+        buttonsLayout.childControlWidth = true;
+        buttonsLayout.childControlHeight = true;
+        buttonsLayout.childForceExpandWidth = true;
+        buttonsLayout.childForceExpandHeight = true;
+
+        CreateLayoutButton(buttons.transform, "Cancel", GameUiThemeRuntime.Current.secondaryButton, CancelPrivateRoomPassword);
+        CreateLayoutButton(buttons.transform, "Join", GameUiThemeRuntime.Current.primaryButton, SubmitPrivateRoomPassword);
+
+        _privateRoomPasswordPanel.SetActive(false);
     }
 
     private string BuildRoomPlayerNames(LobbyRoomData room)
@@ -4786,8 +4935,76 @@ public class AuthMenuController : MonoBehaviour
             new Color(0.10f, 0.15f, 0.30f, 1f),
             interactable: true, OpenJoinSession);
 
+        BuildPrivateCreateOptions(_multiplayerPanel.transform);
         _multiplayerPanel.SetActive(false);
         RefreshCreateSessionButtonState();
+    }
+
+    private void BuildPrivateCreateOptions(Transform parent)
+    {
+        GameObject options = new GameObject("PrivateCreateOptions");
+        options.transform.SetParent(parent, false);
+        RectTransform rect = options.AddComponent<RectTransform>();
+        rect.anchorMin = new Vector2(0.5f, 0.5f);
+        rect.anchorMax = new Vector2(0.5f, 0.5f);
+        rect.pivot = new Vector2(0.5f, 0.5f);
+        rect.sizeDelta = new Vector2(720f, 76f);
+        rect.anchoredPosition = new Vector2(0f, -250f);
+        GameUiThemeRuntime.StyleSurface(options);
+
+        HorizontalLayoutGroup layout = options.AddComponent<HorizontalLayoutGroup>();
+        layout.padding = new RectOffset(14, 14, 12, 12);
+        layout.spacing = 12f;
+        layout.childControlWidth = true;
+        layout.childControlHeight = true;
+        layout.childForceExpandWidth = false;
+        layout.childForceExpandHeight = true;
+
+        _privateCreateToggleButton = CreateLayoutButton(
+            options.transform,
+            "Private: Off",
+            GameUiThemeRuntime.Current.secondaryButton,
+            TogglePrivateCreate);
+        AddLayoutWidth(_privateCreateToggleButton.gameObject, 170f);
+        _privateCreateToggleText = _privateCreateToggleButton.GetComponentInChildren<TextMeshProUGUI>();
+
+        _privateCreatePasswordInput = CreateGoogleInput(options.transform, "PrivateCreatePasswordInput", "Private password");
+        _privateCreatePasswordInput.contentType = TMP_InputField.ContentType.Password;
+        LayoutElement inputLayout = _privateCreatePasswordInput.GetComponent<LayoutElement>();
+        if (inputLayout != null)
+        {
+            inputLayout.preferredWidth = 360f;
+            inputLayout.flexibleWidth = 1f;
+        }
+
+        RefreshPrivateCreateUi();
+    }
+
+    private void TogglePrivateCreate()
+    {
+        _createPrivateMatch = !_createPrivateMatch;
+        RefreshPrivateCreateUi();
+    }
+
+    private void RefreshPrivateCreateUi()
+    {
+        if (_privateCreateToggleText != null)
+            _privateCreateToggleText.text = _createPrivateMatch ? "Private: On" : "Private: Off";
+
+        if (_privateCreatePasswordInput != null)
+        {
+            _privateCreatePasswordInput.interactable = _createPrivateMatch;
+            if (!_createPrivateMatch)
+                _privateCreatePasswordInput.text = "";
+
+            Image image = _privateCreatePasswordInput.GetComponent<Image>();
+            if (image != null)
+            {
+                image.color = _createPrivateMatch
+                    ? new Color(0.12f, 0.16f, 0.22f, 1f)
+                    : new Color(0.08f, 0.10f, 0.13f, 0.65f);
+            }
+        }
     }
 
     private Button CreateModeCard(Transform parent, string title, string subtitle,
@@ -4897,6 +5114,42 @@ public class AuthMenuController : MonoBehaviour
         tmp.alignment = TextAlignmentOptions.Center;
         tmp.color = GameUiThemeRuntime.Current.text;
         tmp.raycastTarget = false;
+    }
+
+    private Button CreateLayoutButton(Transform parent, string label, Color color, UnityEngine.Events.UnityAction onClick)
+    {
+        GameObject obj = new GameObject(label.Replace(" ", "") + "Button");
+        obj.transform.SetParent(parent, false);
+        Image img = obj.AddComponent<Image>();
+        Button btn = obj.AddComponent<Button>();
+        GameUiThemeRuntime.StyleButton(btn, img, color);
+        if (onClick != null)
+            btn.onClick.AddListener(onClick);
+
+        GameObject labelObj = new GameObject("Label");
+        labelObj.transform.SetParent(obj.transform, false);
+        RectTransform lr = labelObj.AddComponent<RectTransform>();
+        lr.anchorMin = Vector2.zero;
+        lr.anchorMax = Vector2.one;
+        lr.offsetMin = Vector2.zero;
+        lr.offsetMax = Vector2.zero;
+        TextMeshProUGUI tmp = labelObj.AddComponent<TextMeshProUGUI>();
+        tmp.text = label;
+        tmp.font = TMP_Settings.defaultFontAsset;
+        tmp.fontSize = 19f;
+        tmp.fontStyle = FontStyles.Bold;
+        tmp.alignment = TextAlignmentOptions.Center;
+        tmp.color = GameUiThemeRuntime.Current.text;
+        tmp.raycastTarget = false;
+        return btn;
+    }
+
+    private static void AddLayoutWidth(GameObject obj, float width)
+    {
+        LayoutElement layout = obj.GetComponent<LayoutElement>();
+        if (layout == null)
+            layout = obj.AddComponent<LayoutElement>();
+        layout.preferredWidth = width;
     }
 
     private static T GetOrAddComponent<T>(GameObject obj) where T : Component

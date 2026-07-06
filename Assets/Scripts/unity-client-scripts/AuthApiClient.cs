@@ -1427,8 +1427,18 @@ public class AuthApiClient
 
     public IEnumerator LobbyCreate(string lobbyClientId, Action<LobbyRoomData> onSuccess, Action<string> onError)
     {
+        yield return LobbyCreate(lobbyClientId, false, "", onSuccess, onError);
+    }
+
+    public IEnumerator LobbyCreate(string lobbyClientId, bool privateMatch, string password, Action<LobbyRoomData> onSuccess, Action<string> onError)
+    {
         var request = new UnityWebRequest(_baseUrl + "/lobby/create", "POST");
-        request.uploadHandler   = new UploadHandlerRaw(new byte[0]);
+        string json = JsonUtility.ToJson(new LobbyCreateRequest
+        {
+            privateMatch = privateMatch,
+            password = password ?? ""
+        });
+        request.uploadHandler   = new UploadHandlerRaw(Encoding.UTF8.GetBytes(json));
         request.downloadHandler = new DownloadHandlerBuffer();
         request.SetRequestHeader("Content-Type", "application/json");
         AttachLobbyClientId(request, lobbyClientId);
@@ -1476,12 +1486,21 @@ public class AuthApiClient
     public IEnumerator LobbyPing(int roomNumber, string lobbyClientId, string weapon, string armor, string item, float x, float y,
         Action<LobbyPlayerData[], bool> onSuccess, Action<string> onError)
     {
+        yield return LobbyPing(roomNumber, lobbyClientId, weapon, armor, item, x, y, "", false, onSuccess, onError);
+    }
+
+    public IEnumerator LobbyPing(int roomNumber, string lobbyClientId, string weapon, string armor, string item, float x, float y,
+        string password, bool inviteJoin, Action<LobbyPlayerData[], bool> onSuccess, Action<string> onError)
+    {
         string json = JsonUtility.ToJson(new LobbyPingRequest
         {
             roomNumber = Mathf.Max(1, roomNumber),
             weapon = weapon ?? "",
             armor  = armor  ?? "",
             item   = item   ?? "",
+            password = password ?? "",
+            lobbyPassword = password ?? "",
+            inviteJoin = inviteJoin,
             x = x, y = y
         });
         var request = new UnityWebRequest(_baseUrl + "/lobby/ping", "POST");
@@ -1609,6 +1628,13 @@ public class AuthApiClient
     }
 
     [Serializable]
+    private class LobbyCreateRequest
+    {
+        public bool privateMatch;
+        public string password;
+    }
+
+    [Serializable]
     private class SocialSummaryEnvelope
     {
         public SocialSummaryResponse summary;
@@ -1625,6 +1651,9 @@ public class AuthApiClient
         public string weapon;
         public string armor;
         public string item;
+        public string password;
+        public string lobbyPassword;
+        public bool inviteJoin;
         public float x;
         public float y;
     }
@@ -1664,6 +1693,7 @@ public class LobbyRoomData
     public int playerCount;
     public int maxPlayers;
     public bool full;
+    public bool privateMatch;
 }
 
 [Serializable]

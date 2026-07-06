@@ -32,7 +32,7 @@ public class GhostEnemy : MonoBehaviour
         TemporaryWall wall = other.GetComponent<TemporaryWall>();
         if (wall != null)
         {
-            wall.Hit(TouchDamage);
+            wall.Hit(EnemyDamage.Amount(TouchDamage));
             _nextTouchDamage = Time.time + TouchCooldown;
             return;
         }
@@ -42,7 +42,7 @@ public class GhostEnemy : MonoBehaviour
         Health h = other.GetComponent<Health>();
         if (h == null) return;
 
-        h.Hit(TouchDamage);
+        h.Hit(EnemyDamage.Amount(TouchDamage));
         _nextTouchDamage = Time.time + TouchCooldown;
     }
 

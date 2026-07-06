@@ -165,7 +165,7 @@ public class GiantEnemyController : MonoBehaviour
 
         HitBox hit = smash.AddComponent<HitBox>();
         hit.hitsPlayer = true;
-        hit.damage = Mathf.Max(1, smashDamage);
+        hit.damage = EnemyDamage.AmountInt(smashDamage);
         hit.life = Mathf.Max(0.01f, smashLife);
 
         smash.AddComponent<GiantShockwaveAnimator>();
@@ -225,7 +225,7 @@ public class GiantEnemyController : MonoBehaviour
         TemporaryWall wall = other.GetComponent<TemporaryWall>();
         if (wall != null)
         {
-            wall.Hit(touchDamage);
+            wall.Hit(EnemyDamage.Amount(touchDamage));
             nextTouchDamageAt = Time.time + 0.8f;
             return;
         }
@@ -247,7 +247,7 @@ public class GiantEnemyController : MonoBehaviour
             return;
         }
 
-        health.Hit(touchDamage);
+        health.Hit(EnemyDamage.Amount(touchDamage));
         nextTouchDamageAt = Time.time + 0.8f;
     }
 
@@ -264,7 +264,7 @@ public class GiantEnemyController : MonoBehaviour
             return false;
         }
 
-        health.Hit(touchDamage);
+        health.Hit(EnemyDamage.Amount(touchDamage));
         return true;
     }
 }

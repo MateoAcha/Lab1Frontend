@@ -208,7 +208,7 @@ public class RangedEnemyController : MonoBehaviour
         TemporaryWall wall = other.GetComponent<TemporaryWall>();
         if (wall != null)
         {
-            wall.Hit(touchDamage);
+            wall.Hit(EnemyDamage.Amount(touchDamage));
             nextTouchDamageAt = Time.time + Mathf.Max(0.05f, cooldown);
             return;
         }
@@ -230,7 +230,7 @@ public class RangedEnemyController : MonoBehaviour
             return;
         }
 
-        health.Hit(touchDamage);
+        health.Hit(EnemyDamage.Amount(touchDamage));
         nextTouchDamageAt = Time.time + Mathf.Max(0.05f, cooldown);
     }
 
@@ -247,7 +247,7 @@ public class RangedEnemyController : MonoBehaviour
             return false;
         }
 
-        health.Hit(touchDamage);
+        health.Hit(EnemyDamage.Amount(touchDamage));
         return true;
     }
 

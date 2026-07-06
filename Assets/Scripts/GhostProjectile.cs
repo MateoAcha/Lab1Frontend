@@ -34,7 +34,7 @@ public class GhostProjectile : MonoBehaviour
             return;
         }
 
-        other.GetComponent<Health>()?.Hit(1);
+        other.GetComponent<Health>()?.Hit(EnemyDamage.Amount(1));
         Destroy(gameObject);
     }
 }

@@ -9,7 +9,7 @@ using UnityEngine.UI;
 
 public class SocialPanelController : MonoBehaviour
 {
-    private const float RefreshIntervalSeconds = 30f;
+    private const float RefreshIntervalSeconds = 5f;
     private const float PanelWidth = 390f;
     private const float PanelHeight = 620f;
 
@@ -41,6 +41,7 @@ public class SocialPanelController : MonoBehaviour
     private Button _friendsTabButton;
     private Button _inboxTabButton;
     private Button _sentTabButton;
+    private GameObject _inboxNotificationDot;
     private Button _inviteFriendButton;
     private GameObject _sendFriendRow;
     private GameObject _friendActionsRow;
@@ -195,6 +196,7 @@ public class SocialPanelController : MonoBehaviour
         _friendsTabButton = CreateButton("FriendsTab", tabs.transform, "Friends", GameUiThemeRuntime.Current.primaryButton, 15f);
         _inboxTabButton = CreateButton("InboxTab", tabs.transform, "Inbox", GameUiThemeRuntime.Current.secondaryButton, 15f);
         _sentTabButton = CreateButton("SentTab", tabs.transform, "Sent", GameUiThemeRuntime.Current.secondaryButton, 15f);
+        _inboxNotificationDot = CreateNotificationDot(_inboxTabButton.transform);
         AddFlexibleButtonLayout(_friendsTabButton.gameObject);
         AddFlexibleButtonLayout(_inboxTabButton.gameObject);
         AddFlexibleButtonLayout(_sentTabButton.gameObject);
@@ -425,6 +427,7 @@ public class SocialPanelController : MonoBehaviour
 
         UpdateContextText();
         UpdateTabButtonVisuals();
+        UpdateInboxNotificationDot();
         ClearChildren(_listContent);
 
         bool hasSummary = _summary != null;
@@ -751,6 +754,29 @@ public class SocialPanelController : MonoBehaviour
         RemoveCachedFriend(friendUserId);
         _selectedFriend = null;
         ApplySocialActionResponse(response, ResponseMessage(response, "Friend removed."));
+        StartCoroutine(RefreshSummaryQuietlyRoutine());
+    }
+
+    private IEnumerator RefreshSummaryQuietlyRoutine()
+    {
+        if (_refreshInFlight || _apiClient == null || string.IsNullOrWhiteSpace(AuthSession.AccessToken))
+            yield break;
+
+        _refreshInFlight = true;
+        _refreshStartedAt = Time.realtimeSinceStartup;
+        SocialSummaryResponse response = null;
+        string error = null;
+        yield return RunSummaryRequestSafely(
+            data => response = data,
+            err => error = err);
+        _refreshInFlight = false;
+
+        if (!string.IsNullOrWhiteSpace(error) || response == null)
+            yield break;
+
+        _summary = response;
+        RestoreSelectedFriendAfterRefresh();
+        Render();
     }
 
     private void InviteSelectedFriend()
@@ -1301,11 +1327,7 @@ public class SocialPanelController : MonoBehaviour
     {
         if (_summary == null)
             return new FriendSummaryResponse[0];
-        if (_summary.friends != null)
-            return _summary.friends;
-        if (_summary.friendList != null)
-            return _summary.friendList;
-        return _summary.friendships ?? new FriendSummaryResponse[0];
+        return FirstNonEmptyArray(_summary.friends, _summary.friendList, _summary.friendships);
     }
 
     private void RemoveCachedFriend(int friendUserId)
@@ -1349,24 +1371,38 @@ public class SocialPanelController : MonoBehaviour
     {
         if (_summary == null)
             return new FriendRequestResponse[0];
-        if (_summary.incomingFriendRequests != null)
-            return _summary.incomingFriendRequests;
-        if (_summary.incomingRequests != null)
-            return _summary.incomingRequests;
-        if (_summary.receivedFriendRequests != null)
-            return _summary.receivedFriendRequests;
-        return _summary.friendRequests ?? new FriendRequestResponse[0];
+        return FirstNonEmptyArray(
+            _summary.incomingFriendRequests,
+            _summary.incomingRequests,
+            _summary.receivedFriendRequests,
+            _summary.friendRequests);
     }
 
     private FriendRequestResponse[] GetSentRequests()
     {
         if (_summary == null)
             return new FriendRequestResponse[0];
-        if (_summary.sentFriendRequests != null)
-            return _summary.sentFriendRequests;
-        if (_summary.sentRequests != null)
-            return _summary.sentRequests;
-        return _summary.outgoingFriendRequests ?? new FriendRequestResponse[0];
+        return FirstNonEmptyArray(
+            _summary.sentFriendRequests,
+            _summary.sentRequests,
+            _summary.outgoingFriendRequests);
+    }
+
+    private static T[] FirstNonEmptyArray<T>(params T[][] groups)
+    {
+        T[] fallback = null;
+        for (int i = 0; i < groups.Length; i++)
+        {
+            T[] group = groups[i];
+            if (group == null)
+                continue;
+            if (fallback == null)
+                fallback = group;
+            if (group.Length > 0)
+                return group;
+        }
+
+        return fallback ?? new T[0];
     }
 
     private GameInviteResponse[] GetGameInvites()
@@ -1437,6 +1473,51 @@ public class SocialPanelController : MonoBehaviour
         StyleTabButton(_friendsTabButton, _activeTab == SocialTab.Friends);
         StyleTabButton(_inboxTabButton, _activeTab == SocialTab.Inbox);
         StyleTabButton(_sentTabButton, _activeTab == SocialTab.Sent);
+    }
+
+    private void UpdateInboxNotificationDot()
+    {
+        if (_inboxNotificationDot != null)
+            _inboxNotificationDot.SetActive(HasInboxItems());
+    }
+
+    private bool HasInboxItems()
+    {
+        GameInviteResponse[] invites = GetGameInvites();
+        for (int i = 0; i < invites.Length; i++)
+        {
+            if (IsInviteActive(invites[i]))
+                return true;
+        }
+
+        FriendRequestResponse[] requests = GetIncomingRequests();
+        for (int i = 0; i < requests.Length; i++)
+        {
+            if (IsPending(requests[i]?.status))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static GameObject CreateNotificationDot(Transform parent)
+    {
+        GameObject dot = new GameObject("NotificationDot");
+        dot.transform.SetParent(parent, false);
+
+        RectTransform rect = dot.AddComponent<RectTransform>();
+        rect.anchorMin = new Vector2(1f, 1f);
+        rect.anchorMax = new Vector2(1f, 1f);
+        rect.pivot = new Vector2(0.5f, 0.5f);
+        rect.sizeDelta = new Vector2(11f, 11f);
+        rect.anchoredPosition = new Vector2(-10f, -8f);
+
+        Image image = dot.AddComponent<Image>();
+        image.sprite = SimpleSprite.Circle;
+        image.color = new Color(1f, 0.12f, 0.08f, 1f);
+        image.raycastTarget = false;
+        dot.SetActive(false);
+        return dot;
     }
 
     private static void StyleTabButton(Button button, bool selected)
