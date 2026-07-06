@@ -5,7 +5,7 @@ public class OnlinePlayerSync : MonoBehaviour
     public static OnlinePlayerSync Instance { get; private set; }
     public Vector3 RemotePlayerPosition { get; private set; }
     public Vector3 RemotePlayerVelocity { get; private set; }
-    public string RemoteUsername { get; private set; } = "Player";
+    public string RemoteUsername { get; private set; } = "";
     public int RemoteSkinId { get; private set; }
     public string RemoteSkinColor { get; private set; } = "#FFFFFF";
     public int RemoteAttackSequence { get; private set; }
@@ -69,7 +69,7 @@ public class OnlinePlayerSync : MonoBehaviour
     {
         RemotePlayerPosition = pos;
         RemotePlayerVelocity = downed ? Vector3.zero : velocity;
-        RemoteUsername = PlayerDisplayNames.Normalize(username, "Player");
+        RemoteUsername = username?.Trim() ?? "";
         RemoteSkinId = Mathf.Max(0, skinId);
         RemoteSkinColor = string.IsNullOrWhiteSpace(skinColor) ? "#FFFFFF" : skinColor;
         RemoteAttackSequence = Mathf.Max(0, attackSequence);
@@ -91,7 +91,7 @@ public class OnlinePlayerSync : MonoBehaviour
         RemoteDowned = false;
         RemoteReviveProgress = 0f;
         RemotePlayerVelocity = Vector3.zero;
-        RemoteUsername = "Player";
+        RemoteUsername = "";
         RemoteQuickChatSequence = 0;
         RemoteQuickChatEmote = "";
     }

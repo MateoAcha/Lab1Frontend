@@ -7,7 +7,7 @@ using UnityEngine.UI;
 
 public class ShopPanelController : MonoBehaviour
 {
-    private enum ShopTab { Store, Challenges }
+    private enum ShopTab { Store, Challenges, TopUp }
 
     private AuthApiClient _apiClient;
     private Action _backAction;
@@ -28,13 +28,16 @@ public class ShopPanelController : MonoBehaviour
     private RectTransform _contentRoot;
     private Button _storeTabBtn;
     private Button _challengesTabBtn;
+    private Button _topUpTabBtn;
     private Image _storeTabImg;
     private Image _challengesTabImg;
+    private Image _topUpTabImg;
     private readonly List<GameObject> _rows = new List<GameObject>();
 
-    private static readonly Color TabActive   = new Color(0.12f, 0.40f, 0.52f, 1f);
-    private static readonly Color TabInactive = new Color(0.18f, 0.22f, 0.28f, 1f);
+    private static readonly Color TabActive          = new Color(0.12f, 0.40f, 0.52f, 1f);
+    private static readonly Color TabInactive        = new Color(0.18f, 0.22f, 0.28f, 1f);
     private static readonly Color TabActiveChallenge = new Color(0.34f, 0.16f, 0.50f, 1f);
+    private static readonly Color TabActiveTopUp     = new Color(0.10f, 0.42f, 0.24f, 1f);
     private const int GoldItemId = 1004;
     private const int EmeraldItemId = 1033;
     private const int ChallengeRewardCoins = 100;
@@ -98,6 +101,11 @@ public class ShopPanelController : MonoBehaviour
 
         if (_activeTab == ShopTab.Store)
             yield return LoadStoreItems();
+        else if (_activeTab == ShopTab.TopUp)
+        {
+            HideState();
+            RenderTopUpTab();
+        }
         else
         {
             yield return LoadChallengeClaims();
@@ -155,12 +163,22 @@ public class ShopPanelController : MonoBehaviour
         _loadRoutine = StartCoroutine(LoadRoutine());
     }
 
+    private void OnTopUpTabClicked()
+    {
+        _activeTab = ShopTab.TopUp;
+        RefreshTabVisuals();
+        if (_loadRoutine != null) StopCoroutine(_loadRoutine);
+        _loadRoutine = StartCoroutine(LoadRoutine());
+    }
+
     private void RefreshTabVisuals()
     {
         if (_storeTabBtn != null)      _storeTabBtn.interactable      = _activeTab != ShopTab.Store;
         if (_challengesTabBtn != null) _challengesTabBtn.interactable = _activeTab != ShopTab.Challenges;
+        if (_topUpTabBtn != null)      _topUpTabBtn.interactable      = _activeTab != ShopTab.TopUp;
         if (_storeTabImg != null)      _storeTabImg.color      = _activeTab == ShopTab.Store      ? TabActive          : TabInactive;
         if (_challengesTabImg != null) _challengesTabImg.color = _activeTab == ShopTab.Challenges ? TabActiveChallenge : TabInactive;
+        if (_topUpTabImg != null)      _topUpTabImg.color      = _activeTab == ShopTab.TopUp      ? TabActiveTopUp     : TabInactive;
     }
 
     // ── Store rows ──────────────────────────────────────────────────────────
@@ -302,6 +320,148 @@ public class ShopPanelController : MonoBehaviour
         if (goldPrice <= 0)
             return 0;
         return Mathf.Max(1, Mathf.CeilToInt(goldPrice * 0.10f));
+    }
+
+    // ── Top-Up rows ─────────────────────────────────────────────────────────
+
+    private struct EmeraldPack
+    {
+        public string label;
+        public int emeralds;
+        public int pesosPrice;
+    }
+
+    private static readonly EmeraldPack[] EmeraldPacks =
+    {
+        new EmeraldPack { label = "Starter",   emeralds =  100, pesosPrice =   100 },
+        new EmeraldPack { label = "Value",      emeralds =  500, pesosPrice =   500 },
+        new EmeraldPack { label = "Plus",       emeralds = 1000, pesosPrice =  1000 },
+        new EmeraldPack { label = "Mega",       emeralds = 2500, pesosPrice =  2500 },
+    };
+
+    private void RenderTopUpTab()
+    {
+        ClearRows();
+
+        foreach (EmeraldPack pack in EmeraldPacks)
+            CreateTopUpRow(pack);
+    }
+
+    private void CreateTopUpRow(EmeraldPack pack)
+    {
+        GameObject row = CreateUIObj("TopUpRow_" + pack.label, _contentRoot);
+        _rows.Add(row);
+
+        Image rowBg = row.AddComponent<Image>();
+        rowBg.color = new Color(0.08f, 0.18f, 0.12f, 0.98f);
+        GameUiThemeRuntime.ApplyBorder(row);
+        row.AddComponent<LayoutElement>().minHeight = 160f;
+
+        VerticalLayoutGroup vg = row.AddComponent<VerticalLayoutGroup>();
+        vg.padding = new RectOffset(24, 24, 20, 18);
+        vg.spacing = 10f;
+        vg.childAlignment = TextAnchor.UpperLeft;
+        vg.childControlWidth  = true;
+        vg.childControlHeight = true;
+        vg.childForceExpandWidth  = true;
+        vg.childForceExpandHeight = false;
+        row.AddComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+        // Pack name + emerald count
+        GameObject titleRow = CreateUIObj("TitleRow", row.transform);
+        titleRow.AddComponent<LayoutElement>().preferredHeight = 58f;
+        HorizontalLayoutGroup titleHL = titleRow.AddComponent<HorizontalLayoutGroup>();
+        titleHL.childAlignment        = TextAnchor.MiddleLeft;
+        titleHL.childControlWidth     = false;
+        titleHL.childControlHeight    = true;
+        titleHL.childForceExpandWidth = false;
+        titleHL.childForceExpandHeight = true;
+        titleHL.spacing = 14f;
+
+        // Emerald count (big, green)
+        GameObject emeraldObj = CreateUIObj("EmeraldCount", titleRow.transform);
+        emeraldObj.AddComponent<LayoutElement>().preferredWidth = 260f;
+        var emeraldTMP = emeraldObj.AddComponent<TextMeshProUGUI>();
+        emeraldTMP.text = $"{pack.emeralds:N0} Emeralds";
+        emeraldTMP.fontSize = 34f;
+        emeraldTMP.fontStyle = FontStyles.Bold;
+        emeraldTMP.color = new Color(0.20f, 1f, 0.60f, 1f);
+        emeraldTMP.font = TMP_Settings.defaultFontAsset;
+        emeraldTMP.enableWordWrapping = false;
+        emeraldTMP.overflowMode = TextOverflowModes.Ellipsis;
+        emeraldTMP.alignment = TextAlignmentOptions.MidlineLeft;
+        emeraldTMP.raycastTarget = false;
+
+        // Pack label badge
+        GameObject labelObj = CreateUIObj("PackLabel", titleRow.transform);
+        labelObj.AddComponent<LayoutElement>().preferredWidth = 130f;
+        Image labelBg = labelObj.AddComponent<Image>();
+        labelBg.color = new Color(0.10f, 0.42f, 0.24f, 0.85f);
+        GameObject labelText = CreateUIObj("Text", labelObj.transform);
+        RectTransform labelRT = labelText.AddComponent<RectTransform>();
+        labelRT.anchorMin = Vector2.zero;
+        labelRT.anchorMax = Vector2.one;
+        labelRT.offsetMin = Vector2.zero;
+        labelRT.offsetMax = Vector2.zero;
+        var labelTMP = labelText.AddComponent<TextMeshProUGUI>();
+        labelTMP.text = pack.label;
+        labelTMP.fontSize = 20f;
+        labelTMP.fontStyle = FontStyles.Bold;
+        labelTMP.color = new Color(0.85f, 1f, 0.90f, 1f);
+        labelTMP.font = TMP_Settings.defaultFontAsset;
+        labelTMP.alignment = TextAlignmentOptions.Center;
+        labelTMP.enableWordWrapping = false;
+        labelTMP.raycastTarget = false;
+
+        // Bottom row: price + buy button
+        GameObject bottomRow = CreateUIObj("BottomRow", row.transform);
+        bottomRow.AddComponent<LayoutElement>().preferredHeight = 54f;
+        HorizontalLayoutGroup bottomHL = bottomRow.AddComponent<HorizontalLayoutGroup>();
+        bottomHL.childAlignment         = TextAnchor.MiddleLeft;
+        bottomHL.childControlWidth      = false;
+        bottomHL.childControlHeight     = true;
+        bottomHL.childForceExpandWidth  = false;
+        bottomHL.childForceExpandHeight = true;
+        bottomHL.spacing = 20f;
+
+        // Price in ARS
+        GameObject priceObj = CreateUIObj("Price", bottomRow.transform);
+        priceObj.AddComponent<LayoutElement>().preferredWidth = 240f;
+        var priceTMP = priceObj.AddComponent<TextMeshProUGUI>();
+        priceTMP.text = $"AR$ {pack.pesosPrice:N0}";
+        priceTMP.fontSize = 28f;
+        priceTMP.fontStyle = FontStyles.Bold;
+        priceTMP.color = new Color(0.95f, 0.97f, 1f, 1f);
+        priceTMP.font = TMP_Settings.defaultFontAsset;
+        priceTMP.enableWordWrapping = false;
+        priceTMP.overflowMode = TextOverflowModes.Ellipsis;
+        priceTMP.alignment = TextAlignmentOptions.MidlineLeft;
+        priceTMP.raycastTarget = false;
+
+        // MercadoPago buy button (disabled — payment not yet integrated)
+        GameObject btnObj = CreateUIObj("BuyBtn", bottomRow.transform);
+        btnObj.AddComponent<LayoutElement>().preferredWidth = 320f;
+        Image btnImg = btnObj.AddComponent<Image>();
+        Button btn = btnObj.AddComponent<Button>();
+        GameUiThemeRuntime.StyleButton(btn, btnImg, new Color(0.20f, 0.22f, 0.25f, 0.90f));
+        btn.interactable = false;
+
+        GameObject btnLabel = CreateUIObj("Label", btnObj.transform);
+        RectTransform btnLabelRT = btnLabel.AddComponent<RectTransform>();
+        btnLabelRT.anchorMin = Vector2.zero;
+        btnLabelRT.anchorMax = Vector2.one;
+        btnLabelRT.offsetMin = Vector2.zero;
+        btnLabelRT.offsetMax = Vector2.zero;
+        var btnTMP = btnLabel.AddComponent<TextMeshProUGUI>();
+        btnTMP.text = "Buy now";
+        btnTMP.fontSize = 17f;
+        btnTMP.fontStyle = FontStyles.Bold;
+        btnTMP.color = new Color(0.55f, 0.60f, 0.65f, 0.85f);
+        btnTMP.alignment = TextAlignmentOptions.Center;
+        btnTMP.font = TMP_Settings.defaultFontAsset;
+        btnTMP.enableWordWrapping = false;
+        btnTMP.overflowMode = TextOverflowModes.Ellipsis;
+        btnTMP.raycastTarget = false;
     }
 
     // ── Challenge rows ───────────────────────────────────────────────────────
@@ -638,7 +798,7 @@ public class ShopPanelController : MonoBehaviour
         tabRT.anchorMin = new Vector2(0.5f, 1f);
         tabRT.anchorMax = new Vector2(0.5f, 1f);
         tabRT.pivot     = new Vector2(0.5f, 1f);
-        tabRT.sizeDelta = new Vector2(500f, 58f);
+        tabRT.sizeDelta = new Vector2(760f, 58f);
         tabRT.anchoredPosition = new Vector2(0f, -86f);
 
         HorizontalLayoutGroup hlg = tabBar.AddComponent<HorizontalLayoutGroup>();
@@ -651,9 +811,11 @@ public class ShopPanelController : MonoBehaviour
 
         (_storeTabBtn, _storeTabImg)           = BuildTabButton(tabBar.transform, "Store",      TabActive);
         (_challengesTabBtn, _challengesTabImg) = BuildTabButton(tabBar.transform, "Challenges", TabInactive);
+        (_topUpTabBtn, _topUpTabImg)           = BuildTabButton(tabBar.transform, "Emeralds",   TabInactive);
 
         _storeTabBtn.onClick.AddListener(OnStoreTabClicked);
         _challengesTabBtn.onClick.AddListener(OnChallengesTabClicked);
+        _topUpTabBtn.onClick.AddListener(OnTopUpTabClicked);
         _storeTabBtn.interactable = false; // active by default
     }
 
