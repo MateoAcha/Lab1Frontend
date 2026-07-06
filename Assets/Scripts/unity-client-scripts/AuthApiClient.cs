@@ -1042,8 +1042,6 @@ public class AuthApiClient
 
         if (!loginRequest && (code == 401 || code == 403))
         {
-            if (AuthSession.IsLoggedIn)
-                AuthSession.Logout();
             return SessionExpiredMessage;
         }
 
