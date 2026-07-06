@@ -63,6 +63,12 @@ public class RangedAbilityProjectile : MonoBehaviour
             return;
         }
 
+        if (PvpDamageUtility.TryDamageOpposingPlayer(other, ownerPlayerIndex, damage))
+        {
+            Finish(explodesOnImpact);
+            return;
+        }
+
         EnemyController melee = other.GetComponent<EnemyController>();
         RangedEnemyController ranged = other.GetComponent<RangedEnemyController>();
         GiantEnemyController giant = other.GetComponent<GiantEnemyController>();

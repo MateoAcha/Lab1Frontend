@@ -73,6 +73,14 @@ public class ExpansionBurst : MonoBehaviour
             return;
         }
 
+        PlayerController opposingPlayer;
+        if (PvpDamageUtility.TryGetOpposingPlayer(other, ownerPlayerIndex, out opposingPlayer))
+        {
+            hitIds.Add(id);
+            PvpDamageUtility.TryDamageOpposingPlayer(other, ownerPlayerIndex, damage);
+            return;
+        }
+
         EnemyController melee = other.GetComponent<EnemyController>();
         RangedEnemyController ranged = other.GetComponent<RangedEnemyController>();
         GiantEnemyController giant = other.GetComponent<GiantEnemyController>();

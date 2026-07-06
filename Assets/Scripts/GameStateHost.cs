@@ -276,6 +276,8 @@ public class GameStateHost : MonoBehaviour
             matchEnding = MatchExit.IsEnding,
             matchFinished = ended && GameStatsTracker.LastRunWasFinished,
             pausedByHost = PauseMenu.IsPaused,
+            pvp = MultiplayerState.IsPvP,
+            pvpLoserPlayerId = ended && MultiplayerState.IsPvP ? GameStatsTracker.LastPvpLoserPlayerIndex : -1,
             endingPlayerId = MatchExit.EndingPlayerId,
             meleeKills = meleeKills,
             rangedKills = rangedKills,

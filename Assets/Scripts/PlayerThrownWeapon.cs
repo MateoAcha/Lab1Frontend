@@ -159,6 +159,20 @@ public class PlayerThrownWeapon : MonoBehaviour
             return;
         }
 
+        PlayerController opposingPlayer;
+        if (PvpDamageUtility.TryGetOpposingPlayer(other, ownerPlayerIndex, out opposingPlayer))
+        {
+            int playerId = other.GetInstanceID();
+            if (_hitIds.Contains(playerId))
+            {
+                return;
+            }
+
+            _hitIds.Add(playerId);
+            PvpDamageUtility.TryDamageOpposingPlayer(other, ownerPlayerIndex, damage);
+            return;
+        }
+
         EnemyController melee = other.GetComponent<EnemyController>();
         RangedEnemyController ranged = other.GetComponent<RangedEnemyController>();
         GiantEnemyController giant = other.GetComponent<GiantEnemyController>();

@@ -91,6 +91,12 @@ public class PlayerMinion : MonoBehaviour
             return;
         }
 
+        if (PvpDamageUtility.TryDamageOpposingPlayer(other, ownerPlayerIndex, Mathf.Max(1, touchDamage)))
+        {
+            _nextTouchDamageAt = Time.time + Mathf.Max(0.05f, touchCooldown);
+            return;
+        }
+
         EnemyController melee = other.GetComponent<EnemyController>();
         RangedEnemyController ranged = other.GetComponent<RangedEnemyController>();
         GiantEnemyController giant = other.GetComponent<GiantEnemyController>();
@@ -118,6 +124,11 @@ public class PlayerMinion : MonoBehaviour
     {
         Transform nearest = null;
         float nearestSqDist = float.MaxValue;
+
+        if (MultiplayerState.IsPvP)
+        {
+            ConsiderOpposingPlayers(ref nearest, ref nearestSqDist);
+        }
 
         ConsiderEnemies(FindObjectsOfType<EnemyController>(), ref nearest, ref nearestSqDist);
         ConsiderEnemies(FindObjectsOfType<RangedEnemyController>(), ref nearest, ref nearestSqDist);
@@ -152,6 +163,37 @@ public class PlayerMinion : MonoBehaviour
         }
     }
 
+    private void ConsiderOpposingPlayers(ref Transform nearest, ref float nearestSqDist)
+    {
+        PlayerController[] players = FindObjectsOfType<PlayerController>();
+        for (int i = 0; i < players.Length; i++)
+        {
+            PlayerController player = players[i];
+            if (player == null || !player.gameObject.activeInHierarchy || player.playerIndex == ownerPlayerIndex)
+            {
+                continue;
+            }
+
+            if (player.IsDowned)
+            {
+                continue;
+            }
+
+            Health health = player.GetComponent<Health>();
+            if (health != null && health.hp <= 0f)
+            {
+                continue;
+            }
+
+            float sqDist = (player.transform.position - transform.position).sqrMagnitude;
+            if (sqDist < nearestSqDist)
+            {
+                nearestSqDist = sqDist;
+                nearest = player.transform;
+            }
+        }
+    }
+
     private void IgnorePlayerCollisions()
     {
         Collider2D ownCollider = GetComponent<Collider2D>();
@@ -164,6 +206,11 @@ public class PlayerMinion : MonoBehaviour
         for (int i = 0; i < players.Length; i++)
         {
             if (players[i] == null)
+            {
+                continue;
+            }
+
+            if (MultiplayerState.IsPvP && ownerPlayerIndex >= 0 && players[i].playerIndex != ownerPlayerIndex)
             {
                 continue;
             }

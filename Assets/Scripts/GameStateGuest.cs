@@ -44,6 +44,7 @@ public class GameStateGuest : MonoBehaviour
     private bool _sentReady;
     private bool _matchStarted;
     private bool _appliedMatchEndingVisual;
+    private bool _appliedPvpState;
     private GameObject _hostPauseNotice;
     private GameObject _reconnectNoticeCanvas;
     private TextMeshProUGUI _reconnectNoticeText;
@@ -338,6 +339,7 @@ public class GameStateGuest : MonoBehaviour
         if (state.matchStarted)
             HideReconnectNotice();
 
+        ApplyPvpState(state.pvp);
         EnemySpawner.SetNetworkElapsedTime(state.matchStarted ? state.elapsedSeconds : 0f);
         ApplyMapState(state.mapIndex);
         ApplyStartState(state);
@@ -353,6 +355,15 @@ public class GameStateGuest : MonoBehaviour
         if (state.matchEnded && !_matchCompleted)
         {
             _matchCompleted = true;
+            if (state.pvp)
+            {
+                DisableLocalPlayer();
+                GameStatsTracker.CompleteNetworkPvpMatch(
+                    ResolvePvpLoserPlayerId(state),
+                    Mathf.Max(0, state.elapsedSeconds));
+                return;
+            }
+
             if (state.matchFinished)
             {
                 Time.timeScale = 0f;
@@ -364,6 +375,49 @@ public class GameStateGuest : MonoBehaviour
                 state.giantKills,
                 Mathf.Max(0, state.elapsedSeconds),
                 state.matchFinished);
+        }
+    }
+
+    private int ResolvePvpLoserPlayerId(OnlineMatchStateMessage state)
+    {
+        if (state != null && state.pvpLoserPlayerId >= 0)
+        {
+            return state.pvpLoserPlayerId;
+        }
+
+        if (state != null && state.players != null)
+        {
+            for (int i = 0; i < state.players.Length; i++)
+            {
+                OnlinePlayerState player = state.players[i];
+                if (player != null && player.present && !player.alive)
+                {
+                    return player.id;
+                }
+            }
+        }
+
+        return MultiplayerState.IsHost ? 1 : 0;
+    }
+
+    private void ApplyPvpState(bool pvp)
+    {
+        if (!pvp)
+        {
+            return;
+        }
+
+        MultiplayerState.SetPvP(true);
+        if (_appliedPvpState)
+        {
+            return;
+        }
+
+        _appliedPvpState = true;
+        GameBootstrap bootstrap = FindObjectOfType<GameBootstrap>();
+        if (bootstrap != null)
+        {
+            bootstrap.ApplyPvpRuntimeRules();
         }
     }
 

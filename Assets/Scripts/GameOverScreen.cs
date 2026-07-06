@@ -35,11 +35,12 @@ public class GameOverScreen : MonoBehaviour
         bool isOnline = MultiplayerState.IsOnline;
         int winnerIndex = loserPlayerIndex == 0 ? 1 : 0;
 
+        int localOnlinePlayerIndex = MultiplayerState.IsHost ? 0 : 1;
         string winnerName = isOnline
-            ? (winnerIndex == 0 ? "You" : "Opponent")
+            ? (winnerIndex == localOnlinePlayerIndex ? "You" : "Opponent")
             : $"Player {winnerIndex + 1}";
         string loserName = isOnline
-            ? (loserPlayerIndex == 0 ? "You" : "Opponent")
+            ? (loserPlayerIndex == localOnlinePlayerIndex ? "You" : "Opponent")
             : $"Player {loserPlayerIndex + 1}";
 
         int seconds = GameStatsTracker.LastRunTimeSeconds;

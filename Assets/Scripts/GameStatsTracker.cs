@@ -46,6 +46,7 @@ public static class GameStatsTracker
     public static int LastRunTimeSeconds { get; private set; }
     public static bool LastRunWasFinished { get; private set; }
     public static int LastRunXpEarned { get; private set; }
+    public static int LastPvpLoserPlayerIndex { get; private set; } = -1;
     public static bool IsRunActive => _runActive;
     public static int CurrentMeleeKills => _runMeleeKills;
     public static int CurrentRangedKills => _runRangedKills;
@@ -78,6 +79,7 @@ public static class GameStatsTracker
         _runGiantKills = 0;
         _pendingMaterials.Clear();
         LastRunWasFinished = false;
+        LastPvpLoserPlayerIndex = -1;
     }
 
     public static void RegisterMeleeEnemyKilled()
@@ -152,11 +154,25 @@ public static class GameStatsTracker
             return;
 
         int seconds = Mathf.Max(0, Mathf.FloorToInt(Time.time - _runStartAt));
+        CompletePvpRun(loserPlayerIndex, seconds);
+    }
+
+    public static void CompleteNetworkPvpMatch(int loserPlayerIndex, int timePlayedSeconds)
+    {
+        if (!_runActive)
+            return;
+
+        CompletePvpRun(loserPlayerIndex, Mathf.Max(0, timePlayedSeconds));
+    }
+
+    private static void CompletePvpRun(int loserPlayerIndex, int seconds)
+    {
         LastRunMeleeKills = _runMeleeKills;
         LastRunRangedKills = _runRangedKills;
         LastRunGiantKills = _runGiantKills;
         LastRunTimeSeconds = seconds;
         LastRunWasFinished = false;
+        LastPvpLoserPlayerIndex = loserPlayerIndex;
         _runActive = false;
         OnPvpMatchFinished?.Invoke(loserPlayerIndex);
     }

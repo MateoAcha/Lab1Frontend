@@ -53,6 +53,8 @@ public class OnlineMatchStateMessage
     public bool matchEnding;
     public bool matchFinished;
     public bool pausedByHost;
+    public bool pvp;
+    public int pvpLoserPlayerId = -1;
     public int endingPlayerId = -1;
     public int meleeKills;
     public int rangedKills;

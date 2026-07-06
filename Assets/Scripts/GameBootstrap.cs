@@ -591,10 +591,60 @@ public class GameBootstrap : MonoBehaviour
             exitsRoot.name = "RuntimeExits_Old";
             exitsRoot.SetActive(false);
             Destroy(exitsRoot);
-            SetupExits();
+            if (!MultiplayerState.IsPvP)
+            {
+                SetupExits();
+            }
         }
 
-        SetupSpawner();
+        if (MultiplayerState.IsPvP)
+        {
+            ApplyPvpRuntimeRules();
+        }
+        else
+        {
+            SetupSpawner();
+        }
+    }
+
+    public void ApplyPvpRuntimeRules()
+    {
+        if (!MultiplayerState.IsPvP)
+        {
+            return;
+        }
+
+        EnemySpawner[] spawners = FindObjectsOfType<EnemySpawner>();
+        for (int i = 0; i < spawners.Length; i++)
+        {
+            if (spawners[i] == null)
+            {
+                continue;
+            }
+
+            spawners[i].gameObject.SetActive(false);
+            Destroy(spawners[i].gameObject);
+        }
+
+        GameObject exitsRoot = GameObject.Find("RuntimeExits");
+        if (exitsRoot != null)
+        {
+            exitsRoot.name = "RuntimeExits_PvpDisabled";
+            exitsRoot.SetActive(false);
+            Destroy(exitsRoot);
+        }
+
+        MatchExit[] looseExits = FindObjectsOfType<MatchExit>();
+        for (int i = 0; i < looseExits.Length; i++)
+        {
+            if (looseExits[i] == null)
+            {
+                continue;
+            }
+
+            looseExits[i].gameObject.SetActive(false);
+            Destroy(looseExits[i].gameObject);
+        }
     }
 
     private GameMapDefinition GetSelectedMapDefinition()

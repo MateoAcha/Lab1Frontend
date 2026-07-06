@@ -72,17 +72,25 @@ public class FireTrailSegment : MonoBehaviour
             return;
         }
 
+        int id = other.GetInstanceID();
+        if (_hitIds.Contains(id))
+        {
+            return;
+        }
+
+        PlayerController opposingPlayer;
+        if (PvpDamageUtility.TryGetOpposingPlayer(other, ownerPlayerIndex, out opposingPlayer))
+        {
+            _hitIds.Add(id);
+            PvpDamageUtility.TryDamageOpposingPlayer(other, ownerPlayerIndex, damage);
+            return;
+        }
+
         EnemyController melee = other.GetComponent<EnemyController>();
         RangedEnemyController ranged = other.GetComponent<RangedEnemyController>();
         GiantEnemyController giant = other.GetComponent<GiantEnemyController>();
         GhostEnemy ghost = other.GetComponent<GhostEnemy>();
         if (melee == null && ranged == null && giant == null && ghost == null)
-        {
-            return;
-        }
-
-        int id = other.GetInstanceID();
-        if (_hitIds.Contains(id))
         {
             return;
         }

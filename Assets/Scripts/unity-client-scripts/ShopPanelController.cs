@@ -15,6 +15,7 @@ public class ShopPanelController : MonoBehaviour
     private ShopTab _activeTab = ShopTab.Store;
     private int _userId;
     private int _userCoins;
+    private int _userEmeralds;
     private ShopItemData[] _shopItems;
     private Coroutine _loadRoutine;
     private SkinVisualDatabase _skinVisualDatabase;
@@ -22,6 +23,7 @@ public class ShopPanelController : MonoBehaviour
     private readonly HashSet<int> _claimedChallenges = new HashSet<int>();
 
     private TextMeshProUGUI _coinsText;
+    private TextMeshProUGUI _emeraldsText;
     private TextMeshProUGUI _stateText;
     private RectTransform _contentRoot;
     private Button _storeTabBtn;
@@ -33,6 +35,8 @@ public class ShopPanelController : MonoBehaviour
     private static readonly Color TabActive   = new Color(0.12f, 0.40f, 0.52f, 1f);
     private static readonly Color TabInactive = new Color(0.18f, 0.22f, 0.28f, 1f);
     private static readonly Color TabActiveChallenge = new Color(0.34f, 0.16f, 0.50f, 1f);
+    private const int GoldItemId = 1004;
+    private const int EmeraldItemId = 1033;
     private const int ChallengeRewardCoins = 100;
 
     public void Initialize(AuthApiClient apiClient, Action backAction, SkinVisualDatabase skinVisualDatabase = null)
@@ -64,7 +68,9 @@ public class ShopPanelController : MonoBehaviour
         SetState("Loading...");
         ClearRows();
         _userCoins = 0;
+        _userEmeralds = 0;
         if (_coinsText != null) _coinsText.text = "Coins: ...";
+        if (_emeraldsText != null) _emeraldsText.text = "Emeralds: ...";
 
         UserInventoryData inv = null;
         yield return _apiClient.GetInventory(_userId, d => inv = d, _ => { });
@@ -73,16 +79,22 @@ public class ShopPanelController : MonoBehaviour
         {
             foreach (var item in inv.items)
             {
-                if (string.Equals(item.itemType, "Currency", StringComparison.OrdinalIgnoreCase) &&
-                    string.Equals(item.itemName, "Gold Coins", StringComparison.OrdinalIgnoreCase))
+                if (!string.Equals(item.itemType, "Currency", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                if (item.itemId == GoldItemId || string.Equals(item.itemName, "Gold Coins", StringComparison.OrdinalIgnoreCase))
                 {
                     _userCoins = item.quantity;
-                    break;
+                }
+                else if (item.itemId == EmeraldItemId || string.Equals(item.itemName, "Emeralds", StringComparison.OrdinalIgnoreCase))
+                {
+                    _userEmeralds = item.quantity;
                 }
             }
         }
 
         if (_coinsText != null) _coinsText.text = $"Coins: {_userCoins}";
+        if (_emeraldsText != null) _emeraldsText.text = $"Emeralds: {_userEmeralds}";
 
         if (_activeTab == ShopTab.Store)
             yield return LoadStoreItems();
@@ -113,10 +125,10 @@ public class ShopPanelController : MonoBehaviour
             CreateStoreRow(item);
     }
 
-    private IEnumerator DoPurchase(int shopItemId)
+    private IEnumerator DoPurchase(int shopItemId, string currency)
     {
         string error = null;
-        yield return _apiClient.BuyShopItem(_userId, shopItemId, () => { }, e => error = e);
+        yield return _apiClient.BuyShopItem(_userId, shopItemId, currency, () => { }, e => error = e);
 
         if (error != null)
             Debug.LogWarning($"[Shop] Purchase failed: {error}");
@@ -155,12 +167,14 @@ public class ShopPanelController : MonoBehaviour
 
     private void CreateStoreRow(ShopItemData item)
     {
-        bool canAfford = _userCoins >= item.goldPrice;
+        int emeraldPrice = GetEmeraldPrice(item.goldPrice);
+        bool canAffordCoins = _userCoins >= item.goldPrice;
+        bool canAffordEmeralds = _userEmeralds >= emeraldPrice;
 
         GameObject row = CreateUIObj("ShopRow", _contentRoot);
         _rows.Add(row);
         GameUiThemeRuntime.StyleSurface(row);
-        row.AddComponent<LayoutElement>().minHeight = 220f;
+        row.AddComponent<LayoutElement>().minHeight = 260f;
 
         VerticalLayoutGroup vg = row.AddComponent<VerticalLayoutGroup>();
         vg.padding = new RectOffset(22, 22, 22, 20);
@@ -185,41 +199,85 @@ public class ShopPanelController : MonoBehaviour
             MakeLabel(row.transform, item.detailSummary, 20, FontStyles.Italic,
                 new Color(0.74f, 0.90f, 0.76f, 1f), 36f);
 
-        // Price + Buy button row
+        // Price + buy controls
         GameObject bottom = CreateUIObj("Bottom", row.transform);
-        bottom.AddComponent<LayoutElement>().preferredHeight = 58f;
+        bottom.AddComponent<LayoutElement>().preferredHeight = 106f;
 
-        HorizontalLayoutGroup hlg = bottom.AddComponent<HorizontalLayoutGroup>();
-        hlg.childAlignment        = TextAnchor.MiddleLeft;
-        hlg.childControlWidth     = false;
-        hlg.childControlHeight    = true;
-        hlg.childForceExpandWidth = false;
-        hlg.childForceExpandHeight = true;
-        hlg.spacing = 12f;
+        VerticalLayoutGroup bottomLayout = bottom.AddComponent<VerticalLayoutGroup>();
+        bottomLayout.childAlignment = TextAnchor.UpperLeft;
+        bottomLayout.childControlWidth = true;
+        bottomLayout.childControlHeight = true;
+        bottomLayout.childForceExpandWidth = true;
+        bottomLayout.childForceExpandHeight = false;
+        bottomLayout.spacing = 8f;
 
-        // Price
-        GameObject priceObj = CreateUIObj("Price", bottom.transform);
-        priceObj.AddComponent<LayoutElement>().preferredWidth = 220f;
-        var priceTMP = priceObj.AddComponent<TextMeshProUGUI>();
-        priceTMP.text = $"{item.goldPrice} coins";
+        GameObject priceRow = CreateUIObj("PriceRow", bottom.transform);
+        priceRow.AddComponent<LayoutElement>().preferredHeight = 40f;
+        HorizontalLayoutGroup priceLayout = priceRow.AddComponent<HorizontalLayoutGroup>();
+        priceLayout.childAlignment = TextAnchor.MiddleLeft;
+        priceLayout.childControlWidth = false;
+        priceLayout.childControlHeight = true;
+        priceLayout.childForceExpandWidth = false;
+        priceLayout.childForceExpandHeight = true;
+        priceLayout.spacing = 18f;
+
+        CreatePriceLabel(priceRow.transform, $"{item.goldPrice} coins",
+            canAffordCoins ? new Color(1f, 0.85f, 0.15f, 1f) : new Color(0.75f, 0.40f, 0.40f, 1f),
+            170f);
+        CreatePriceLabel(priceRow.transform, $"{emeraldPrice} emeralds",
+            canAffordEmeralds ? new Color(0.30f, 1f, 0.66f, 1f) : new Color(0.75f, 0.40f, 0.40f, 1f),
+            205f);
+
+        GameObject buttonRow = CreateUIObj("ButtonRow", bottom.transform);
+        buttonRow.AddComponent<LayoutElement>().preferredHeight = 54f;
+        HorizontalLayoutGroup buttonLayout = buttonRow.AddComponent<HorizontalLayoutGroup>();
+        buttonLayout.childAlignment = TextAnchor.MiddleLeft;
+        buttonLayout.childControlWidth = false;
+        buttonLayout.childControlHeight = true;
+        buttonLayout.childForceExpandWidth = false;
+        buttonLayout.childForceExpandHeight = true;
+        buttonLayout.spacing = 18f;
+
+        // Buy buttons
+        int capturedId = item.shopItemId;
+        CreatePurchaseButton(buttonRow.transform, "BuyCoinsBtn", "Buy Coins", canAffordCoins,
+            new Color(0.54f, 0.38f, 0.08f, 1f),
+            () => StartCoroutine(DoPurchase(capturedId, "COINS")));
+        CreatePurchaseButton(buttonRow.transform, "BuyEmeraldsBtn", "Buy Emeralds", canAffordEmeralds,
+            new Color(0.06f, 0.46f, 0.33f, 1f),
+            () => StartCoroutine(DoPurchase(capturedId, "EMERALDS")));
+    }
+
+    private void CreatePriceLabel(Transform parent, string text, Color color, float width)
+    {
+        GameObject priceObj = CreateUIObj("Price", parent);
+        LayoutElement layout = priceObj.AddComponent<LayoutElement>();
+        layout.preferredWidth = width;
+        layout.preferredHeight = 40f;
+
+        TextMeshProUGUI priceTMP = priceObj.AddComponent<TextMeshProUGUI>();
+        priceTMP.text = text;
         priceTMP.fontSize = 22f;
         priceTMP.fontStyle = FontStyles.Bold;
-        priceTMP.color = canAfford ? new Color(1f, 0.85f, 0.15f, 1f) : new Color(0.75f, 0.40f, 0.40f, 1f);
+        priceTMP.color = color;
         priceTMP.font = TMP_Settings.defaultFontAsset;
         priceTMP.enableWordWrapping = false;
+        priceTMP.overflowMode = TextOverflowModes.Ellipsis;
         priceTMP.alignment = TextAlignmentOptions.MidlineLeft;
         priceTMP.raycastTarget = false;
+    }
 
-        // Buy button
-        int capturedId = item.shopItemId;
-        Color btnColor = canAfford ? new Color(0.14f, 0.42f, 0.22f, 1f) : new Color(0.22f, 0.22f, 0.22f, 0.88f);
-        GameObject btnObj = CreateUIObj("BuyBtn", bottom.transform);
-        btnObj.AddComponent<LayoutElement>().preferredWidth = 145f;
+    private void CreatePurchaseButton(Transform parent, string name, string label, bool canAfford, Color activeColor, Action onClick)
+    {
+        Color btnColor = canAfford ? activeColor : new Color(0.22f, 0.22f, 0.22f, 0.88f);
+        GameObject btnObj = CreateUIObj(name, parent);
+        btnObj.AddComponent<LayoutElement>().preferredWidth = 170f;
         Image btnImg = btnObj.AddComponent<Image>();
         Button btn = btnObj.AddComponent<Button>();
         GameUiThemeRuntime.StyleButton(btn, btnImg, btnColor);
         btn.interactable = canAfford;
-        btn.onClick.AddListener(() => StartCoroutine(DoPurchase(capturedId)));
+        if (canAfford && onClick != null)
+            btn.onClick.AddListener(() => onClick());
 
         GameObject btnLabel = CreateUIObj("Label", btnObj.transform);
         var btnLabelRT = btnLabel.AddComponent<RectTransform>();
@@ -228,13 +286,22 @@ public class ShopPanelController : MonoBehaviour
         btnLabelRT.offsetMin = Vector2.zero;
         btnLabelRT.offsetMax = Vector2.zero;
         var btnTMP = btnLabel.AddComponent<TextMeshProUGUI>();
-        btnTMP.text = "Buy";
-        btnTMP.fontSize = 21f;
+        btnTMP.text = label;
+        btnTMP.fontSize = 18f;
         btnTMP.fontStyle = FontStyles.Bold;
-        btnTMP.color = Color.white;
+        btnTMP.color = canAfford ? Color.white : new Color(0.60f, 0.62f, 0.65f, 0.85f);
         btnTMP.alignment = TextAlignmentOptions.Center;
         btnTMP.font = TMP_Settings.defaultFontAsset;
+        btnTMP.enableWordWrapping = false;
+        btnTMP.overflowMode = TextOverflowModes.Ellipsis;
         btnTMP.raycastTarget = false;
+    }
+
+    private static int GetEmeraldPrice(int goldPrice)
+    {
+        if (goldPrice <= 0)
+            return 0;
+        return Mathf.Max(1, Mathf.CeilToInt(goldPrice * 0.10f));
     }
 
     // ── Challenge rows ───────────────────────────────────────────────────────
@@ -483,22 +550,24 @@ public class ShopPanelController : MonoBehaviour
             new Color(0.18f, 0.23f, 0.30f, 1f));
         backBtn.GetComponent<Button>().onClick.AddListener(() => _backAction?.Invoke());
 
-        // Coins — top-right
-        GameObject coinsObj = CreateUIObj("Coins", transform);
-        RectTransform coinsRT = GetOrAddRT(coinsObj);
-        coinsRT.anchorMin = new Vector2(1f, 1f);
-        coinsRT.anchorMax = new Vector2(1f, 1f);
-        coinsRT.pivot     = new Vector2(1f, 1f);
-        coinsRT.sizeDelta = new Vector2(300f, 54f);
-        coinsRT.anchoredPosition = new Vector2(-16f, -16f);
-        _coinsText = coinsObj.AddComponent<TextMeshProUGUI>();
-        _coinsText.text = "Coins: ...";
-        _coinsText.fontSize = 24f;
-        _coinsText.fontStyle = FontStyles.Bold;
-        _coinsText.color = new Color(1f, 0.85f, 0.15f, 1f);
-        _coinsText.font = TMP_Settings.defaultFontAsset;
-        _coinsText.alignment = TextAlignmentOptions.MidlineRight;
-        _coinsText.raycastTarget = false;
+        // Currency balances — top-right
+        GameObject currencyObj = CreateUIObj("CurrencyBalances", transform);
+        RectTransform currencyRT = GetOrAddRT(currencyObj);
+        currencyRT.anchorMin = new Vector2(1f, 1f);
+        currencyRT.anchorMax = new Vector2(1f, 1f);
+        currencyRT.pivot     = new Vector2(1f, 1f);
+        currencyRT.sizeDelta = new Vector2(460f, 54f);
+        currencyRT.anchoredPosition = new Vector2(-16f, -16f);
+        HorizontalLayoutGroup currencyLayout = currencyObj.AddComponent<HorizontalLayoutGroup>();
+        currencyLayout.childAlignment = TextAnchor.MiddleRight;
+        currencyLayout.childControlWidth = true;
+        currencyLayout.childControlHeight = true;
+        currencyLayout.childForceExpandWidth = false;
+        currencyLayout.childForceExpandHeight = true;
+        currencyLayout.spacing = 18f;
+
+        _coinsText = CreateCurrencyBalanceText(currencyObj.transform, "Coins", new Color(1f, 0.85f, 0.15f, 1f), 190f);
+        _emeraldsText = CreateCurrencyBalanceText(currencyObj.transform, "Emeralds", new Color(0.30f, 1f, 0.66f, 1f), 230f);
 
         // Title
         GameObject titleObj = CreateUIObj("Title", transform);
@@ -540,6 +609,26 @@ public class ShopPanelController : MonoBehaviour
 
         // Scroll view
         BuildScrollView();
+    }
+
+    private TextMeshProUGUI CreateCurrencyBalanceText(Transform parent, string label, Color color, float width)
+    {
+        GameObject obj = CreateUIObj(label + "Balance", parent);
+        LayoutElement layout = obj.AddComponent<LayoutElement>();
+        layout.preferredWidth = width;
+        layout.preferredHeight = 54f;
+
+        TextMeshProUGUI text = obj.AddComponent<TextMeshProUGUI>();
+        text.text = label + ": ...";
+        text.fontSize = 23f;
+        text.fontStyle = FontStyles.Bold;
+        text.color = color;
+        text.font = TMP_Settings.defaultFontAsset;
+        text.alignment = TextAlignmentOptions.MidlineRight;
+        text.enableWordWrapping = false;
+        text.overflowMode = TextOverflowModes.Ellipsis;
+        text.raycastTarget = false;
+        return text;
     }
 
     private void BuildTabBar()

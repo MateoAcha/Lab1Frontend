@@ -49,6 +49,12 @@ public class PlayerProjectile : MonoBehaviour
             return;
         }
 
+        if (PvpDamageUtility.TryDamageOpposingPlayer(other, ownerPlayerIndex, damage))
+        {
+            Destroy(gameObject);
+            return;
+        }
+
         EnemyController melee = other.GetComponent<EnemyController>();
         RangedEnemyController ranged = other.GetComponent<RangedEnemyController>();
         GiantEnemyController giant = other.GetComponent<GiantEnemyController>();

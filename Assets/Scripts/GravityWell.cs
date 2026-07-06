@@ -65,7 +65,8 @@ public class GravityWell : MonoBehaviour
         for (int i = 0; i < overlaps.Length; i++)
         {
             Collider2D col = overlaps[i];
-            if (col == null || !IsEnemy(col))
+            PlayerController opposingPlayer;
+            if (col == null || (!IsEnemy(col) && !PvpDamageUtility.TryGetOpposingPlayer(col, ownerPlayerIndex, out opposingPlayer)))
             {
                 continue;
             }

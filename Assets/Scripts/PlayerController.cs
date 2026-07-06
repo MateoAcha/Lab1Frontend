@@ -1620,7 +1620,7 @@ public class PlayerController : MonoBehaviour
         slashBody.gravityScale = 0f;
 
         HitBox hit = slash.AddComponent<HitBox>();
-        hit.hitsPlayer = false;
+        hit.hitsPlayer = MultiplayerState.IsPvP;
         hit.life = usedLife;
         hit.damage = Mathf.Max(1, Mathf.RoundToInt(GetWeaponDamage() * Mathf.Max(1f, damageMultiplier)));
         hit.ownerPlayerIndex = playerIndex;
@@ -1671,7 +1671,7 @@ public class PlayerController : MonoBehaviour
         slashBody.gravityScale = 0f;
 
         HitBox hit = slash.AddComponent<HitBox>();
-        hit.hitsPlayer = false;
+        hit.hitsPlayer = MultiplayerState.IsPvP;
         hit.life = usedLife;
         hit.damage = Mathf.Max(1, Mathf.RoundToInt(GetWeaponDamage() * Mathf.Max(1f, damageMultiplier)));
         hit.ownerPlayerIndex = playerIndex;

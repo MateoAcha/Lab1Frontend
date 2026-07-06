@@ -40,6 +40,16 @@ public class HitBox : MonoBehaviour
     {
         if (hitsPlayer)
         {
+            if (PvpDamageUtility.IsOwnedByPlayer(other, ownerPlayerIndex))
+            {
+                return;
+            }
+
+            if (PvpDamageUtility.TryDamageOpposingPlayer(other, ownerPlayerIndex, damage))
+            {
+                return;
+            }
+
             if (other.GetComponent<PlayerController>() == null &&
                 other.GetComponent<TemporaryWall>() == null &&
                 other.GetComponent<PlayerDecoy>() == null &&

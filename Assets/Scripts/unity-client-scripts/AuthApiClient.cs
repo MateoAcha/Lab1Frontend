@@ -756,9 +756,13 @@ public class AuthApiClient
         onSuccess?.Invoke(catalog);
     }
 
-    public IEnumerator BuyShopItem(int userId, int shopItemId, Action onSuccess, Action<string> onError)
+    public IEnumerator BuyShopItem(int userId, int shopItemId, string currency, Action onSuccess, Action<string> onError)
     {
-        string json = JsonUtility.ToJson(new BuyShopItemRequest { shopItemId = shopItemId });
+        string json = JsonUtility.ToJson(new BuyShopItemRequest
+        {
+            shopItemId = shopItemId,
+            currency = currency ?? "COINS"
+        });
         var request = new UnityWebRequest(_baseUrl + $"/users/{userId}/shop/buy", "POST");
         byte[] bodyRaw = System.Text.Encoding.UTF8.GetBytes(json);
         request.uploadHandler = new UploadHandlerRaw(bodyRaw);
@@ -767,7 +771,7 @@ public class AuthApiClient
         if (!string.IsNullOrWhiteSpace(AuthSession.AccessToken))
             request.SetRequestHeader("Authorization", $"Bearer {AuthSession.AccessToken}");
 
-        Debug.Log($"[AuthApi] POST {_baseUrl}/users/{userId}/shop/buy  shopItemId={shopItemId}");
+        Debug.Log($"[AuthApi] POST {_baseUrl}/users/{userId}/shop/buy  shopItemId={shopItemId} currency={currency}");
         yield return request.SendWebRequest();
 
         if (request.result == UnityWebRequest.Result.Success
@@ -1502,6 +1506,7 @@ public class AuthApiClient
     private class BuyShopItemRequest
     {
         public int shopItemId;
+        public string currency;
     }
 
     [Serializable]
