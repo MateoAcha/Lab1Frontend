@@ -413,6 +413,31 @@ public class AuthApiClient
         }
     }
 
+    public IEnumerator AddEmeralds(int userId, int quantity, Action onSuccess, Action<string> onError)
+    {
+        string json = JsonUtility.ToJson(new AddEmeraldsRequest { quantity = quantity });
+        var request = new UnityWebRequest(_baseUrl + $"/users/{userId}/inventory/add-emeralds", "POST");
+        byte[] bodyRaw = Encoding.UTF8.GetBytes(json);
+        request.uploadHandler = new UploadHandlerRaw(bodyRaw);
+        request.downloadHandler = new DownloadHandlerBuffer();
+        request.SetRequestHeader("Content-Type", "application/json");
+        if (!string.IsNullOrWhiteSpace(AuthSession.AccessToken))
+            request.SetRequestHeader("Authorization", $"Bearer {AuthSession.AccessToken}");
+
+        Debug.Log($"[AuthApi] POST {_baseUrl}/users/{userId}/inventory/add-emeralds  qty={quantity}");
+        yield return request.SendWebRequest();
+
+        if (request.result == UnityWebRequest.Result.Success
+            && request.responseCode >= 200 && request.responseCode < 300)
+        {
+            onSuccess?.Invoke();
+        }
+        else
+        {
+            onError?.Invoke(FormatError(request));
+        }
+    }
+
     public IEnumerator SpendMaterial(int userId, string materialKey, int quantity, Action onSuccess, Action<string> onError)
     {
         string json = JsonUtility.ToJson(new SpendMaterialRequest
@@ -1447,6 +1472,12 @@ public class AuthApiClient
     }
 
     [Serializable]
+    private class AddEmeraldsRequest
+    {
+        public int quantity;
+    }
+
+    [Serializable]
     private class SpendMaterialRequest
     {
         public string materialKey;
@@ -1746,6 +1777,7 @@ public class SocialStatsSummary
     public int level;
     public int xp;
     public int experience;
+    public int emeralds;
     public float bestTimeSeconds;
     public float bestRunTimeSeconds;
     public float fastestWinSeconds;
