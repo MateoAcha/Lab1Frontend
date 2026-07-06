@@ -917,7 +917,7 @@ public class AuthMenuController : MonoBehaviour
             yield break;
         }
 
-        ShowError("Could not verify your saved login. Please log in again.");
+        ShowError("Could not reach the server. You have been logged out.");
     }
 
     private void LaunchGame()

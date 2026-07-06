@@ -188,6 +188,7 @@ public class AuthApiClient
 
         var request = UnityWebRequest.Get(_baseUrl + $"/users/{userId}");
         request.SetRequestHeader("Authorization", $"Bearer {AuthSession.AccessToken}");
+        request.timeout = 10;
 
         Debug.Log($"[AuthApi] Validating stored session for userId={userId}");
         yield return request.SendWebRequest();
