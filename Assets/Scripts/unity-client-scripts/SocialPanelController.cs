@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
 using TMPro;
@@ -747,6 +748,7 @@ public class SocialPanelController : MonoBehaviour
             yield break;
         }
 
+        RemoveCachedFriend(friendUserId);
         _selectedFriend = null;
         ApplySocialActionResponse(response, ResponseMessage(response, "Friend removed."));
     }
@@ -1306,6 +1308,43 @@ public class SocialPanelController : MonoBehaviour
         return _summary.friendships ?? new FriendSummaryResponse[0];
     }
 
+    private void RemoveCachedFriend(int friendUserId)
+    {
+        if (_summary == null || friendUserId <= 0)
+            return;
+
+        _summary.friends = RemoveCachedFriend(_summary.friends, friendUserId);
+        _summary.friendList = RemoveCachedFriend(_summary.friendList, friendUserId);
+        _summary.friendships = RemoveCachedFriend(_summary.friendships, friendUserId);
+    }
+
+    private static FriendSummaryResponse[] RemoveCachedFriend(FriendSummaryResponse[] friends, int friendUserId)
+    {
+        if (friends == null || friendUserId <= 0)
+            return friends;
+
+        List<FriendSummaryResponse> remaining = null;
+        for (int i = 0; i < friends.Length; i++)
+        {
+            FriendSummaryResponse friend = friends[i];
+            if (friend != null && GetFriendUserId(friend) == friendUserId)
+            {
+                if (remaining == null)
+                {
+                    remaining = new List<FriendSummaryResponse>(friends.Length);
+                    for (int j = 0; j < i; j++)
+                        remaining.Add(friends[j]);
+                }
+                continue;
+            }
+
+            if (remaining != null)
+                remaining.Add(friend);
+        }
+
+        return remaining != null ? remaining.ToArray() : friends;
+    }
+
     private FriendRequestResponse[] GetIncomingRequests()
     {
         if (_summary == null)
@@ -1334,13 +1373,53 @@ public class SocialPanelController : MonoBehaviour
     {
         if (_summary == null)
             return new GameInviteResponse[0];
-        if (_summary.gameInvites != null)
-            return _summary.gameInvites;
-        if (_summary.invites != null)
-            return _summary.invites;
-        if (_summary.pendingGameInvites != null)
-            return _summary.pendingGameInvites;
-        return _summary.lobbyInvites ?? new GameInviteResponse[0];
+
+        return MergeGameInviteArrays(
+            _summary.gameInvites,
+            _summary.invites,
+            _summary.pendingGameInvites,
+            _summary.lobbyInvites);
+    }
+
+    private static GameInviteResponse[] MergeGameInviteArrays(params GameInviteResponse[][] groups)
+    {
+        if (groups == null)
+            return new GameInviteResponse[0];
+
+        List<GameInviteResponse> merged = new List<GameInviteResponse>();
+        HashSet<string> seen = new HashSet<string>();
+        for (int i = 0; i < groups.Length; i++)
+        {
+            GameInviteResponse[] group = groups[i];
+            if (group == null)
+                continue;
+
+            for (int j = 0; j < group.Length; j++)
+            {
+                GameInviteResponse invite = group[j];
+                if (invite == null)
+                    continue;
+
+                string key = GetInviteIdentity(invite);
+                if (seen.Add(key))
+                    merged.Add(invite);
+            }
+        }
+
+        return merged.ToArray();
+    }
+
+    private static string GetInviteIdentity(GameInviteResponse invite)
+    {
+        int id = GetInviteId(invite);
+        if (id > 0)
+            return "id:" + id;
+
+        return string.Join("|",
+            GetInviteHostName(invite),
+            GetInviteRoomNumber(invite).ToString(CultureInfo.InvariantCulture),
+            invite != null ? (invite.createdAt ?? "") : "",
+            invite != null ? (invite.expiresAt ?? "") : "");
     }
 
     private void UpdateContextText()
@@ -1516,15 +1595,53 @@ public class SocialPanelController : MonoBehaviour
 
     private static bool TryParseUtc(string value, out DateTime utc)
     {
+        utc = default(DateTime);
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+
+        string trimmed = value.Trim();
+        if (HasExplicitTimezone(trimmed))
+        {
+            DateTimeOffset offsetTime;
+            if (DateTimeOffset.TryParse(
+                    trimmed,
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                    out offsetTime))
+            {
+                utc = offsetTime.UtcDateTime;
+                return true;
+            }
+        }
+
+        DateTime localTime;
         if (DateTime.TryParse(
-                value,
+                trimmed,
                 CultureInfo.InvariantCulture,
-                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
-                out utc))
+                DateTimeStyles.AssumeLocal,
+                out localTime))
+        {
+            utc = localTime.ToUniversalTime();
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool HasExplicitTimezone(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+
+        if (value.EndsWith("Z", StringComparison.OrdinalIgnoreCase))
             return true;
 
-        utc = default(DateTime);
-        return false;
+        int timeStart = value.IndexOf('T');
+        if (timeStart < 0)
+            timeStart = value.IndexOf(' ');
+        timeStart = timeStart >= 0 ? timeStart + 1 : 0;
+
+        return value.IndexOf('+', timeStart) >= 0 || value.IndexOf('-', timeStart) >= 0;
     }
 
     private static Color ParseColor(string value, Color fallback)

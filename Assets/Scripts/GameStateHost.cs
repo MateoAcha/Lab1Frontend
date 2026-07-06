@@ -159,7 +159,7 @@ public class GameStateHost : MonoBehaviour
             input.weaponColor,
             input.skinId,
             input.skinColor,
-            input.maxHp,
+            MultiplayerState.GetModeAdjustedPlayerMaxHp(input.maxHp),
             input.consumableQuantity,
             input.consumableHealAmount,
             input.consumableCooldown,

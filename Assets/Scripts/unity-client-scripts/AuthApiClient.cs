@@ -335,14 +335,15 @@ public class AuthApiClient
 
     public IEnumerator RemoveFriend(int friendUserId, Action<SocialActionResponse> onSuccess, Action<string> onError)
     {
-        yield return SendJsonTyped(
-            $"/friends/{Mathf.Max(1, friendUserId)}",
-            "DELETE",
-            "",
-            onSuccess,
-            onError,
-            requiresAuth: true,
-            context: "remove friend");
+        string endpoint = $"/friends/{Mathf.Max(1, friendUserId)}";
+        var request = new UnityWebRequest(_baseUrl + endpoint, "DELETE");
+        request.uploadHandler = new UploadHandlerRaw(new byte[0]);
+        request.downloadHandler = new DownloadHandlerBuffer();
+        request.SetRequestHeader("Content-Type", "application/json");
+        if (!TryAttachAuthorization(request, onError))
+            yield break;
+
+        yield return SendAndParseSocialActionOrSummary(request, endpoint, onSuccess, onError, "remove friend");
     }
 
     public IEnumerator SendLobbyInvite(string username, int roomNumber, Action<SocialActionResponse> onSuccess, Action<string> onError)
@@ -1342,6 +1343,63 @@ public class AuthApiClient
         }
 
         onSuccess?.Invoke(data == null ? new T() : data);
+    }
+
+    private IEnumerator SendAndParseSocialActionOrSummary(
+        UnityWebRequest request,
+        string endpoint,
+        Action<SocialActionResponse> onSuccess,
+        Action<string> onError,
+        string context)
+    {
+        Debug.Log($"[AuthApi] {request.method} {_baseUrl + endpoint}");
+        yield return request.SendWebRequest();
+        Debug.Log($"[AuthApi] Response {(long)request.responseCode} from {endpoint}");
+
+        if (request.result != UnityWebRequest.Result.Success
+            || request.responseCode < 200
+            || request.responseCode >= 300)
+        {
+            onError?.Invoke(FormatError(request));
+            yield break;
+        }
+
+        string raw = request.downloadHandler != null ? request.downloadHandler.text : "";
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            onSuccess?.Invoke(new SocialActionResponse());
+            yield break;
+        }
+
+        SocialActionResponse action = null;
+        try
+        {
+            action = JsonUtility.FromJson<SocialActionResponse>(raw);
+        }
+        catch
+        {
+            action = null;
+        }
+
+        if (action == null)
+            action = new SocialActionResponse();
+
+        if (action.summary == null)
+        {
+            SocialSummaryResponse directSummary = ParseSocialSummary(raw);
+            if (HasAnySocialSection(directSummary))
+                action.summary = directSummary;
+        }
+
+        if (action.summary == null && action.friend == null && action.friendship == null
+            && action.request == null && action.friendRequest == null
+            && action.invite == null && action.gameInvite == null
+            && string.IsNullOrWhiteSpace(action.result))
+        {
+            Debug.LogWarning($"[AuthApi] Unexpected {context} response: {TruncateForLog(raw, 600)}");
+        }
+
+        onSuccess?.Invoke(action);
     }
 
     public IEnumerator GetLobbyRooms(Action<LobbyRoomListData> onSuccess, Action<string> onError)

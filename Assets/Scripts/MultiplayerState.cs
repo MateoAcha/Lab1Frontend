@@ -3,6 +3,8 @@ using UnityEngine;
 
 public static class MultiplayerState
 {
+    public const float PvpHealthMultiplier = 5f;
+
     public static bool IsMultiplayer { get; private set; }
     public static bool IsOnline      { get; private set; }
     public static bool IsHost        { get; private set; }
@@ -18,6 +20,12 @@ public static class MultiplayerState
     public static void SetHost(bool value)        { IsHost = value; }
     public static void SetPvP(bool value)         { IsPvP = value; }
     public static void SetOnlineRoomNumber(int value) { OnlineRoomNumber = Mathf.Max(1, value); }
+    public static float GetModeAdjustedPlayerMaxHp(float baseMaxHp)
+    {
+        float safeMaxHp = Mathf.Max(1f, baseMaxHp);
+        return IsPvP ? safeMaxHp * PvpHealthMultiplier : safeMaxHp;
+    }
+
     public static void RequestReturnToOnlineMenu() { _returnToOnlineMenu = true; }
     public static bool ConsumeReturnToOnlineMenu()
     {

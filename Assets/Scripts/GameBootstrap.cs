@@ -236,8 +236,8 @@ public class GameBootstrap : MonoBehaviour
         spriteObj.AddComponent<PlayerAnimator>();
 
         Health health = ghost.AddComponent<Health>();
-        health.hp = 10f;
-        health.maxHp = 10f;
+        health.maxHp = MultiplayerState.GetModeAdjustedPlayerMaxHp(10f);
+        health.hp = health.maxHp;
         ghost.AddComponent<PlayerPointer>();
         ghost.AddComponent<RemotePlayerGhost>();
     }
@@ -277,7 +277,8 @@ public class GameBootstrap : MonoBehaviour
         spriteObj.AddComponent<PlayerAnimator>(); // walk/idle animation; adjust spriteScale to resize visuals
 
         Health health = player.AddComponent<Health>();
-        health.hp = index == 0 ? PlayerLoadout.MaxHP : 10f;
+        health.maxHp = MultiplayerState.GetModeAdjustedPlayerMaxHp(index == 0 ? PlayerLoadout.MaxHP : 10f);
+        health.hp = health.maxHp;
 
         PlayerController pc = player.AddComponent<PlayerController>();
         pc.playerIndex = index;
