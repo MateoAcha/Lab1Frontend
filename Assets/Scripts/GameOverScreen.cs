@@ -120,14 +120,12 @@ public class GameOverScreen : MonoBehaviour
 
     private static string ResolvePvpPlayerName(int playerIndex)
     {
-        PlayerController player = MultiplayerState.GetPlayerByIndex(playerIndex);
-        if (player != null && !string.IsNullOrWhiteSpace(player.NetworkUsername))
-            return player.NetworkUsername;
-
+        // NOTE: player.NetworkUsername is intentionally NOT used here because its property
+        // always returns a non-empty fallback ("Player"/"Guest"), masking the real username.
         if (MultiplayerState.IsOnline)
         {
-            // Both host and guest spawn their own player as index 0 locally.
-            // Index 1 is always the remote player (guest on host's machine, host on guest's machine).
+            // Index 0 = local player on this machine (host or guest).
+            // Index 1 = remote player.
             if (playerIndex == 0)
                 return PlayerDisplayNames.LocalUsernameOrFallback(MultiplayerState.IsHost ? "Host" : "Guest");
 

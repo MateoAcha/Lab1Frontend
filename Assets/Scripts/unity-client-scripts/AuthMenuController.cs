@@ -3314,7 +3314,12 @@ public class AuthMenuController : MonoBehaviour
                             int hostBet = Mathf.RoundToInt(other.x);
                             if (hostPvp != _guestSeenPvp || hostBet != _guestSeenBetCoins)
                             {
-                                if (!hostPvp) { _guestBetAccepted = false; _guestBetDeclined = false; }
+                                // Reset acceptance whenever PvP turns off OR the bet amount changes
+                                if (!hostPvp || hostBet != _guestSeenBetCoins)
+                                {
+                                    _guestBetAccepted = false;
+                                    _guestBetDeclined = false;
+                                }
                                 _guestSeenPvp = hostPvp;
                                 _guestSeenBetCoins = hostBet;
                                 if (_lobbyGuestPvpSection != null)
@@ -4596,7 +4601,10 @@ public class AuthMenuController : MonoBehaviour
     private void AdjustBetCoins(int delta)
     {
         _betCoins = Mathf.Clamp(_betCoins + delta, 0, 9999);
+        _guestBetAcceptedByPing = false;
         if (_betCoinsLabel != null) _betCoinsLabel.text = $"{_betCoins} coins";
+        if (_betStatusLabel != null) _betStatusLabel.text = "Waiting for guest...";
+        RefreshLobbyStartButtonState();
     }
 
     private void AcceptBet()
