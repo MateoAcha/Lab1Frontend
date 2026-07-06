@@ -129,10 +129,11 @@ public class GameBootstrap : MonoBehaviour
         bool isOnline      = MultiplayerState.IsOnline;
         bool isHost        = MultiplayerState.IsHost;
         bool isPvP         = MultiplayerState.IsPvP;
+        int pvpBetCoins    = MultiplayerState.PvpBetCoins;
         int onlineRoom     = MultiplayerState.OnlineRoomNumber;
         MultiplayerState.Reset();
         MultiplayerState.SetMultiplayer(isMultiplayer || isOnline);
-        if (isPvP) MultiplayerState.SetPvP(true);
+        if (isPvP) { MultiplayerState.SetPvP(true); MultiplayerState.SetPvpBetCoins(pvpBetCoins); }
         if (isOnline) { MultiplayerState.SetOnline(true); MultiplayerState.SetHost(isHost); MultiplayerState.SetOnlineRoomNumber(onlineRoom); }
         if (isOnline)
             OnlineMatchStartGate.Show(isHost ? "Waiting for guest..." : "Syncing online match...");

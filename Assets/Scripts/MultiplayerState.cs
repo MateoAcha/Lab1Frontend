@@ -9,6 +9,7 @@ public static class MultiplayerState
     public static bool IsOnline      { get; private set; }
     public static bool IsHost        { get; private set; }
     public static bool IsPvP         { get; private set; }
+    public static int PvpBetCoins    { get; private set; }
     public static int OnlineRoomNumber { get; private set; } = 1;
     private static bool _returnToOnlineMenu;
 
@@ -19,6 +20,7 @@ public static class MultiplayerState
     public static void SetOnline(bool value)      { IsOnline = value; }
     public static void SetHost(bool value)        { IsHost = value; }
     public static void SetPvP(bool value)         { IsPvP = value; }
+    public static void SetPvpBetCoins(int value)  { PvpBetCoins = Mathf.Max(0, value); }
     public static void SetOnlineRoomNumber(int value) { OnlineRoomNumber = Mathf.Max(1, value); }
     public static float GetModeAdjustedPlayerMaxHp(float baseMaxHp)
     {
@@ -182,6 +184,7 @@ public static class MultiplayerState
         IsOnline = false;
         IsHost = false;
         IsPvP = false;
+        PvpBetCoins = 0;
         OnlineRoomNumber = 1;
         _enemyTargets.Clear();
     }

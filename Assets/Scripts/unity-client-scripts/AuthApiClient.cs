@@ -414,6 +414,30 @@ public class AuthApiClient
         }
     }
 
+    public IEnumerator SpendCoins(int userId, int quantity, Action onSuccess, Action<string> onError)
+    {
+        string json = JsonUtility.ToJson(new AddCoinsRequest { quantity = quantity });
+        var request = new UnityWebRequest(_baseUrl + $"/users/{userId}/inventory/spend-coins", "POST");
+        byte[] bodyRaw = Encoding.UTF8.GetBytes(json);
+        request.uploadHandler = new UploadHandlerRaw(bodyRaw);
+        request.downloadHandler = new DownloadHandlerBuffer();
+        request.SetRequestHeader("Content-Type", "application/json");
+        if (!string.IsNullOrWhiteSpace(AuthSession.AccessToken))
+            request.SetRequestHeader("Authorization", $"Bearer {AuthSession.AccessToken}");
+
+        yield return request.SendWebRequest();
+
+        if (request.result == UnityWebRequest.Result.Success
+            && request.responseCode >= 200 && request.responseCode < 300)
+        {
+            onSuccess?.Invoke();
+        }
+        else
+        {
+            onError?.Invoke(FormatError(request));
+        }
+    }
+
     public IEnumerator AddEmeralds(int userId, int quantity, Action onSuccess, Action<string> onError)
     {
         string json = JsonUtility.ToJson(new AddEmeraldsRequest { quantity = quantity });

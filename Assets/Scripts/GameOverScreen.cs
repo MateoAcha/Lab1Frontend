@@ -33,6 +33,18 @@ public class GameOverScreen : MonoBehaviour
         Time.timeScale = 0f;
 
         int winnerIndex = loserPlayerIndex == 0 ? 1 : 0;
+        int betCoins = MultiplayerState.PvpBetCoins;
+
+        // In online mode: playerIndex 0 is always the local player
+        // Award/deduct coins accordingly — fire-and-forget, don't block the UI
+        if (MultiplayerState.IsOnline && AuthSession.IsLoggedIn && betCoins > 0)
+        {
+            var api = new AuthApiClient(GameStatsTracker.ApiBaseUrl);
+            if (loserPlayerIndex == 0) // local player lost
+                StartCoroutine(api.SpendCoins(AuthSession.UserId, betCoins, onSuccess: () => { }, onError: err => Debug.LogWarning($"[PvP] SpendCoins failed: {err}")));
+            else // local player won
+                StartCoroutine(api.AddCoins(AuthSession.UserId, betCoins, onSuccess: () => { }, onError: err => Debug.LogWarning($"[PvP] AddCoins failed: {err}")));
+        }
 
         string winnerName = ResolvePvpPlayerName(winnerIndex);
         string loserName = ResolvePvpPlayerName(loserPlayerIndex);
@@ -87,6 +99,14 @@ public class GameOverScreen : MonoBehaviour
         AddLabel(panel.transform, $"☠  {loserName} was eliminated", 22, FontStyles.Normal, new Color(1f, 0.35f, 0.35f, 1f));
         AddSpacer(panel.transform, 6f);
         AddLabel(panel.transform, $"Match Time:  {timeStr}", 22, FontStyles.Normal, new Color(0.9f, 0.92f, 1f, 1f));
+        if (betCoins > 0 && MultiplayerState.IsOnline)
+        {
+            string betResult = loserPlayerIndex == 0
+                ? $"You lost the bet:  -{betCoins} coins"
+                : $"You won the bet:  +{betCoins} coins";
+            Color betColor = loserPlayerIndex == 0 ? new Color(1f, 0.4f, 0.4f, 1f) : new Color(1f, 0.85f, 0.15f, 1f);
+            AddLabel(panel.transform, betResult, 22, FontStyles.Bold, betColor);
+        }
         AddSpacer(panel.transform, 10f);
 
         AddButton(panel.transform, "Main Menu", new Color(0.18f, 0.22f, 0.35f, 1f), () =>

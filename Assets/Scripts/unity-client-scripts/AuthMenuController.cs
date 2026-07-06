@@ -197,10 +197,26 @@ public class AuthMenuController : MonoBehaviour
     private GameObject _mapSelectReturnPanel;
     private Action<int> _pendingMapSelection;
     private bool _launchMultiplayer;
-    private bool _pvpModeActive;
-    private bool _pvpOffered;
-    private GameObject _pvpButtonObj;
-    private Image _pvpButtonImage;
+    // Lobby PvP / betting state
+    private bool _lobbyPvpActive;
+    private int _betCoins;
+    private bool _guestBetAccepted;
+    private bool _guestBetDeclined;
+    private bool _guestSeenPvp;
+    private int _guestSeenBetCoins;
+    // Lobby PvP UI — host section
+    private GameObject _lobbyPvpSection;
+    private Image _lobbyPvpBtnImage;
+    private TextMeshProUGUI _lobbyPvpBtnText;
+    private TextMeshProUGUI _betCoinsLabel;
+    private TextMeshProUGUI _betStatusLabel;
+    private GameObject _lobbyBetRow;
+    // Lobby PvP UI — guest section
+    private GameObject _lobbyGuestPvpSection;
+    private TextMeshProUGUI _guestPvpLabel;
+    private Button _guestBetAcceptBtn;
+    private Button _guestBetDeclineBtn;
+    private bool _guestBetAcceptedByPing;
     private bool _mainMenuButtonsBuilt;
     private bool _sessionValidationInProgress;
     private string _sessionValidationMessage = "";
@@ -874,7 +890,7 @@ public class AuthMenuController : MonoBehaviour
         MultiplayerState.SetOnline(false);
         MultiplayerState.SetHost(false);
         Debug.Log("[AuthUI] Local multiplayer clicked.");
-        OpenMapSelect(_multiplayerPanel, _ => StartCoroutine(FetchLoadoutThenPlay()), offerPvp: true);
+        OpenMapSelect(_multiplayerPanel, _ => StartCoroutine(FetchLoadoutThenPlay()));
     }
 
     private IEnumerator FetchLoadoutThenPlay(bool waitForLoadout = true)
@@ -3193,6 +3209,18 @@ public class AuthMenuController : MonoBehaviour
 
         SetOtherPlayerWaiting();
 
+        // Reset lobby PvP/bet state
+        _lobbyPvpActive = false;
+        _betCoins = 0;
+        _guestBetAccepted = false;
+        _guestBetDeclined = false;
+        _guestSeenPvp = false;
+        _guestSeenBetCoins = 0;
+        _guestBetAcceptedByPing = false;
+        RefreshLobbyPvpUI();
+        if (_lobbyPvpSection != null) _lobbyPvpSection.SetActive(_isHostSession);
+        if (_lobbyGuestPvpSection != null) _lobbyGuestPvpSection.SetActive(false);
+
         _lobbyPlayerCount = 1;
         RefreshLobbyStartButtonState();
         if (_lobbyWaitingText != null) _lobbyWaitingText.gameObject.SetActive(!_isHostSession);
@@ -3242,7 +3270,11 @@ public class AuthMenuController : MonoBehaviour
 
             bool shouldLaunch = false;
             string pingError = null;
-            yield return _apiClient.LobbyPing(_currentLobbyRoomNumber, _lobbyClientId, weapon, armor, item, 0f, 0f,
+            float sendX = _isHostSession ? (float)_betCoins : 0f;
+            float sendY = _isHostSession
+                ? (_lobbyPvpActive ? 1f : 0f)
+                : (_guestBetAccepted ? 1f : (_guestBetDeclined ? -1f : 0f));
+            yield return _apiClient.LobbyPing(_currentLobbyRoomNumber, _lobbyClientId, weapon, armor, item, sendX, sendY,
                 _currentLobbyPassword,
                 _joiningViaInvite,
                 onSuccess: (players, started) =>
@@ -3257,10 +3289,44 @@ public class AuthMenuController : MonoBehaviour
                     {
                         if (_otherNameText != null) _otherNameText.text = other.username;
                         RenderOtherLobbyLoadoutPreview(other);
+                        if (_isHostSession)
+                        {
+                            // Host reads guest's bet acceptance from y: 1=accepted, -1=declined, 0=pending
+                            bool accepted = other.y > 0.5f;
+                            bool declined = other.y < -0.5f;
+                            _guestBetAcceptedByPing = accepted;
+                            if (_betStatusLabel != null)
+                            {
+                                if (_betCoins == 0 || !_lobbyPvpActive)
+                                    _betStatusLabel.text = "";
+                                else if (accepted)
+                                    _betStatusLabel.text = "Guest accepted  ✓";
+                                else if (declined)
+                                    _betStatusLabel.text = "Guest declined  ✗";
+                                else
+                                    _betStatusLabel.text = "Waiting for guest...";
+                            }
+                        }
+                        else
+                        {
+                            // Guest reads host's pvp/bet state from y/x
+                            bool hostPvp = other.y > 0.5f;
+                            int hostBet = Mathf.RoundToInt(other.x);
+                            if (hostPvp != _guestSeenPvp || hostBet != _guestSeenBetCoins)
+                            {
+                                if (!hostPvp) { _guestBetAccepted = false; _guestBetDeclined = false; }
+                                _guestSeenPvp = hostPvp;
+                                _guestSeenBetCoins = hostBet;
+                                if (_lobbyGuestPvpSection != null)
+                                    _lobbyGuestPvpSection.SetActive(hostPvp);
+                                RefreshGuestPvpSection();
+                            }
+                        }
                     }
                     else
                     {
                         SetOtherPlayerWaiting();
+                        if (!_isHostSession) { _guestSeenPvp = false; _guestSeenBetCoins = 0; _guestBetAccepted = false; _guestBetDeclined = false; if (_lobbyGuestPvpSection != null) _lobbyGuestPvpSection.SetActive(false); }
                     }
                     RefreshLobbyStartButtonState();
                     // Guest auto-launches when host starts the game
@@ -3296,6 +3362,12 @@ public class AuthMenuController : MonoBehaviour
         MultiplayerState.SetOnline(true);
         MultiplayerState.SetHost(_isHostSession);
         MultiplayerState.SetOnlineRoomNumber(_currentLobbyRoomNumber);
+        // Guest sets PvP/bet from what they read in pings; host sets it in SelectMap
+        if (!_isHostSession)
+        {
+            MultiplayerState.SetPvP(_guestSeenPvp);
+            MultiplayerState.SetPvpBetCoins(_guestSeenPvp ? _guestSeenBetCoins : 0);
+        }
         _launchMultiplayer = true;
         StartCoroutine(FetchLoadoutThenPlay());
     }
@@ -3308,7 +3380,7 @@ public class AuthMenuController : MonoBehaviour
             yield break;
         }
 
-        OpenMapSelect(_onlineLobbyPanel, _ => StartCoroutine(HostStartGameAfterMapSelection()), offerPvp: true);
+        OpenMapSelect(_onlineLobbyPanel, _ => StartCoroutine(HostStartGameAfterMapSelection()));
         yield break;
     }
 
@@ -3661,12 +3733,19 @@ public class AuthMenuController : MonoBehaviour
         if (_lobbyPlayButton == null) return;
 
         bool visible = _isHostSession;
-        bool canStart = visible && _lobbyPlayerCount >= 2;
+        bool hasPlayers = _lobbyPlayerCount >= 2;
+        bool betNeedsAccept = _lobbyPvpActive && _betCoins > 0 && !_guestBetAcceptedByPing;
+        bool canStart = visible && hasPlayers && !betNeedsAccept;
+
         _lobbyPlayButton.gameObject.SetActive(visible);
         _lobbyPlayButton.interactable = canStart;
 
         if (_lobbyPlayButtonText != null)
-            _lobbyPlayButtonText.text = canStart ? "Start Game" : "Waiting for Player";
+        {
+            if (!hasPlayers) _lobbyPlayButtonText.text = "Waiting for Player";
+            else if (betNeedsAccept) _lobbyPlayButtonText.text = "Waiting for Bet Accept";
+            else _lobbyPlayButtonText.text = "Start Game";
+        }
 
         if (_lobbyPlayButtonImage != null)
             _lobbyPlayButtonImage.color = canStart
@@ -3680,6 +3759,13 @@ public class AuthMenuController : MonoBehaviour
         StopOtherLobbyProfileFetch();
         if (_currentLobbyRoomNumber > 0) StartCoroutine(_apiClient.LobbyLeave(_currentLobbyRoomNumber, _lobbyClientId));
         _currentLobbyRoomNumber = 0;
+        _lobbyPvpActive = false;
+        _betCoins = 0;
+        _guestBetAccepted = false;
+        _guestBetDeclined = false;
+        _guestSeenPvp = false;
+        _guestSeenBetCoins = 0;
+        _guestBetAcceptedByPing = false;
         OpenMultiplayer();
     }
 
@@ -4470,49 +4556,86 @@ public class AuthMenuController : MonoBehaviour
             _googleStatusText.text = status ?? "";
     }
 
-    private void OpenMapSelect(GameObject returnPanel, Action<int> onSelected, bool offerPvp = false)
+    private void OpenMapSelect(GameObject returnPanel, Action<int> onSelected)
     {
         EnsureMapSelectPanel();
         _mapSelectReturnPanel = returnPanel != null ? returnPanel : mainMenuPanel;
         _pendingMapSelection = onSelected;
-        _pvpModeActive = false;
-        _pvpOffered = offerPvp;
-        if (_pvpButtonObj != null)
-        {
-            _pvpButtonObj.SetActive(offerPvp);
-            RefreshPvpButtonStyle();
-        }
         ShowOnly(_mapSelectPanel);
     }
 
     private void BackFromMapSelect()
     {
-        _pvpModeActive = false;
         Action<int> pending = _pendingMapSelection;
         _pendingMapSelection = null;
         ShowOnly(_mapSelectReturnPanel != null ? _mapSelectReturnPanel : mainMenuPanel);
     }
 
-    private void TogglePvpMode()
+    private void ToggleLobbyPvp()
     {
-        _pvpModeActive = !_pvpModeActive;
-        RefreshPvpButtonStyle();
+        _lobbyPvpActive = !_lobbyPvpActive;
+        if (!_lobbyPvpActive) _betCoins = 0;
+        RefreshLobbyPvpUI();
+        RefreshLobbyStartButtonState();
     }
 
-    private void RefreshPvpButtonStyle()
+    private void RefreshLobbyPvpUI()
     {
-        if (_pvpButtonImage == null)
-            return;
-        _pvpButtonImage.color = _pvpModeActive
-            ? new Color(0.55f, 0.15f, 0.75f, 1f)
-            : new Color(0.22f, 0.12f, 0.32f, 1f);
+        if (_lobbyPvpBtnImage != null)
+            _lobbyPvpBtnImage.color = _lobbyPvpActive
+                ? new Color(0.55f, 0.15f, 0.75f, 1f)
+                : new Color(0.22f, 0.12f, 0.32f, 1f);
+        if (_lobbyPvpBtnText != null)
+            _lobbyPvpBtnText.text = _lobbyPvpActive ? "⚔  PvP Mode: ON" : "⚔  PvP Mode: OFF";
+        if (_lobbyBetRow != null)
+            _lobbyBetRow.SetActive(_lobbyPvpActive);
+        if (_betCoinsLabel != null)
+            _betCoinsLabel.text = $"{_betCoins} coins";
+    }
+
+    private void AdjustBetCoins(int delta)
+    {
+        _betCoins = Mathf.Clamp(_betCoins + delta, 0, 9999);
+        if (_betCoinsLabel != null) _betCoinsLabel.text = $"{_betCoins} coins";
+    }
+
+    private void AcceptBet()
+    {
+        _guestBetAccepted = true;
+        _guestBetDeclined = false;
+        RefreshGuestPvpSection();
+    }
+
+    private void DeclineBet()
+    {
+        _guestBetAccepted = false;
+        _guestBetDeclined = true;
+        RefreshGuestPvpSection();
+    }
+
+    private void RefreshGuestPvpSection()
+    {
+        if (_guestBetAcceptBtn != null)
+            _guestBetAcceptBtn.interactable = !_guestBetAccepted && !_guestBetDeclined;
+        if (_guestBetDeclineBtn != null)
+            _guestBetDeclineBtn.interactable = !_guestBetAccepted && !_guestBetDeclined;
+
+        if (_guestPvpLabel != null)
+        {
+            string status = _guestBetAccepted ? "  (Accepted)" : _guestBetDeclined ? "  (Declined)" : "";
+            string betText = _guestSeenBetCoins > 0
+                ? $"⚔  PvP Match — {_guestSeenBetCoins} coins at stake{status}"
+                : $"⚔  PvP Match — no bet{status}";
+            _guestPvpLabel.text = betText;
+        }
     }
 
     private void SelectMap(int index)
     {
         GameMapSelection.Select(index);
-        MultiplayerState.SetPvP(_pvpModeActive);
-        _pvpModeActive = false;
+        MultiplayerState.SetPvP(_lobbyPvpActive);
+        MultiplayerState.SetPvpBetCoins(_lobbyPvpActive ? _betCoins : 0);
+        _lobbyPvpActive = false;
         Action<int> pending = _pendingMapSelection;
         _pendingMapSelection = null;
         pending?.Invoke(index);
@@ -4579,39 +4702,6 @@ public class AuthMenuController : MonoBehaviour
         {
             CreateMapCard(row.transform, mapSelectOptions[i], i);
         }
-
-        // PvP toggle button — shown only in multiplayer map selects
-        _pvpButtonObj = new GameObject("PvpModeButton");
-        _pvpButtonObj.transform.SetParent(_mapSelectPanel.transform, false);
-        RectTransform pvpRect = _pvpButtonObj.AddComponent<RectTransform>();
-        pvpRect.anchorMin = new Vector2(0.5f, 0.5f);
-        pvpRect.anchorMax = new Vector2(0.5f, 0.5f);
-        pvpRect.pivot = new Vector2(0.5f, 0.5f);
-        pvpRect.sizeDelta = new Vector2(380f, 60f);
-        pvpRect.anchoredPosition = new Vector2(0f, -270f);
-
-        _pvpButtonImage = _pvpButtonObj.AddComponent<Image>();
-        _pvpButtonImage.color = new Color(0.22f, 0.12f, 0.32f, 1f);
-        Button pvpBtn = _pvpButtonObj.AddComponent<Button>();
-        GameUiThemeRuntime.StyleButton(pvpBtn, _pvpButtonImage, new Color(0.22f, 0.12f, 0.32f, 1f));
-        pvpBtn.onClick.AddListener(TogglePvpMode);
-
-        GameObject pvpLabel = new GameObject("Label");
-        pvpLabel.transform.SetParent(_pvpButtonObj.transform, false);
-        RectTransform pvpLabelRect = pvpLabel.AddComponent<RectTransform>();
-        pvpLabelRect.anchorMin = Vector2.zero;
-        pvpLabelRect.anchorMax = Vector2.one;
-        pvpLabelRect.offsetMin = Vector2.zero;
-        pvpLabelRect.offsetMax = Vector2.zero;
-        TextMeshProUGUI pvpTmp = pvpLabel.AddComponent<TextMeshProUGUI>();
-        pvpTmp.text = "⚔  PvP Mode";
-        pvpTmp.font = TMP_Settings.defaultFontAsset;
-        pvpTmp.fontSize = 24f;
-        pvpTmp.fontStyle = FontStyles.Bold;
-        pvpTmp.color = new Color(0.9f, 0.75f, 1f, 1f);
-        pvpTmp.alignment = TextAlignmentOptions.Center;
-        pvpTmp.raycastTarget = false;
-        _pvpButtonObj.SetActive(false);
 
         _mapSelectPanel.SetActive(false);
     }
@@ -4760,6 +4850,148 @@ public class AuthMenuController : MonoBehaviour
         playTmp.fontSize = 26f; playTmp.fontStyle = FontStyles.Bold;
         playTmp.alignment = TextAlignmentOptions.Center; playTmp.color = GameUiThemeRuntime.Current.text;
         playTmp.raycastTarget = false;
+
+        // Host PvP section (toggle + bet controls)
+        _lobbyPvpSection = new GameObject("LobbyPvpSection");
+        _lobbyPvpSection.transform.SetParent(_onlineLobbyPanel.transform, false);
+        {
+            RectTransform sr = _lobbyPvpSection.AddComponent<RectTransform>();
+            sr.anchorMin = new Vector2(0.5f, 0f); sr.anchorMax = new Vector2(0.5f, 0f);
+            sr.pivot = new Vector2(0.5f, 0f);
+            sr.sizeDelta = new Vector2(580f, 130f);
+            sr.anchoredPosition = new Vector2(0f, 132f);
+
+            // PvP toggle button
+            GameObject pvpBtn = new GameObject("PvpToggleBtn");
+            pvpBtn.transform.SetParent(_lobbyPvpSection.transform, false);
+            RectTransform pbr = pvpBtn.AddComponent<RectTransform>();
+            pbr.anchorMin = new Vector2(0.5f, 1f); pbr.anchorMax = new Vector2(0.5f, 1f);
+            pbr.pivot = new Vector2(0.5f, 1f);
+            pbr.sizeDelta = new Vector2(320f, 52f);
+            pbr.anchoredPosition = new Vector2(0f, 0f);
+            _lobbyPvpBtnImage = pvpBtn.AddComponent<Image>();
+            _lobbyPvpBtnImage.color = new Color(0.22f, 0.12f, 0.32f, 1f);
+            Button pvpToggle = pvpBtn.AddComponent<Button>();
+            GameUiThemeRuntime.StyleButton(pvpToggle, _lobbyPvpBtnImage, new Color(0.22f, 0.12f, 0.32f, 1f));
+            pvpToggle.onClick.AddListener(ToggleLobbyPvp);
+            GameObject pvpBtnLabel = new GameObject("Label");
+            pvpBtnLabel.transform.SetParent(pvpBtn.transform, false);
+            RectTransform pbl = pvpBtnLabel.AddComponent<RectTransform>();
+            pbl.anchorMin = Vector2.zero; pbl.anchorMax = Vector2.one;
+            pbl.offsetMin = Vector2.zero; pbl.offsetMax = Vector2.zero;
+            _lobbyPvpBtnText = pvpBtnLabel.AddComponent<TextMeshProUGUI>();
+            _lobbyPvpBtnText.text = "⚔  PvP Mode: OFF";
+            _lobbyPvpBtnText.font = TMP_Settings.defaultFontAsset;
+            _lobbyPvpBtnText.fontSize = 22f; _lobbyPvpBtnText.fontStyle = FontStyles.Bold;
+            _lobbyPvpBtnText.alignment = TextAlignmentOptions.Center;
+            _lobbyPvpBtnText.color = new Color(0.9f, 0.75f, 1f, 1f);
+            _lobbyPvpBtnText.raycastTarget = false;
+
+            // Bet row (−  coins label  +)
+            _lobbyBetRow = new GameObject("BetRow");
+            _lobbyBetRow.transform.SetParent(_lobbyPvpSection.transform, false);
+            RectTransform brr = _lobbyBetRow.AddComponent<RectTransform>();
+            brr.anchorMin = new Vector2(0.5f, 1f); brr.anchorMax = new Vector2(0.5f, 1f);
+            brr.pivot = new Vector2(0.5f, 1f);
+            brr.sizeDelta = new Vector2(400f, 46f);
+            brr.anchoredPosition = new Vector2(0f, -58f);
+            HorizontalLayoutGroup betHlg = _lobbyBetRow.AddComponent<HorizontalLayoutGroup>();
+            betHlg.spacing = 12f; betHlg.childAlignment = TextAnchor.MiddleCenter;
+            betHlg.childControlWidth = false; betHlg.childControlHeight = false;
+            betHlg.childForceExpandWidth = false; betHlg.childForceExpandHeight = false;
+
+            GameObject minusBtn = CreateSmallBetButton("−", _lobbyBetRow.transform, () => AdjustBetCoins(-50));
+            _ = minusBtn;
+
+            GameObject coinsLabelObj = new GameObject("CoinsLabel");
+            coinsLabelObj.transform.SetParent(_lobbyBetRow.transform, false);
+            coinsLabelObj.AddComponent<RectTransform>().sizeDelta = new Vector2(160f, 46f);
+            coinsLabelObj.AddComponent<LayoutElement>().preferredWidth = 160f;
+            _betCoinsLabel = coinsLabelObj.AddComponent<TextMeshProUGUI>();
+            _betCoinsLabel.text = "0 coins";
+            _betCoinsLabel.font = TMP_Settings.defaultFontAsset;
+            _betCoinsLabel.fontSize = 22f; _betCoinsLabel.fontStyle = FontStyles.Bold;
+            _betCoinsLabel.alignment = TextAlignmentOptions.Center;
+            _betCoinsLabel.color = new Color(1f, 0.85f, 0.15f, 1f);
+            _betCoinsLabel.raycastTarget = false;
+
+            GameObject plusBtn = CreateSmallBetButton("+", _lobbyBetRow.transform, () => AdjustBetCoins(50));
+            _ = plusBtn;
+
+            _lobbyBetRow.SetActive(false);
+
+            // Status label
+            GameObject statusObj = new GameObject("BetStatus");
+            statusObj.transform.SetParent(_lobbyPvpSection.transform, false);
+            RectTransform str2 = statusObj.AddComponent<RectTransform>();
+            str2.anchorMin = new Vector2(0.5f, 1f); str2.anchorMax = new Vector2(0.5f, 1f);
+            str2.pivot = new Vector2(0.5f, 0.5f);
+            str2.sizeDelta = new Vector2(500f, 30f);
+            str2.anchoredPosition = new Vector2(0f, -108f);
+            _betStatusLabel = statusObj.AddComponent<TextMeshProUGUI>();
+            _betStatusLabel.text = "";
+            _betStatusLabel.font = TMP_Settings.defaultFontAsset;
+            _betStatusLabel.fontSize = 18f;
+            _betStatusLabel.alignment = TextAlignmentOptions.Center;
+            _betStatusLabel.color = new Color(0.7f, 0.95f, 0.7f, 1f);
+            _betStatusLabel.raycastTarget = false;
+        }
+        _lobbyPvpSection.SetActive(false); // shown only for host
+
+        // Guest PvP section (read-only: shows host's pvp proposal)
+        _lobbyGuestPvpSection = new GameObject("LobbyGuestPvpSection");
+        _lobbyGuestPvpSection.transform.SetParent(_onlineLobbyPanel.transform, false);
+        {
+            RectTransform gsr = _lobbyGuestPvpSection.AddComponent<RectTransform>();
+            gsr.anchorMin = new Vector2(0.5f, 0f); gsr.anchorMax = new Vector2(0.5f, 0f);
+            gsr.pivot = new Vector2(0.5f, 0f);
+            gsr.sizeDelta = new Vector2(560f, 120f);
+            gsr.anchoredPosition = new Vector2(0f, 132f);
+
+            GameObject pvpInfoObj = new GameObject("PvpInfo");
+            pvpInfoObj.transform.SetParent(_lobbyGuestPvpSection.transform, false);
+            RectTransform pir = pvpInfoObj.AddComponent<RectTransform>();
+            pir.anchorMin = new Vector2(0.5f, 1f); pir.anchorMax = new Vector2(0.5f, 1f);
+            pir.pivot = new Vector2(0.5f, 1f);
+            pir.sizeDelta = new Vector2(520f, 36f);
+            pir.anchoredPosition = new Vector2(0f, 0f);
+            _guestPvpLabel = pvpInfoObj.AddComponent<TextMeshProUGUI>();
+            _guestPvpLabel.text = "⚔  PvP Match proposed";
+            _guestPvpLabel.font = TMP_Settings.defaultFontAsset;
+            _guestPvpLabel.fontSize = 20f; _guestPvpLabel.fontStyle = FontStyles.Bold;
+            _guestPvpLabel.alignment = TextAlignmentOptions.Center;
+            _guestPvpLabel.color = new Color(0.9f, 0.75f, 1f, 1f);
+            _guestPvpLabel.raycastTarget = false;
+
+            // Accept button
+            GameObject acceptObj = new GameObject("AcceptBtn");
+            acceptObj.transform.SetParent(_lobbyGuestPvpSection.transform, false);
+            RectTransform ar = acceptObj.AddComponent<RectTransform>();
+            ar.anchorMin = new Vector2(0.5f, 1f); ar.anchorMax = new Vector2(0.5f, 1f);
+            ar.pivot = new Vector2(1f, 1f);
+            ar.sizeDelta = new Vector2(190f, 46f);
+            ar.anchoredPosition = new Vector2(-8f, -44f);
+            Image acceptImg = acceptObj.AddComponent<Image>();
+            _guestBetAcceptBtn = acceptObj.AddComponent<Button>();
+            GameUiThemeRuntime.StyleButton(_guestBetAcceptBtn, acceptImg, new Color(0.12f, 0.42f, 0.18f, 1f));
+            _guestBetAcceptBtn.onClick.AddListener(AcceptBet);
+            AddButtonLabel(acceptObj.transform, "Accept ✓", 20f);
+
+            // Decline button
+            GameObject declineObj = new GameObject("DeclineBtn");
+            declineObj.transform.SetParent(_lobbyGuestPvpSection.transform, false);
+            RectTransform dr = declineObj.AddComponent<RectTransform>();
+            dr.anchorMin = new Vector2(0.5f, 1f); dr.anchorMax = new Vector2(0.5f, 1f);
+            dr.pivot = new Vector2(0f, 1f);
+            dr.sizeDelta = new Vector2(190f, 46f);
+            dr.anchoredPosition = new Vector2(8f, -44f);
+            Image declineImg = declineObj.AddComponent<Image>();
+            _guestBetDeclineBtn = declineObj.AddComponent<Button>();
+            GameUiThemeRuntime.StyleButton(_guestBetDeclineBtn, declineImg, new Color(0.42f, 0.12f, 0.12f, 1f));
+            _guestBetDeclineBtn.onClick.AddListener(DeclineBet);
+            AddButtonLabel(declineObj.transform, "Decline ✗", 20f);
+        }
+        _lobbyGuestPvpSection.SetActive(false);
 
         // Waiting label (guest only)
         GameObject waitObj = new GameObject("WaitingText");
@@ -5079,6 +5311,37 @@ public class AuthMenuController : MonoBehaviour
             _createSessionSubtitleText.color = canCreate
                 ? GameUiThemeRuntime.Current.MutedText(0.9f)
                 : GameUiThemeRuntime.Current.MutedText(0.5f);
+    }
+
+    private GameObject CreateSmallBetButton(string label, Transform parent, UnityEngine.Events.UnityAction onClick)
+    {
+        GameObject obj = new GameObject("BetBtn_" + label);
+        obj.transform.SetParent(parent, false);
+        RectTransform rect = obj.AddComponent<RectTransform>();
+        rect.sizeDelta = new Vector2(46f, 46f);
+        obj.AddComponent<LayoutElement>().preferredWidth = 46f;
+        Image img = obj.AddComponent<Image>();
+        Button btn = obj.AddComponent<Button>();
+        GameUiThemeRuntime.StyleButton(btn, img, new Color(0.22f, 0.12f, 0.32f, 1f));
+        btn.onClick.AddListener(onClick);
+        AddButtonLabel(obj.transform, label, 26f);
+        return obj;
+    }
+
+    private void AddButtonLabel(Transform parent, string text, float fontSize)
+    {
+        GameObject labelObj = new GameObject("Label");
+        labelObj.transform.SetParent(parent, false);
+        RectTransform lr = labelObj.AddComponent<RectTransform>();
+        lr.anchorMin = Vector2.zero; lr.anchorMax = Vector2.one;
+        lr.offsetMin = Vector2.zero; lr.offsetMax = Vector2.zero;
+        TextMeshProUGUI tmp = labelObj.AddComponent<TextMeshProUGUI>();
+        tmp.text = text;
+        tmp.font = TMP_Settings.defaultFontAsset;
+        tmp.fontSize = fontSize; tmp.fontStyle = FontStyles.Bold;
+        tmp.alignment = TextAlignmentOptions.Center;
+        tmp.color = GameUiThemeRuntime.Current.text;
+        tmp.raycastTarget = false;
     }
 
     private void CreateMenuButton(string name, Transform parent, string label,
