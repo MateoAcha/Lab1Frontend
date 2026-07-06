@@ -106,21 +106,22 @@ public class GameOverScreen : MonoBehaviour
 
         if (MultiplayerState.IsOnline)
         {
-            if (MultiplayerState.IsHost)
-            {
-                if (playerIndex == 0)
-                    return PlayerDisplayNames.LocalUsernameOrFallback("Host");
-            }
-            else
-            {
-                if (playerIndex == 1)
-                    return PlayerDisplayNames.LocalUsernameOrFallback("Guest");
-                if (OnlinePlayerSync.Instance != null && !string.IsNullOrWhiteSpace(OnlinePlayerSync.Instance.RemoteUsername))
-                    return OnlinePlayerSync.Instance.RemoteUsername;
-            }
+            // Both host and guest spawn their own player as index 0 locally.
+            // Index 1 is always the remote player (guest on host's machine, host on guest's machine).
+            if (playerIndex == 0)
+                return PlayerDisplayNames.LocalUsernameOrFallback(MultiplayerState.IsHost ? "Host" : "Guest");
+
+            string remoteUsername = OnlinePlayerSync.Instance != null
+                ? OnlinePlayerSync.Instance.RemoteUsername
+                : "";
+            return !string.IsNullOrWhiteSpace(remoteUsername)
+                ? remoteUsername
+                : (MultiplayerState.IsHost ? "Guest" : "Host");
         }
 
-        return "Player " + (playerIndex + 1);
+        if (playerIndex == 0)
+            return PlayerDisplayNames.LocalUsernameOrFallback("Player 1");
+        return "Player 2";
     }
 
     private void ShowGameOver(int meleeKills, int rangedKills, int giantKills, int seconds)
