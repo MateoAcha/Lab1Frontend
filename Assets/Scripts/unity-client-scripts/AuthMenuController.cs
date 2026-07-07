@@ -173,7 +173,9 @@ public class AuthMenuController : MonoBehaviour
     private GameObject _privateRoomPasswordPanel;
     private TMP_InputField _privateRoomPasswordInput;
     private TextMeshProUGUI _privateRoomPasswordTitleText;
+    private TextMeshProUGUI _privateRoomPasswordStatusText;
     private LobbyRoomData _pendingPrivateRoom;
+    private bool _privateRoomPasswordJoinInFlight;
     private GameObject _joinSessionPanel;
     private TMP_InputField _joinServerUrlInput;
     private TextMeshProUGUI _joinSessionTitleText;
@@ -3343,14 +3345,16 @@ public class AuthMenuController : MonoBehaviour
             {
                 Debug.LogWarning($"[AuthUI] Lobby ping failed: {pingError}");
                 RefreshSessionUI();
-                ShowError(pingError);
                 if (!_isHostSession)
                 {
                     _currentLobbyRoomNumber = 0;
+                    if (!IsQuietLobbyClosedError(pingError))
+                        ShowError(pingError);
                     ShowRoomList();
                     yield break;
                 }
 
+                ShowError(pingError);
                 _currentLobbyRoomNumber = 0;
                 OpenMultiplayer();
                 yield break;
@@ -3375,6 +3379,16 @@ public class AuthMenuController : MonoBehaviour
         }
         _launchMultiplayer = true;
         StartCoroutine(FetchLoadoutThenPlay());
+    }
+
+    private static bool IsQuietLobbyClosedError(string error)
+    {
+        if (string.IsNullOrWhiteSpace(error))
+            return false;
+
+        return error.IndexOf("Lobby closed", StringComparison.OrdinalIgnoreCase) >= 0
+            || error.IndexOf("Lobby not found", StringComparison.OrdinalIgnoreCase) >= 0
+            || error.IndexOf("Lobby is no longer active", StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
     private IEnumerator HostStartGame()
@@ -4119,6 +4133,7 @@ public class AuthMenuController : MonoBehaviour
             _privateRoomPasswordTitleText.text = "Room #" + room.roomNumber + " Password";
         if (_privateRoomPasswordInput != null)
             _privateRoomPasswordInput.text = "";
+        SetPrivateRoomPasswordStatus("");
         _privateRoomPasswordPanel.SetActive(true);
         _privateRoomPasswordPanel.transform.SetAsLastSibling();
         AutoFocusNextFrame(_privateRoomPasswordInput);
@@ -4126,14 +4141,66 @@ public class AuthMenuController : MonoBehaviour
 
     private void SubmitPrivateRoomPassword()
     {
+        if (_privateRoomPasswordJoinInFlight)
+            return;
+
         string password = _privateRoomPasswordInput != null ? (_privateRoomPasswordInput.text ?? "").Trim() : "";
         if (string.IsNullOrWhiteSpace(password))
         {
-            ShowError("Enter the room password.");
+            SetPrivateRoomPasswordStatus("Enter the room password.", true);
             return;
         }
 
+        StartCoroutine(ValidatePrivateRoomPasswordRoutine(password));
+    }
+
+    private IEnumerator ValidatePrivateRoomPasswordRoutine(string password)
+    {
         LobbyRoomData room = _pendingPrivateRoom;
+        if (room == null)
+        {
+            SetPrivateRoomPasswordStatus("Room is no longer available.", true);
+            yield break;
+        }
+
+        _privateRoomPasswordJoinInFlight = true;
+        if (_privateRoomPasswordInput != null)
+            _privateRoomPasswordInput.interactable = false;
+        SetPrivateRoomPasswordStatus("Checking password...");
+
+        bool joined = false;
+        string error = null;
+        if (_apiClient == null)
+        {
+            error = "Could not check the room password.";
+        }
+        else
+        {
+            yield return _apiClient.LobbyPing(
+                room.roomNumber,
+                _lobbyClientId,
+                "", "", "",
+                0f, 0f,
+                password,
+                false,
+                onSuccess: (players, started) => joined = true,
+                onError: err => error = err);
+        }
+
+        _privateRoomPasswordJoinInFlight = false;
+        if (_privateRoomPasswordInput != null)
+            _privateRoomPasswordInput.interactable = true;
+
+        if (_pendingPrivateRoom != room)
+            yield break;
+
+        if (!joined)
+        {
+            SetPrivateRoomPasswordStatus(FormatPrivateRoomPasswordError(error), true);
+            AutoFocusNextFrame(_privateRoomPasswordInput);
+            yield break;
+        }
+
         _pendingPrivateRoom = null;
         if (_privateRoomPasswordPanel != null)
             _privateRoomPasswordPanel.SetActive(false);
@@ -4143,8 +4210,31 @@ public class AuthMenuController : MonoBehaviour
     private void CancelPrivateRoomPassword()
     {
         _pendingPrivateRoom = null;
+        _privateRoomPasswordJoinInFlight = false;
         if (_privateRoomPasswordPanel != null)
             _privateRoomPasswordPanel.SetActive(false);
+    }
+
+    private void SetPrivateRoomPasswordStatus(string message, bool error = false)
+    {
+        if (_privateRoomPasswordStatusText == null)
+            return;
+
+        _privateRoomPasswordStatusText.text = message ?? "";
+        _privateRoomPasswordStatusText.color = error
+            ? new Color(1f, 0.42f, 0.42f, 1f)
+            : GameUiThemeRuntime.Current.MutedText(0.9f);
+    }
+
+    private static string FormatPrivateRoomPasswordError(string error)
+    {
+        if (string.IsNullOrWhiteSpace(error))
+            return "Could not join this private room.";
+
+        if (error.IndexOf("password", StringComparison.OrdinalIgnoreCase) >= 0)
+            return "Wrong password.";
+
+        return error;
     }
 
     private void EnsurePrivateRoomPasswordPanel()
@@ -4172,7 +4262,7 @@ public class AuthMenuController : MonoBehaviour
         cardRect.anchorMin = new Vector2(0.5f, 0.5f);
         cardRect.anchorMax = new Vector2(0.5f, 0.5f);
         cardRect.pivot = new Vector2(0.5f, 0.5f);
-        cardRect.sizeDelta = new Vector2(460f, 230f);
+        cardRect.sizeDelta = new Vector2(460f, 270f);
         cardRect.anchoredPosition = Vector2.zero;
         GameUiThemeRuntime.StyleSurface(card);
 
@@ -4197,6 +4287,17 @@ public class AuthMenuController : MonoBehaviour
 
         _privateRoomPasswordInput = CreateGoogleInput(card.transform, "RoomPasswordInput", "Password");
         _privateRoomPasswordInput.contentType = TMP_InputField.ContentType.Password;
+
+        GameObject statusObj = new GameObject("Status");
+        statusObj.transform.SetParent(card.transform, false);
+        statusObj.AddComponent<LayoutElement>().preferredHeight = 28f;
+        _privateRoomPasswordStatusText = statusObj.AddComponent<TextMeshProUGUI>();
+        _privateRoomPasswordStatusText.font = TMP_Settings.defaultFontAsset;
+        _privateRoomPasswordStatusText.fontSize = 15f;
+        _privateRoomPasswordStatusText.alignment = TextAlignmentOptions.Center;
+        _privateRoomPasswordStatusText.color = GameUiThemeRuntime.Current.MutedText(0.85f);
+        _privateRoomPasswordStatusText.raycastTarget = false;
+        _privateRoomPasswordStatusText.text = "";
 
         GameObject buttons = new GameObject("Buttons");
         buttons.transform.SetParent(card.transform, false);

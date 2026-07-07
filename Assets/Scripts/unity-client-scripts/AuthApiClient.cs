@@ -1174,11 +1174,6 @@ public class AuthApiClient
         long code  = request.responseCode;
         Debug.Log($"[AuthApi] Error body (code={code}): {raw}");
 
-        if (!loginRequest && (code == 401 || code == 403))
-        {
-            return SessionExpiredMessage;
-        }
-
         // Try to extract a message from the JSON body (works with both Spring Boot formats).
         if (!string.IsNullOrWhiteSpace(raw))
         {
@@ -1189,6 +1184,11 @@ public class AuthApiClient
                     !val.Equals("error", System.StringComparison.OrdinalIgnoreCase))
                     return val;
             }
+        }
+
+        if (!loginRequest && (code == 401 || code == 403))
+        {
+            return SessionExpiredMessage;
         }
 
         // Status-code fallbacks for common cases.
