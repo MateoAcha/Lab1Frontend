@@ -806,6 +806,86 @@ public class AuthApiClient
             onError?.Invoke(FormatError(request));
     }
 
+    public IEnumerator CreatePaymentPreference(int userId, int emeralds, int pesosPrice,
+        Action<PaymentPreferenceData> onSuccess, Action<string> onError)
+    {
+        string json = JsonUtility.ToJson(new CreatePreferenceRequest
+        {
+            emeralds = emeralds,
+            pesosPrice = pesosPrice
+        });
+        var request = new UnityWebRequest(_baseUrl + $"/payments/{userId}/create-preference", "POST");
+        byte[] bodyRaw = System.Text.Encoding.UTF8.GetBytes(json);
+        request.uploadHandler = new UploadHandlerRaw(bodyRaw);
+        request.downloadHandler = new DownloadHandlerBuffer();
+        request.SetRequestHeader("Content-Type", "application/json");
+        if (!string.IsNullOrWhiteSpace(AuthSession.AccessToken))
+            request.SetRequestHeader("Authorization", $"Bearer {AuthSession.AccessToken}");
+
+        yield return request.SendWebRequest();
+
+        if (request.result == UnityWebRequest.Result.Success
+            && request.responseCode >= 200 && request.responseCode < 300)
+        {
+            try
+            {
+                var data = JsonUtility.FromJson<PaymentPreferenceData>(request.downloadHandler.text);
+                onSuccess?.Invoke(data);
+            }
+            catch { onError?.Invoke("Unexpected payment response."); }
+        }
+        else
+            onError?.Invoke(FormatError(request));
+    }
+
+    public IEnumerator VerifyPayment(long paymentRecordId, Action<string> onSuccess, Action<string> onError)
+    {
+        var request = new UnityWebRequest(_baseUrl + $"/payments/verify/{paymentRecordId}", "POST");
+        request.uploadHandler = new UploadHandlerRaw(new byte[0]);
+        request.downloadHandler = new DownloadHandlerBuffer();
+        request.timeout = 15;
+        if (!string.IsNullOrWhiteSpace(AuthSession.AccessToken))
+            request.SetRequestHeader("Authorization", $"Bearer {AuthSession.AccessToken}");
+
+        yield return request.SendWebRequest();
+
+        if (request.result == UnityWebRequest.Result.Success
+            && request.responseCode >= 200 && request.responseCode < 300)
+        {
+            try
+            {
+                var data = JsonUtility.FromJson<PaymentStatusData>(request.downloadHandler.text);
+                onSuccess?.Invoke(data?.status ?? "UNKNOWN");
+            }
+            catch { onError?.Invoke("Unexpected response."); }
+        }
+        else
+            onError?.Invoke(FormatError(request));
+    }
+
+    public IEnumerator GetPaymentStatus(long paymentRecordId, Action<string> onSuccess, Action<string> onError)
+    {
+        var request = UnityWebRequest.Get(_baseUrl + $"/payments/status/{paymentRecordId}");
+        request.timeout = 10;
+        if (!string.IsNullOrWhiteSpace(AuthSession.AccessToken))
+            request.SetRequestHeader("Authorization", $"Bearer {AuthSession.AccessToken}");
+
+        yield return request.SendWebRequest();
+
+        if (request.result == UnityWebRequest.Result.Success
+            && request.responseCode >= 200 && request.responseCode < 300)
+        {
+            try
+            {
+                var data = JsonUtility.FromJson<PaymentStatusData>(request.downloadHandler.text);
+                onSuccess?.Invoke(data?.status ?? "UNKNOWN");
+            }
+            catch { onError?.Invoke("Unexpected status response."); }
+        }
+        else
+            onError?.Invoke(FormatError(request));
+    }
+
     public IEnumerator GetSkins(int userId, Action<UserSkinsData> onSuccess, Action<string> onError)
     {
         var request = UnityWebRequest.Get(_baseUrl + $"/users/{userId}/skins");
@@ -1608,6 +1688,13 @@ public class AuthApiClient
     {
         public int shopItemId;
         public string currency;
+    }
+
+    [Serializable]
+    private class CreatePreferenceRequest
+    {
+        public int emeralds;
+        public int pesosPrice;
     }
 
     [Serializable]

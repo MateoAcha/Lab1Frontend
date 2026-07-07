@@ -76,3 +76,16 @@ public class UserSkinsData
     public int userId;
     public SkinData[] skins;
 }
+
+[Serializable]
+public class PaymentPreferenceData
+{
+    public long paymentRecordId;
+    public string checkoutUrl;
+}
+
+[Serializable]
+public class PaymentStatusData
+{
+    public string status;
+}

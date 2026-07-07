@@ -34,12 +34,17 @@ public class ShopPanelController : MonoBehaviour
     private Image _topUpTabImg;
     private readonly List<GameObject> _rows = new List<GameObject>();
 
+    private GameObject _paymentOverlay;
+    private TextMeshProUGUI _paymentOverlayLabel;
+    private Coroutine _pollRoutine;
+    private long _pendingPaymentRecordId;
+
     private static readonly Color TabActive          = new Color(0.12f, 0.40f, 0.52f, 1f);
     private static readonly Color TabInactive        = new Color(0.18f, 0.22f, 0.28f, 1f);
     private static readonly Color TabActiveChallenge = new Color(0.34f, 0.16f, 0.50f, 1f);
     private static readonly Color TabActiveTopUp     = new Color(0.10f, 0.42f, 0.24f, 1f);
     private const int GoldItemId = 1004;
-    private const int EmeraldItemId = 1033;
+    private const int EmeraldItemId = 3000;
     private const int ChallengeRewardCoins = 100;
 
     public void Initialize(AuthApiClient apiClient, Action backAction, SkinVisualDatabase skinVisualDatabase = null)
@@ -76,10 +81,16 @@ public class ShopPanelController : MonoBehaviour
         if (_emeraldsText != null) _emeraldsText.text = "Emeralds: ...";
 
         UserInventoryData inv = null;
-        yield return _apiClient.GetInventory(_userId, d => inv = d, _ => { });
+        string invError = null;
+        yield return _apiClient.GetInventory(_userId, d => inv = d, e => invError = e);
+
+        Debug.Log($"[Shop] LoadRoutine: inv={(inv == null ? "null" : "ok")} items={inv?.items?.Length ?? -1} error={invError}");
 
         if (inv?.items != null)
         {
+            var allIds = string.Join(", ", System.Array.ConvertAll(inv.items, i => $"{i.itemId}({i.itemType}/{i.quantity})"));
+            Debug.Log($"[Shop] All items: {allIds}");
+
             foreach (var item in inv.items)
             {
                 if (!string.Equals(item.itemType, "Currency", StringComparison.OrdinalIgnoreCase))
@@ -96,6 +107,7 @@ public class ShopPanelController : MonoBehaviour
             }
         }
 
+        Debug.Log($"[Shop] LoadRoutine: coins={_userCoins} emeralds={_userEmeralds}");
         if (_coinsText != null) _coinsText.text = $"Coins: {_userCoins}";
         if (_emeraldsText != null) _emeraldsText.text = $"Emeralds: {_userEmeralds}";
 
@@ -438,13 +450,15 @@ public class ShopPanelController : MonoBehaviour
         priceTMP.alignment = TextAlignmentOptions.MidlineLeft;
         priceTMP.raycastTarget = false;
 
-        // MercadoPago buy button (disabled — payment not yet integrated)
+        // MercadoPago buy button
+        int capturedEmeralds = pack.emeralds;
+        int capturedPrice = pack.pesosPrice;
         GameObject btnObj = CreateUIObj("BuyBtn", bottomRow.transform);
         btnObj.AddComponent<LayoutElement>().preferredWidth = 320f;
         Image btnImg = btnObj.AddComponent<Image>();
         Button btn = btnObj.AddComponent<Button>();
-        GameUiThemeRuntime.StyleButton(btn, btnImg, new Color(0.20f, 0.22f, 0.25f, 0.90f));
-        btn.interactable = false;
+        GameUiThemeRuntime.StyleButton(btn, btnImg, new Color(0.08f, 0.50f, 0.28f, 1f));
+        btn.onClick.AddListener(() => StartCoroutine(StartPayment(capturedEmeralds, capturedPrice)));
 
         GameObject btnLabel = CreateUIObj("Label", btnObj.transform);
         RectTransform btnLabelRT = btnLabel.AddComponent<RectTransform>();
@@ -456,7 +470,7 @@ public class ShopPanelController : MonoBehaviour
         btnTMP.text = "Buy now";
         btnTMP.fontSize = 17f;
         btnTMP.fontStyle = FontStyles.Bold;
-        btnTMP.color = new Color(0.55f, 0.60f, 0.65f, 0.85f);
+        btnTMP.color = Color.white;
         btnTMP.alignment = TextAlignmentOptions.Center;
         btnTMP.font = TMP_Settings.defaultFontAsset;
         btnTMP.enableWordWrapping = false;
@@ -686,6 +700,193 @@ public class ShopPanelController : MonoBehaviour
 
         if (_loadRoutine != null) StopCoroutine(_loadRoutine);
         _loadRoutine = StartCoroutine(LoadRoutine());
+    }
+
+    // ── Payment flow ─────────────────────────────────────────────────────────
+
+    private IEnumerator StartPayment(int emeralds, int pesosPrice)
+    {
+        ShowPaymentOverlay("Opening MercadoPago...");
+
+        PaymentPreferenceData preference = null;
+        string error = null;
+        yield return _apiClient.CreatePaymentPreference(_userId, emeralds, pesosPrice,
+            d => preference = d, e => error = e);
+
+        if (error != null || preference == null || string.IsNullOrWhiteSpace(preference.checkoutUrl))
+        {
+            ShowPaymentOverlay($"Could not start payment.\n{error ?? "No checkout URL received."}");
+            yield return new WaitForSeconds(3f);
+            HidePaymentOverlay();
+            yield break;
+        }
+
+        _pendingPaymentRecordId = preference.paymentRecordId;
+        Application.OpenURL(preference.checkoutUrl);
+        ShowPaymentOverlay("Complete the payment in your browser.\nPress \"I paid\" once done.");
+
+        if (_pollRoutine != null) StopCoroutine(_pollRoutine);
+        _pollRoutine = StartCoroutine(PollPaymentStatus(preference.paymentRecordId));
+    }
+
+    private IEnumerator PollPaymentStatus(long paymentRecordId)
+    {
+        const int maxAttempts = 100; // ~5 minutes at 3s intervals
+        int attempts = 0;
+
+        while (attempts < maxAttempts)
+        {
+            yield return new WaitForSeconds(3f);
+            attempts++;
+
+            string status = null;
+            yield return _apiClient.GetPaymentStatus(paymentRecordId, s => status = s, _ => { });
+
+            if (status == "APPROVED")
+            {
+                HidePaymentOverlay();
+                if (_loadRoutine != null) StopCoroutine(_loadRoutine);
+                _loadRoutine = StartCoroutine(LoadRoutine());
+                yield break;
+            }
+
+            if (status == "FAILED")
+            {
+                ShowPaymentOverlay("Payment failed.");
+                yield return new WaitForSeconds(3f);
+                HidePaymentOverlay();
+                yield break;
+            }
+        }
+
+        ShowPaymentOverlay("Payment timed out.\nIf you completed it, reopen the store to refresh.");
+        yield return new WaitForSeconds(5f);
+        HidePaymentOverlay();
+    }
+
+    private void ShowPaymentOverlay(string message)
+    {
+        EnsurePaymentOverlay();
+        _paymentOverlay.SetActive(true);
+        if (_paymentOverlayLabel != null) _paymentOverlayLabel.text = message;
+    }
+
+    private void HidePaymentOverlay()
+    {
+        if (_paymentOverlay != null) _paymentOverlay.SetActive(false);
+        if (_pollRoutine != null) { StopCoroutine(_pollRoutine); _pollRoutine = null; }
+    }
+
+    private IEnumerator CheckPaymentNow()
+    {
+        ShowPaymentOverlay("Checking payment...");
+        string status = null;
+        string verifyError = null;
+        yield return _apiClient.VerifyPayment(_pendingPaymentRecordId, s => status = s, e => verifyError = e);
+
+        Debug.Log($"[Shop] VerifyPayment recordId={_pendingPaymentRecordId} status={status} error={verifyError}");
+
+        if (status == "APPROVED")
+        {
+            HidePaymentOverlay();
+            if (_loadRoutine != null) StopCoroutine(_loadRoutine);
+            _loadRoutine = StartCoroutine(LoadRoutine());
+        }
+        else
+        {
+            ShowPaymentOverlay($"Payment not confirmed yet.\nStatus: {status ?? verifyError ?? "no response"}\nPress \"I paid\" to check again.");
+        }
+    }
+
+    private void EnsurePaymentOverlay()
+    {
+        if (_paymentOverlay != null) return;
+
+        _paymentOverlay = CreateUIObj("PaymentOverlay", transform);
+        RectTransform rt = GetOrAddRT(_paymentOverlay);
+        rt.anchorMin = Vector2.zero;
+        rt.anchorMax = Vector2.one;
+        rt.offsetMin = Vector2.zero;
+        rt.offsetMax = Vector2.zero;
+        Image bg = _paymentOverlay.AddComponent<Image>();
+        bg.color = new Color(0f, 0f, 0f, 0.82f);
+
+        GameObject box = CreateUIObj("Box", _paymentOverlay.transform);
+        RectTransform boxRT = GetOrAddRT(box);
+        boxRT.anchorMin = new Vector2(0.15f, 0.35f);
+        boxRT.anchorMax = new Vector2(0.85f, 0.65f);
+        boxRT.offsetMin = Vector2.zero;
+        boxRT.offsetMax = Vector2.zero;
+        Image boxBg = box.AddComponent<Image>();
+        boxBg.color = new Color(0.08f, 0.12f, 0.16f, 1f);
+        GameUiThemeRuntime.ApplyBorder(box);
+
+        VerticalLayoutGroup vg = box.AddComponent<VerticalLayoutGroup>();
+        vg.padding = new RectOffset(30, 30, 30, 20);
+        vg.spacing = 18f;
+        vg.childAlignment = TextAnchor.MiddleCenter;
+        vg.childControlWidth = true;
+        vg.childControlHeight = true;
+        vg.childForceExpandWidth = true;
+        vg.childForceExpandHeight = false;
+
+        GameObject labelObj = CreateUIObj("Label", box.transform);
+        labelObj.AddComponent<LayoutElement>().preferredHeight = 90f;
+        _paymentOverlayLabel = labelObj.AddComponent<TextMeshProUGUI>();
+        _paymentOverlayLabel.text = "";
+        _paymentOverlayLabel.fontSize = 24f;
+        _paymentOverlayLabel.color = new Color(0.92f, 0.96f, 1f, 1f);
+        _paymentOverlayLabel.alignment = TextAlignmentOptions.Center;
+        _paymentOverlayLabel.font = TMP_Settings.defaultFontAsset;
+        _paymentOverlayLabel.enableWordWrapping = true;
+        _paymentOverlayLabel.raycastTarget = false;
+
+        GameObject btnRow = CreateUIObj("BtnRow", box.transform);
+        btnRow.AddComponent<LayoutElement>().preferredHeight = 48f;
+        HorizontalLayoutGroup btnRowHL = btnRow.AddComponent<HorizontalLayoutGroup>();
+        btnRowHL.childAlignment = TextAnchor.MiddleCenter;
+        btnRowHL.childControlWidth = false;
+        btnRowHL.childControlHeight = true;
+        btnRowHL.childForceExpandWidth = false;
+        btnRowHL.childForceExpandHeight = true;
+        btnRowHL.spacing = 14f;
+
+        // "I paid" button
+        GameObject checkObj = CreateUIObj("CheckBtn", btnRow.transform);
+        checkObj.AddComponent<LayoutElement>().preferredWidth = 180f;
+        Image checkImg = checkObj.AddComponent<Image>();
+        Button checkBtn = checkObj.AddComponent<Button>();
+        GameUiThemeRuntime.StyleButton(checkBtn, checkImg, new Color(0.08f, 0.42f, 0.24f, 1f));
+        checkBtn.onClick.AddListener(() => StartCoroutine(CheckPaymentNow()));
+        GameObject checkLabel = CreateUIObj("Label", checkObj.transform);
+        RectTransform checkRT = checkLabel.AddComponent<RectTransform>();
+        checkRT.anchorMin = Vector2.zero; checkRT.anchorMax = Vector2.one;
+        checkRT.offsetMin = Vector2.zero; checkRT.offsetMax = Vector2.zero;
+        var checkTMP = checkLabel.AddComponent<TextMeshProUGUI>();
+        checkTMP.text = "I paid";
+        checkTMP.fontSize = 20f; checkTMP.fontStyle = FontStyles.Bold;
+        checkTMP.color = Color.white; checkTMP.alignment = TextAlignmentOptions.Center;
+        checkTMP.font = TMP_Settings.defaultFontAsset; checkTMP.raycastTarget = false;
+
+        // Cancel button
+        GameObject cancelObj = CreateUIObj("CancelBtn", btnRow.transform);
+        cancelObj.AddComponent<LayoutElement>().preferredWidth = 130f;
+        Image cancelImg = cancelObj.AddComponent<Image>();
+        Button cancelBtn = cancelObj.AddComponent<Button>();
+        GameUiThemeRuntime.StyleButton(cancelBtn, cancelImg, new Color(0.30f, 0.14f, 0.14f, 1f));
+        cancelBtn.onClick.AddListener(HidePaymentOverlay);
+        GameObject cancelLabel = CreateUIObj("Label", cancelObj.transform);
+        RectTransform clRT = cancelLabel.AddComponent<RectTransform>();
+        clRT.anchorMin = Vector2.zero; clRT.anchorMax = Vector2.one;
+        clRT.offsetMin = Vector2.zero; clRT.offsetMax = Vector2.zero;
+        var clTMP = cancelLabel.AddComponent<TextMeshProUGUI>();
+        clTMP.text = "Cancel";
+        clTMP.fontSize = 20f; clTMP.fontStyle = FontStyles.Bold;
+        clTMP.color = new Color(1f, 0.70f, 0.70f, 1f);
+        clTMP.alignment = TextAlignmentOptions.Center;
+        clTMP.font = TMP_Settings.defaultFontAsset; clTMP.raycastTarget = false;
+
+        _paymentOverlay.SetActive(false);
     }
 
     // ── UI Building ──────────────────────────────────────────────────────────
