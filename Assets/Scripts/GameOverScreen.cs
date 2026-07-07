@@ -95,8 +95,8 @@ public class GameOverScreen : MonoBehaviour
 
         AddLabel(panel.transform, "PvP MATCH OVER", 44, FontStyles.Bold, new Color(0.55f, 0.35f, 1f, 1f));
         AddSpacer(panel.transform, 8f);
-        AddLabel(panel.transform, $"🏆  {winnerName} Wins!", 34, FontStyles.Bold, new Color(0.4f, 1f, 0.55f, 1f));
-        AddLabel(panel.transform, $"☠  {loserName} was eliminated", 22, FontStyles.Normal, new Color(1f, 0.35f, 0.35f, 1f));
+        AddLabel(panel.transform, $"{winnerName} Wins!", 34, FontStyles.Bold, new Color(0.4f, 1f, 0.55f, 1f));
+        AddLabel(panel.transform, $"{loserName} was eliminated", 22, FontStyles.Normal, new Color(1f, 0.35f, 0.35f, 1f));
         AddSpacer(panel.transform, 6f);
         AddLabel(panel.transform, $"Match Time:  {timeStr}", 22, FontStyles.Normal, new Color(0.9f, 0.92f, 1f, 1f));
         if (betCoins > 0 && MultiplayerState.IsOnline)
@@ -120,8 +120,10 @@ public class GameOverScreen : MonoBehaviour
 
     private static string ResolvePvpPlayerName(int playerIndex)
     {
-        // NOTE: player.NetworkUsername is intentionally NOT used here because its property
-        // always returns a non-empty fallback ("Player"/"Guest"), masking the real username.
+        PlayerController player = MultiplayerState.GetPlayerByIndex(playerIndex);
+        if (player != null && !string.IsNullOrWhiteSpace(player.RawNetworkUsername))
+            return player.RawNetworkUsername;
+
         if (MultiplayerState.IsOnline)
         {
             // Index 0 = local player on this machine (host or guest).

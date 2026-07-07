@@ -604,7 +604,7 @@ public class ShopPanelController : MonoBehaviour
             : completed
                 ? new Color(0.35f, 1f, 0.50f, 1f)
                 : new Color(0.95f, 0.97f, 1f, 1f);
-        MakeLabel(row.transform, $"{title}  —  🏆 {ChallengeRewardCoins} coins", 27, FontStyles.Bold, titleColor, 44f);
+        MakeLabel(row.transform, $"{title}  -  {ChallengeRewardCoins} coins", 27, FontStyles.Bold, titleColor, 44f);
 
         // Progress bar
         int filled = Mathf.RoundToInt(24 * progress);

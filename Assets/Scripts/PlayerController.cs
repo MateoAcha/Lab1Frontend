@@ -75,10 +75,10 @@ public class PlayerController : MonoBehaviour
     public float bombShotExplosionPushMultiplier = 2.4f;
     public float bombShotLevelRangeBonus = 0.15f;
     public float bombShotLevelDamageBonus = 0.15f;
-    public int quickBurstShotCount = 5;
+    public int quickBurstShotCount = 3;
     public float quickBurstInterval = 0.1f;
     public float quickBurstDamageMultiplier = 0.8f;
-    public int quickBurstLevelExtraShots = 2;
+    public int quickBurstLevelExtraShots = 1;
     public float snipeShotSpeedMultiplier = 2.6f;
     public float snipeShotDamageMultiplier = 3f;
     public float snipeShotLevelDamageBonus = 0.25f;
@@ -229,6 +229,7 @@ public class PlayerController : MonoBehaviour
     public int NetworkConsumableSequence { get; private set; }
     public int NetworkQuickChatSequence { get; private set; }
     public string NetworkQuickChatEmote { get; private set; } = "";
+    public string RawNetworkUsername => string.IsNullOrWhiteSpace(_networkUsername) ? "" : _networkUsername.Trim();
     public string NetworkUsername => PlayerDisplayNames.Normalize(_networkUsername, playerIndex == 1 ? "Guest" : "Player");
     public string DisplayName => _useExternalInput
         ? NetworkUsername

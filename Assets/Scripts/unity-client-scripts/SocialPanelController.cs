@@ -336,9 +336,15 @@ public class SocialPanelController : MonoBehaviour
             yield break;
         }
 
-        _listMessage = "Loading social data...";
-        SetStatus("Loading...");
-        Render();
+        bool hasCachedSummary = _summary != null;
+        string previousVisibleSignature = hasCachedSummary ? GetVisibleListSignature() : "";
+        if (!hasCachedSummary)
+        {
+            _listMessage = "Loading social data...";
+            SetStatus("Loading...");
+            Render();
+        }
+
         _refreshInFlight = true;
         _refreshStartedAt = Time.realtimeSinceStartup;
         SocialSummaryResponse response = null;
@@ -350,8 +356,9 @@ public class SocialPanelController : MonoBehaviour
 
         if (!string.IsNullOrWhiteSpace(error))
         {
-            _listMessage = error;
-            _summary = null;
+            _listMessage = hasCachedSummary ? "" : error;
+            if (!hasCachedSummary)
+                _summary = null;
             SetStatus(error);
             _summary = _summary ?? new SocialSummaryResponse();
             Render();
@@ -362,6 +369,12 @@ public class SocialPanelController : MonoBehaviour
         _listMessage = "";
         RestoreSelectedFriendAfterRefresh();
         SetStatus("");
+        if (hasCachedSummary && string.Equals(previousVisibleSignature, GetVisibleListSignature(), StringComparison.Ordinal))
+        {
+            UpdateNonListUi();
+            yield break;
+        }
+
         Render();
     }
 
@@ -467,17 +480,7 @@ public class SocialPanelController : MonoBehaviour
             AddFriendRow(friend);
         }
 
-        if (_selectedFriend != null)
-        {
-            _selectedFriendText.text = "Selected: " + GetFriendName(_selectedFriend);
-            _inviteFriendButton.gameObject.SetActive(_allowLobbyInvites);
-            _inviteFriendButton.interactable = _allowLobbyInvites && _roomNumber > 0 && !_actionInFlight;
-            _friendActionsRow.SetActive(true);
-        }
-        else
-        {
-            _friendActionsRow.SetActive(false);
-        }
+        UpdateFriendActionsState();
     }
 
     private void RenderInbox()
@@ -522,6 +525,118 @@ public class SocialPanelController : MonoBehaviour
 
         if (!any)
             AddInfoRow("No sent requests.");
+    }
+
+    private void UpdateNonListUi()
+    {
+        if (!_built)
+            return;
+
+        UpdateContextText();
+        UpdateTabButtonVisuals();
+        UpdateInboxNotificationDot();
+        if (_sendFriendRow != null)
+            _sendFriendRow.SetActive(_activeTab == SocialTab.Friends);
+        UpdateFriendActionsState();
+    }
+
+    private void UpdateFriendActionsState()
+    {
+        if (_friendActionsRow == null)
+            return;
+
+        if (_activeTab != SocialTab.Friends || _selectedFriend == null)
+        {
+            _friendActionsRow.SetActive(false);
+            return;
+        }
+
+        if (_selectedFriendText != null)
+            _selectedFriendText.text = "Selected: " + GetFriendName(_selectedFriend);
+        if (_inviteFriendButton != null)
+        {
+            _inviteFriendButton.gameObject.SetActive(_allowLobbyInvites);
+            _inviteFriendButton.interactable = _allowLobbyInvites && _roomNumber > 0 && !_actionInFlight;
+        }
+        _friendActionsRow.SetActive(true);
+    }
+
+    private string GetVisibleListSignature()
+    {
+        if (_summary == null)
+            return "none|" + _activeTab + "|" + (_listMessage ?? "");
+
+        StringBuilder sb = new StringBuilder();
+        sb.Append(_activeTab).Append('|')
+            .Append(_allowLobbyInvites).Append('|')
+            .Append(_roomNumber).Append('|')
+            .Append(_actionInFlight).Append('|')
+            .Append(_selectedFriend != null ? GetFriendUserId(_selectedFriend) : 0);
+
+        if (_activeTab == SocialTab.Friends)
+        {
+            FriendSummaryResponse[] friends = GetFriends();
+            sb.Append("|friends:").Append(friends.Length);
+            for (int i = 0; i < friends.Length; i++)
+            {
+                FriendSummaryResponse friend = friends[i];
+                if (friend == null)
+                    continue;
+
+                sb.Append('|')
+                    .Append(GetFriendUserId(friend)).Append(':')
+                    .Append(GetFriendName(friend)).Append(':')
+                    .Append(GetFriendLevel(friend));
+            }
+        }
+        else if (_activeTab == SocialTab.Inbox)
+        {
+            AppendInviteSignature(sb, GetGameInvites());
+            AppendRequestSignature(sb, "incoming", GetIncomingRequests(), true);
+        }
+        else
+        {
+            AppendRequestSignature(sb, "sent", GetSentRequests(), false);
+        }
+
+        return sb.ToString();
+    }
+
+    private static void AppendInviteSignature(StringBuilder sb, GameInviteResponse[] invites)
+    {
+        sb.Append("|invites:");
+        if (invites == null)
+            return;
+
+        for (int i = 0; i < invites.Length; i++)
+        {
+            GameInviteResponse invite = invites[i];
+            if (!IsInviteActive(invite))
+                continue;
+
+            sb.Append('|')
+                .Append(GetInviteIdentity(invite)).Append(':')
+                .Append(GetInviteRemainingLabel(invite));
+        }
+    }
+
+    private static void AppendRequestSignature(StringBuilder sb, string label, FriendRequestResponse[] requests, bool incoming)
+    {
+        sb.Append('|').Append(label).Append(':');
+        if (requests == null)
+            return;
+
+        for (int i = 0; i < requests.Length; i++)
+        {
+            FriendRequestResponse request = requests[i];
+            if (!IsPending(request?.status))
+                continue;
+
+            sb.Append('|')
+                .Append(GetRequestId(request)).Append(':')
+                .Append(incoming ? GetRequesterName(request) : GetRecipientName(request)).Append(':')
+                .Append(request.status ?? "");
+        }
     }
 
     private void AddFriendRow(FriendSummaryResponse friend)
@@ -762,6 +877,8 @@ public class SocialPanelController : MonoBehaviour
         if (_refreshInFlight || _apiClient == null || string.IsNullOrWhiteSpace(AuthSession.AccessToken))
             yield break;
 
+        bool hasCachedSummary = _summary != null;
+        string previousVisibleSignature = hasCachedSummary ? GetVisibleListSignature() : "";
         _refreshInFlight = true;
         _refreshStartedAt = Time.realtimeSinceStartup;
         SocialSummaryResponse response = null;
@@ -776,6 +893,12 @@ public class SocialPanelController : MonoBehaviour
 
         _summary = response;
         RestoreSelectedFriendAfterRefresh();
+        if (hasCachedSummary && string.Equals(previousVisibleSignature, GetVisibleListSignature(), StringComparison.Ordinal))
+        {
+            UpdateNonListUi();
+            yield break;
+        }
+
         Render();
     }
 
